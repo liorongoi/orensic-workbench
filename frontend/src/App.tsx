@@ -1,0 +1,87 @@
+import { useEffect, useState } from "react";
+import { api, getExaminer, setExaminer, urls } from "./api";
+import { CaseList } from "./components/CaseList";
+import { Workspace } from "./components/Workspace";
+import type { AnalysisSchema, FilterSchema } from "./types";
+
+function readHash() {
+  const m = location.hash.match(/^#\/case\/([\w-]+)/);
+  return m ? m[1] : null;
+}
+
+export default function App() {
+  const [examiner, setName] = useState(getExaminer());
+  const [draftName, setDraftName] = useState("");
+  const [caseId, setCaseId] = useState<string | null>(readHash());
+  const [filters, setFilters] = useState<FilterSchema[]>([]);
+  const [analyses, setAnalyses] = useState<AnalysisSchema[]>([]);
+  const [caseName, setCaseName] = useState("");
+
+  useEffect(() => {
+    api.filters().then(setFilters);
+    api.analyses().then(setAnalyses);
+    const onHash = () => setCaseId(readHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  useEffect(() => {
+    if (caseId) api.caseDetail(caseId).then((d) => setCaseName(d.case.name)).catch(() => setCaseName(""));
+  }, [caseId]);
+
+  if (!examiner) {
+    return (
+      <div className="signin">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!draftName.trim()) return;
+            setExaminer(draftName.trim());
+            setName(draftName.trim());
+          }}
+        >
+          <h1>Forensic Workbench</h1>
+          <p className="muted">Every action you take is recorded in the case audit log under this name.</p>
+          <input autoFocus placeholder="Examiner name" value={draftName} onChange={(e) => setDraftName(e.target.value)} />
+          <button className="primary">Continue</button>
+        </form>
+      </div>
+    );
+  }
+
+  return (
+    <div className="app">
+      <header className="topbar">
+        <a href="#/" className="brand">Forensic Workbench</a>
+        {caseId && (
+          <>
+            <span className="crumb">/ {caseName}</span>
+            <span className="spacer" />
+            <span className="muted small">Report:</span>
+            <a className="button" href={urls.report(caseId, "html")} target="_blank" rel="noreferrer">HTML</a>
+            <a className="button" href={urls.report(caseId, "pdf")} target="_blank" rel="noreferrer">PDF</a>
+            <a className="button" href={urls.report(caseId, "json")} target="_blank" rel="noreferrer">Bundle</a>
+          </>
+        )}
+        {!caseId && <span className="spacer" />}
+        <span className="examiner" title="Recorded as the actor in the audit log">
+          {examiner}
+          <button
+            className="link"
+            onClick={() => {
+              setExaminer("");
+              setName("");
+            }}
+          >
+            change
+          </button>
+        </span>
+      </header>
+      {caseId ? (
+        <Workspace key={caseId} caseId={caseId} filters={filters} analyses={analyses} />
+      ) : (
+        <CaseList onOpen={(id) => (location.hash = `#/case/${id}`)} />
+      )}
+    </div>
+  );
+}
