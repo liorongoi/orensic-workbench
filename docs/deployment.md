@@ -8,8 +8,15 @@ docker compose up            # http://127.0.0.1:8000
 docker compose --profile agents up   # also the authenticate MCP server on the internal network
 ```
 
-`docker-compose.yml` puts the service on an internal network with no route out. Case data
-lives in `./data`; `./import` is the only folder agents may ingest from.
+Case data lives in `./data`; `./import` is the only folder agents may ingest from. On Linux,
+create both folders before the first start and give them to the container's user
+(`mkdir -p data import && sudo chown 10001 data`), or Docker creates them owned by root and
+the workbench cannot write its cases.
+
+The workbench joins a plain network so its port can reach your browser (Docker does not
+publish ports from internal-only networks) and an internal network shared with the MCP
+servers, which have no route out. Nothing in the workbench makes outbound calls; to enforce
+that, run it on an air-gapped host or firewall the host.
 
 ## Air-gapped installation
 
