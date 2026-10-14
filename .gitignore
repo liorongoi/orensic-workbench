@@ -10,3 +10,4 @@ node_modules/
 frontend/dist/
 dist/
 import/
+build/

@@ -1,5 +1,47 @@
 # Deployment
 
+## Windows (offline installer)
+
+`ForensicWorkbench-<version>-Setup.exe` installs everything the workbench needs on a
+Windows 10 or 11 x64 machine with no internet connection: a private Python 3.12, every Python
+library, FFmpeg and FFprobe, the Visual C++ runtime, the hash-pinned AI models and the built
+UI. It needs no Docker, no system Python and no administrator rights (choose "Install for all
+users" in the first dialog to install under Program Files for everyone on the machine).
+
+Get the installer from the **Windows installer** workflow in GitHub Actions (artifact
+`ForensicWorkbench-Windows-Setup`, with its `.sha256`), or from a release when a `v*` tag is
+pushed. Carry the `.exe` to the offline machine, check its SHA-256 if your lab requires it
+(`certutil -hashfile ForensicWorkbench-0.3.0-Setup.exe SHA256`), and run it. The wizard asks
+for:
+
+- the installation folder;
+- the case data folder (cases, write-once evidence store, derived outputs, audit log, logs).
+  It is kept when the workbench is uninstalled or upgraded;
+- the local port (default 8000; the workbench listens on 127.0.0.1 only).
+
+At the end it offers the acceptance self-test: it re-hashes every installed file against the
+installer's `SHA256SUMS`, then runs `forensic.selftest`, and saves its output under
+`<case data>\logs`. Start the workbench from **Start > Forensic Workbench**: a console window
+shows the address and log, and the browser opens the workbench; closing the window stops it.
+The Start menu also has **Self-test** and **Case data folder**.
+
+Settings live in `<install folder>\workbench.ini` (`data_dir`, `import_dir`, `host`, `port`, and
+optionally `c2pa_trust_anchors`). Running a newer installer upgrades in place and keeps
+these settings and the case data. Silent installation for managed rollouts:
+
+```
+ForensicWorkbench-0.3.0-Setup.exe /VERYSILENT /ALLUSERS /DIR="C:\Program Files\Forensic Workbench" /DATADIR="D:\Cases" /PORT=8000
+```
+
+To build the installer yourself, on a connected Windows x64 machine with Python 3.12 and
+Node.js 22: `powershell -ExecutionPolicy Bypass -File deploy\windows\build-installer.ps1`
+(Inno Setup 6 is used, and installed with Chocolatey if missing). It writes
+`dist\ForensicWorkbench-<version>-Setup.exe`; `BUILDINFO.txt` in the installation records the
+commit and the SHA-256 of the Python, FFmpeg and Visual C++ downloads it was built from.
+CI installs every build on a fresh Windows runner, for one user and for all users, blocks the
+bundled Python from the network, runs the self-test, starts the workbench, and uninstalls
+(`deploy\windows\test-installer.ps1`).
+
 ## Container
 
 ```bash
