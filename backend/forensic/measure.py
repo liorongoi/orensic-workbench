@@ -1,4 +1,4 @@
-"""Measurement from a single view: height by vanishing geometry, distance and speed on a plane.
+"""Measurement from a single view: height by vanishing geometry or camera resection, distance and speed on a plane.
 
 Every measurement carries a 95 % interval from Monte Carlo propagation of the
 examiner's clicking uncertainty (and, for plane measurements, the uncertainty of
@@ -61,7 +61,26 @@ METHODS = {
             "Lens distortion has been corrected.",
         ],
     },
+    "camera_height": {
+        "name": "Height by camera resection (photogrammetry)",
+        "version": "1.0.0",
+        "reference": "R. Hartley and A. Zisserman, Multiple View Geometry in Computer Vision, 2nd ed., Chapter 7 "
+        "(computation of the camera matrix), 2004; ASTM E2825-21 Standard Guide for Forensic Digital Image "
+        "Processing (reverse projection photogrammetry).",
+        "description": "Recovers the camera's focal length, position and orientation from at least six points whose "
+        "positions in the scene were surveyed in 3D (X, Y on the ground, Z up, metres). The target's base is then "
+        "projected onto the ground (Z = 0) and its height is read off the vertical line through it where it meets "
+        "the ray through the clicked top point.",
+        "assumptions": [
+            "Surveyed points are in one right-handed coordinate system in metres, with Z vertical and the ground at Z = 0.",
+            "The target's base touches the ground and its top is vertically above the base.",
+            "Square pixels and a principal point at the image centre; lens distortion has been corrected.",
+            "Control points are spread over the image and over the depth of the scene (not all near one line).",
+        ],
+    },
 }
+
+RESECTION_SAMPLES = 400
 
 
 class MeasureError(ValueError):
@@ -140,9 +159,88 @@ def _plane_inputs(inp: dict) -> tuple[np.ndarray, np.ndarray]:
     return img_pts, world
 
 
+def _pt3(p: Any, name: str) -> np.ndarray:
+    try:
+        v = np.array([float(p[0]), float(p[1]), float(p[2])], np.float64)
+    except (TypeError, ValueError, IndexError):
+        raise MeasureError(f"{name}: expected an [X, Y, Z] point in metres") from None
+    if not np.all(np.isfinite(v)):
+        raise MeasureError(f"{name}: point is not finite")
+    return v
+
+
+def _pnp(world: np.ndarray, img: np.ndarray, f: float, c: np.ndarray):
+    K = np.array([[f, 0, c[0]], [0, f, c[1]], [0, 0, 1.0]])
+    ok, rvec, tvec = cv2.solvePnP(world, img, K, None, flags=cv2.SOLVEPNP_SQPNP)
+    if not ok:
+        return None
+    ok, rvec, tvec = cv2.solvePnP(world, img, K, None, rvec, tvec, True, cv2.SOLVEPNP_ITERATIVE)
+    proj, _ = cv2.projectPoints(world, rvec, tvec, K, None)
+    rms = float(np.sqrt(np.mean(np.sum((proj.reshape(-1, 2) - img) ** 2, axis=1))))
+    return rms, K, rvec, tvec
+
+
+def resect(world: np.ndarray, img: np.ndarray, size: tuple[int, int]) -> dict:
+    """Camera with unknown focal length: scan the focal length, then refine it by golden-section search."""
+    c = np.array([size[0] / 2.0, size[1] / 2.0])
+    diag = float(np.hypot(*size))
+
+    def cost(logf):
+        r = _pnp(world, img, float(np.exp(logf)), c)
+        return r[0] if r else np.inf
+
+    grid = np.linspace(np.log(0.3 * diag), np.log(20 * diag), 40)
+    costs = [cost(g) for g in grid]
+    i = int(np.argmin(costs))
+    if not np.isfinite(costs[i]):
+        raise MeasureError("could not solve for the camera: check the control points")
+    a, b = grid[max(0, i - 1)], grid[min(len(grid) - 1, i + 1)]
+    g = (np.sqrt(5) - 1) / 2
+    x1, x2 = b - g * (b - a), a + g * (b - a)
+    f1, f2 = cost(x1), cost(x2)
+    for _ in range(30):
+        if f1 < f2:
+            b, x2, f2 = x2, x1, f1
+            x1 = b - g * (b - a)
+            f1 = cost(x1)
+        else:
+            a, x1, f1 = x1, x2, f2
+            x2 = a + g * (b - a)
+            f2 = cost(x2)
+    f = float(np.exp((a + b) / 2))
+    rms, K, rvec, tvec = _pnp(world, img, f, c)
+    R, _ = cv2.Rodrigues(rvec)
+    centre = (-R.T @ tvec).ravel()
+    return {"f": f, "K": K, "R": R, "t": tvec.ravel(), "centre": centre, "rms": rms}
+
+
+def _ray(cam: dict, p: np.ndarray) -> np.ndarray:
+    d = cam["R"].T @ np.linalg.solve(cam["K"], _h(p))
+    return d / np.linalg.norm(d)
+
+
+def _camera_height_once(world, img, size, base, top) -> tuple[float, dict, np.ndarray]:
+    cam = resect(world, img, size)
+    o = cam["centre"]
+    db = _ray(cam, base)
+    if abs(db[2]) < 1e-9 or -o[2] / db[2] <= 0:
+        raise MeasureError("the base point does not look down onto the ground (Z = 0)")
+    g = o + (-o[2] / db[2]) * db  # base on the ground
+    dt = _ray(cam, top)
+    # Closest point between the top ray o + s*dt and the vertical line g + h*z.
+    z = np.array([0.0, 0.0, 1.0])
+    w = o - g
+    a, b, cc, d, e = dt @ dt, dt @ z, z @ z, dt @ w, z @ w
+    den = a * cc - b * b
+    if abs(den) < 1e-12:
+        raise MeasureError("the top point's ray is vertical")
+    h = (a * e - b * d) / den
+    return float(h), cam, g
+
+
 def _interval(samples: np.ndarray) -> list[float]:
     s = samples[np.isfinite(samples)]
-    if len(s) < MC_SAMPLES // 2:
+    if len(s) < len(samples) // 2:
         return [float("nan"), float("nan")]
     return [float(np.percentile(s, 2.5)), float(np.percentile(s, 97.5))]
 
@@ -182,6 +280,36 @@ def measure(kind: str, inp: dict, frame_times: dict[int, float] | None = None) -
                 samples[i] = np.nan
         out.update(value=value, unit="m", interval_95=_interval(samples))
 
+    elif kind == "camera_height":
+        img = np.array([_pt(p, "control image points") for p in inp.get("control_image_points") or []])
+        world = np.array([_pt3(p, "control world points") for p in inp.get("control_world_points") or []])
+        if len(img) < 6 or len(img) != len(world):
+            raise MeasureError("camera resection needs at least six image points, each with its surveyed X, Y, Z (metres)")
+        try:
+            size = (int(inp["image_size"][0]), int(inp["image_size"][1]))
+        except (KeyError, TypeError, ValueError, IndexError):
+            raise MeasureError("image size is required") from None
+        base = _pt(inp.get("target_base"), "target base")
+        top = _pt(inp.get("target_top"), "target top")
+        world_sigma = float(inp.get("world_sigma", 0.02))
+        value, cam, ground = _camera_height_once(world, img, size, base, top)
+        samples = np.empty(RESECTION_SAMPLES)
+        for i in range(RESECTION_SAMPLES):
+            try:
+                samples[i] = _camera_height_once(world + rng.normal(0, world_sigma, world.shape),
+                                                 img + rng.normal(0, sigma, img.shape), size,
+                                                 base + rng.normal(0, sigma, 2), top + rng.normal(0, sigma, 2))[0]
+            except (MeasureError, cv2.error, np.linalg.LinAlgError):
+                samples[i] = np.nan
+        out.update(value=value, unit="m", interval_95=_interval(samples),
+                   camera={"focal_length_px": round(cam["f"], 1), "position_m": [round(float(v), 3) for v in cam["centre"]],
+                           "reprojection_rms_px": round(cam["rms"], 2)},
+                   target_ground_m=[round(float(v), 3) for v in ground[:2]], world_sigma_m=world_sigma)
+        if cam["rms"] > 3 * max(sigma, 1.0):
+            out["fit_warning"] = (f"The control points fit the camera model poorly (RMS {cam['rms']:.1f} px): check for a "
+                                  "mis-clicked or mis-surveyed point, or lens distortion.")
+        out["monte_carlo_samples_override"] = RESECTION_SAMPLES
+
     else:
         img_pts, world = _plane_inputs(inp)
         world_sigma = float(inp.get("world_sigma", 0.05))
@@ -218,7 +346,7 @@ def measure(kind: str, inp: dict, frame_times: dict[int, float] | None = None) -
             out.update(value=speed, unit="m/s", interval_95=[lo / dt, hi / dt], distance_m=d, time_s=dt,
                        frames=[fa, fb], value_kmh=speed * 3.6, interval_95_kmh=[lo / dt * 3.6, hi / dt * 3.6])
     out["point_sigma_px"] = sigma
-    out["monte_carlo_samples"] = MC_SAMPLES
+    out["monte_carlo_samples"] = out.pop("monte_carlo_samples_override", MC_SAMPLES)
     lo, hi = out["interval_95"]
     if not (math.isfinite(lo) and math.isfinite(hi)):
         out["warning"] = "The uncertainty could not be estimated: the geometry is unstable for these points."

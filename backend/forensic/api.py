@@ -44,6 +44,11 @@ async def _nf(_: Request, exc: NotFound):
     return JSONResponse({"detail": str(exc)}, status_code=404)
 
 
+@app.exception_handler(PermissionError)
+async def _forbidden(_: Request, exc: PermissionError):
+    return JSONResponse({"detail": str(exc)}, status_code=403)
+
+
 @app.exception_handler(FilterError)
 @app.exception_handler(media.MediaError)
 @app.exception_handler(ValueError)
@@ -143,6 +148,12 @@ def analyses():
     return wb().analyses()
 
 
+@app.get("/api/models")
+def models_list():
+    """Learned models with their pinned weights hashes, sources, licences and a fresh hash check."""
+    return wb().model_catalogue()
+
+
 @app.get("/api/catalogue")
 def catalogue():
     """Everything else the UI offers: conversion methods, measurement methods, planner workflows, triage rules."""
@@ -181,12 +192,28 @@ def get_case(case_id: str):
         "camera_references": w.list_camera_references(case_id),
         "measurements": w.list_measurements(case_id),
         "triage": w.list_triage(case_id),
+        "review": w.latest_review(case_id),
     }
 
 
 @app.post("/api/cases/{case_id}/triage")
 def triage(case_id: str, body: TriageIn, x_examiner: str | None = Header(None)):
     return triage_case(wb(), case_id, body.evidence_ids, actor(x_examiner))
+
+
+class ReviewIn(BaseModel):
+    rerun_analyses: bool = True
+
+
+@app.post("/api/cases/{case_id}/review")
+def review(case_id: str, body: ReviewIn, x_examiner: str | None = Header(None)):
+    actor(x_examiner)  # the examiner asks; the reviewer agent re-checks the case
+    return wb().review_case(case_id, rerun_analyses=body.rerun_analyses)
+
+
+@app.get("/api/cases/{case_id}/review")
+def latest_review(case_id: str):
+    return wb().latest_review(case_id)
 
 
 @app.post("/api/cases/{case_id}/plan")
@@ -326,6 +353,14 @@ def render_chain(chain_id: str, x_examiner: str | None = Header(None)):
 @app.post("/api/chains/{chain_id}/verify")
 def verify_chain(chain_id: str, x_examiner: str | None = Header(None)):
     return wb().verify_chain(chain_id, actor(x_examiner))
+
+
+@app.get("/api/chains/{chain_id}/export.png")
+def export_chain(chain_id: str, frame: int = 0, x_examiner: str | None = Header(None), examiner: str | None = None):
+    png, info = wb().export_chain(chain_id, actor(x_examiner or examiner), frame=frame)
+    return Response(png, media_type="image/png", headers={
+        "Content-Disposition": f'attachment; filename="chain-{chain_id}-frame{frame}.png"',
+        "X-Output-Hash": info["output_hash"], "X-PNG-SHA256": info["png_sha256"]})
 
 
 # Derived files and reports -------------------------------------------------------------------

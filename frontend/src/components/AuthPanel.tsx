@@ -17,7 +17,14 @@ interface Props {
   onShowMap: (digest: string, label: string) => void;
   onTriage: (t: Triage) => void;
   onReference: (r: CameraReference) => void;
+  points: Record<string, number[][]>;
+  pickField: string | null;
+  onStartPick: (field: string, count: number, reset: boolean) => void;
+  onPoints: (p: Record<string, number[][]>) => void;
 }
+
+/** Key under which points clicked on the image for an analysis parameter are kept. */
+export const authField = (analysis: string, param: string) => `auth:${analysis}:${param}`;
 
 function cardLine(a: AnalysisSchema): string | null {
   const c = a.card;
@@ -76,7 +83,8 @@ function TriageBox({ evidence, triage, onTriage }: { evidence: Evidence; triage:
   );
 }
 
-export function AuthPanel({ caseId, evidence, allEvidence, references, triage, catalogue, runs, activeMap, onRun, onShowMap, onTriage, onReference }: Props) {
+export function AuthPanel(props: Props) {
+  const { caseId, evidence, allEvidence, references, triage, catalogue, runs, activeMap, onRun, onShowMap, onTriage, onReference } = props;
   const applicable = catalogue.filter((a) => a.applies_to.includes(evidence.media_type));
   const [open, setOpen] = useState<string | null>(null);
   const [params, setParams] = useState<Record<string, Record<string, unknown>>>({});
@@ -87,7 +95,10 @@ export function AuthPanel({ caseId, evidence, allEvidence, references, triage, c
     setBusy(a.id);
     setError(null);
     try {
-      onRun(await api.runAnalysis(evidence.id, a.id, params[a.id] ?? {}));
+      const picked = Object.fromEntries(
+        a.params.filter((p) => p.type === "points" && props.points[authField(a.id, p.name)]?.length).map((p) => [p.name, props.points[authField(a.id, p.name)]]),
+      );
+      onRun(await api.runAnalysis(evidence.id, a.id, { ...(params[a.id] ?? {}), ...picked }));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -103,15 +114,16 @@ export function AuthPanel({ caseId, evidence, allEvidence, references, triage, c
       <TriageBox evidence={evidence} triage={triage} onTriage={onTriage} />
       <div className="detectors">
         {applicable.map((a) => (
-          <div key={a.id} className="detector">
+          <div key={a.id} className={`detector${a.unavailable ? " analysis-unavailable" : ""}`}>
             <div className="detector-head">
               <div>
                 <b>{a.name}</b>
+                {a.ai && <span className="badge ai" title="Uses a learned model; flagged AI-assisted in the report">AI-assisted</span>}
                 <div className="muted small">{a.category}</div>
               </div>
               <span className="spacer" />
-              {a.params.length > 0 && <button onClick={() => setOpen(open === a.id ? null : a.id)}>Settings</button>}
-              <button className="primary" onClick={() => run(a)} disabled={busy !== null}>
+              {a.params.length > 0 && !a.unavailable && <button onClick={() => setOpen(open === a.id ? null : a.id)}>Settings</button>}
+              <button className="primary" onClick={() => run(a)} disabled={busy !== null || !!a.unavailable} title={a.unavailable ?? undefined}>
                 {busy === a.id ? "Running…" : "Run"}
               </button>
             </div>
@@ -129,14 +141,26 @@ export function AuthPanel({ caseId, evidence, allEvidence, references, triage, c
                 ))}
               </select>
             )}
+            {a.unavailable && <div className="muted small">{a.unavailable}</div>}
             {cardLine(a) && <div className="muted small card-line" title={a.card?.known_failure_modes.join("\n")}>{cardLine(a)}</div>}
             {open === a.id && (
               <>
                 <p className="small">{a.description}</p>
                 <ParamForm
                   params={a.params.filter((p) => p.name !== "reference_id")}
-                  values={params[a.id] ?? {}}
-                  onChange={(n, v) => setParams((p) => ({ ...p, [a.id]: { ...(p[a.id] ?? {}), [n]: v } }))}
+                  values={{
+                    ...(params[a.id] ?? {}),
+                    ...Object.fromEntries(
+                      a.params.filter((p) => p.type === "points").map((p) => [p.name, props.points[authField(a.id, p.name)] ?? []]),
+                    ),
+                  }}
+                  onChange={(n, v) => {
+                    const spec = a.params.find((p) => p.name === n);
+                    if (spec?.type === "points") props.onPoints({ ...props.points, [authField(a.id, n)]: v as number[][] });
+                    else setParams((p) => ({ ...p, [a.id]: { ...(p[a.id] ?? {}), [n]: v } }));
+                  }}
+                  onPick={(p) => props.onStartPick(authField(a.id, p.name), 200, false)}
+                  picking={props.pickField?.startsWith(`auth:${a.id}:`) ? props.pickField.split(":")[2] : null}
                 />
               </>
             )}

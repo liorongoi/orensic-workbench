@@ -1,0 +1,39 @@
+{
+  "detector": "face.consistency",
+  "name": "Face-swap and face-edit checks",
+  "version": "1.0.0",
+  "validated_on": "2026-10-14",
+  "corpus": "synthetic photo-like scenes generated from fixed seeds (forensic.validation.run.scene)",
+  "seeded": true,
+  "results": {
+    "detection": {
+      "task": "Does a marked face region differ in noise or detail from the rest of the image?",
+      "positives": "80 scenes with sensor-like noise; a 70-110 x 90-130 px region replaced by a smoothed copy",
+      "negatives": "the same region left untouched in the same 80 scenes",
+      "threshold": 4.0,
+      "true_positive_rate": 1.0,
+      "false_positive_rate": 0.0125,
+      "auc": 1.0,
+      "tpr_by_condition": {
+        "smoothed (sigma 1.5)": 1.0,
+        "smoothed, noise re-added": 0.0875,
+        "sharper (unsharp mask)": 1.0,
+        "jpeg 60 patch in jpeg 90": 0.95
+      }
+    }
+  },
+  "known_failure_modes": [
+    "Detects a region whose noise or detail differs from the rest; a swap whose noise was matched to the image (see 'smoothed, noise re-added') or a whole re-encoded deepfake video can pass.",
+    "Make-up, focus on the face, motion blur and phone beautification also change local detail: a flag is a reason to look, not a conclusion.",
+    "Synthetic scenes with rectangular regions; no real face swaps were available for this card."
+  ],
+  "software": {
+    "forensic_workbench": "0.3.0",
+    "numpy": "2.5.3",
+    "opencv": "5.0.0",
+    "pillow": "12.3.0",
+    "pywavelets": "1.8.0",
+    "python": "3.13.16"
+  },
+  "how_to_reproduce": "python -m forensic.validation run"
+}

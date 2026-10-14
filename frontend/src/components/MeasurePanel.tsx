@@ -27,6 +27,11 @@ export const MEASURE_FIELDS: Record<string, FieldSpec[]> = {
     { key: "point_a", label: "First point", kind: "point", color: "#ffcf3f" },
     { key: "point_b", label: "Second point", kind: "point", color: "#ff8af0" },
   ],
+  camera_height: [
+    { key: "control_image_points", label: "Surveyed 3D points", kind: "plane", color: "#3fb6ff", help: "At least six points whose X, Y, Z you measured at the scene (Z up, ground at 0), spread over the image and in depth" },
+    { key: "target_base", label: "Target base (on the ground)", kind: "point", color: "#ffcf3f" },
+    { key: "target_top", label: "Target top", kind: "point", color: "#ff8af0" },
+  ],
   speed: [
     { key: "plane_image_points", label: "Surveyed ground points", kind: "plane", color: "#3fb6ff", help: "At least four points on the ground whose positions you measured at the scene" },
     { key: "point_a", label: "Contact point in frame A", kind: "point", color: "#ffcf3f", help: "Pick while frame A is shown" },
@@ -69,13 +74,17 @@ export function MeasurePanel(props: Props) {
   const [error, setError] = useState<string | null>(null);
   const spec = methods[kind];
   const fields = MEASURE_FIELDS[kind] ?? [];
-  const nPlane = points.plane_image_points?.length ?? 0;
+  const is3d = kind === "camera_height";
+  const planeKey = is3d ? "control_image_points" : "plane_image_points";
+  const nPlane = points[planeKey]?.length ?? 0;
+  const dims = is3d ? 3 : 2;
+  const minPlane = is3d ? 6 : 4;
 
   const pick = (f: FieldSpec, more = false) => {
     const cur = points[f.key]?.length ?? 0;
     if (f.kind === "point") props.onStartPick(f.key, 1, true);
     else if (f.kind === "lines") props.onStartPick(f.key, more ? cur + 2 : 4, !more);
-    else props.onStartPick(f.key, more ? cur + 1 : 4, !more);
+    else props.onStartPick(f.key, more ? cur + 1 : minPlane, !more);
   };
 
   const run = async () => {
@@ -86,9 +95,11 @@ export function MeasurePanel(props: Props) {
       for (const f of fields) inputs[f.key] = f.kind === "point" ? points[f.key]?.[0] : points[f.key];
       if (kind === "height") Object.assign(inputs, { ref_height: refHeight, ref_height_sigma: refSigma });
       if (kind !== "height") {
-        inputs.plane_world_points = Array.from({ length: nPlane }, (_, i) => (world[i] ?? ["", ""]).map((v) => parseFloat(v)));
+        const rows = Array.from({ length: nPlane }, (_, i) => Array.from({ length: dims }, (_, j) => parseFloat(world[i]?.[j] ?? "")));
+        inputs[is3d ? "control_world_points" : "plane_world_points"] = rows;
         inputs.world_sigma = worldSigma;
       }
+      if (is3d) inputs.image_size = [evidence.probe.width, evidence.probe.height];
       if (kind === "speed") Object.assign(inputs, { frame_a: frames.a, frame_b: frames.b });
       const m = await api.measure(evidence.id, { kind, inputs, label, chain_id: onChain && chain ? chain.id : null, frame });
       props.onDone(m);
@@ -136,7 +147,7 @@ export function MeasurePanel(props: Props) {
               <button className={active ? "active" : ""} onClick={() => pick(f)}>
                 {active ? "Picking…" : n ? "Redo" : "Pick"}
               </button>
-              {f.kind !== "point" && n >= (f.kind === "lines" ? 4 : 4) && <button onClick={() => pick(f, true)}>+1</button>}
+              {f.kind !== "point" && n >= (f.kind === "lines" ? 4 : minPlane) && <button onClick={() => pick(f, true)}>+1</button>}
             </div>
           );
         })}
@@ -159,13 +170,14 @@ export function MeasurePanel(props: Props) {
           <tbody>
             <tr>
               <th>#</th>
-              <th>Ground x (m)</th>
-              <th>Ground y (m)</th>
+              <th>{is3d ? "X (m)" : "Ground x (m)"}</th>
+              <th>{is3d ? "Y (m)" : "Ground y (m)"}</th>
+              {is3d && <th>Z up (m)</th>}
             </tr>
             {Array.from({ length: nPlane }, (_, i) => (
               <tr key={i}>
                 <td>{i + 1}</td>
-                {[0, 1].map((j) => (
+                {Array.from({ length: dims }, (_, j) => j).map((j) => (
                   <td key={j}>
                     <input
                       type="number"
@@ -173,7 +185,7 @@ export function MeasurePanel(props: Props) {
                       value={world[i]?.[j] ?? ""}
                       onChange={(e) =>
                         setWorld((w) => {
-                          const next = Array.from({ length: nPlane }, (_, k) => [...(w[k] ?? ["", ""])]);
+                          const next = Array.from({ length: nPlane }, (_, k) => [...(w[k] ?? Array(dims).fill(""))]);
                           next[i][j] = e.target.value;
                           return next;
                         })
@@ -243,6 +255,13 @@ export function MeasurePanel(props: Props) {
               </>
             )}
           </div>
+          {m.result.camera && (
+            <div className="muted small">
+              Camera: focal length {fmt(m.result.camera.focal_length_px, 0)} px, position ({m.result.camera.position_m.map((v) => fmt(v, 2)).join(", ")}) m,
+              control-point fit {fmt(m.result.camera.reprojection_rms_px, 2)} px RMS
+            </div>
+          )}
+          {m.result.fit_warning && <p className="error small">{m.result.fit_warning}</p>}
           {m.result.warning && <p className="error small">{m.result.warning}</p>}
           <p className="muted small">
             {m.chain_id ? "on enhanced result" : "on original"} · {m.actor} · <span className="hash">{m.output_hash.slice(0, 16)}…</span>

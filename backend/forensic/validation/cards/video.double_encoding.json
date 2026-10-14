@@ -1,0 +1,41 @@
+{
+  "detector": "video.double_encoding",
+  "name": "Double encoding (VPF)",
+  "version": "1.0.0",
+  "validated_on": "2026-10-14",
+  "corpus": "synthetic photo-like scenes generated from fixed seeds (forensic.validation.run.scene)",
+  "seeded": true,
+  "results": {
+    "detection": {
+      "task": "Was the H.264 video decoded and encoded again (VPF footprint of the first GOP)?",
+      "positives": "16 10 s clips from four synthetic sources: first encoded with GOP [10, 15, 20, 30] at CRF 26, re-encoded at CRF 22 with GOP 250 (no B-frames) or GOP 100 (2 B-frames)",
+      "negatives": "16 clips from the same sources encoded once with the second settings",
+      "threshold": 4.0,
+      "true_positive_rate": 0.75,
+      "false_positive_rate": 0.0,
+      "first_gop_within_1_when_detected": 0.6667,
+      "tpr_by_condition": {
+        "first gop 10": 1.0,
+        "first gop 15": 1.0,
+        "first gop 20": 1.0,
+        "first gop 30": 0.0,
+        "second gop 100, 2 B": 0.5,
+        "second gop 250, no B": 1.0
+      }
+    }
+  },
+  "known_failure_modes": [
+    "Simulated with x264 on synthetic content; the second encoding at higher quality than the first is the easy case. Recorder firmware and platform transcoders behave differently.",
+    "Fails when the second GOP is a multiple of the first or when B-frames dominate; a first GOP of 30 was missed in every 10 s test clip, and two B-frames in the second encoding halve detection.",
+    "Re-encoding is not manipulation: it tells you the file is not the recorder's original stream."
+  ],
+  "software": {
+    "forensic_workbench": "0.3.0",
+    "numpy": "2.5.3",
+    "opencv": "5.0.0",
+    "pillow": "12.3.0",
+    "pywavelets": "1.8.0",
+    "python": "3.13.16"
+  },
+  "how_to_reproduce": "python -m forensic.validation run"
+}

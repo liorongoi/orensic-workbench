@@ -9,12 +9,12 @@ battery found an inconsistency, not that the item is authentic.
 
 from __future__ import annotations
 
-RULES_VERSION = "1.0.0"
+RULES_VERSION = "1.1.0"
 
 # Analyses run per media type, with their parameters (fixed, so triage is reproducible).
 BATTERY: dict[str, list[tuple[str, dict]]] = {
-    "image": [("file.metadata", {}), ("tamper.double_jpeg", {}), ("tamper.nonaligned_grid", {})],
-    "video": [("file.metadata", {})],
+    "image": [("file.metadata", {}), ("synthetic.provenance", {}), ("tamper.double_jpeg", {}), ("tamper.nonaligned_grid", {})],
+    "video": [("file.metadata", {}), ("synthetic.provenance", {}), ("video.frame_integrity", {}), ("video.double_encoding", {})],
     "container": [],
 }
 
@@ -27,6 +27,9 @@ RULES: dict[str, tuple[str, str]] = {
     "meta.dimensions": ("red", "EXIF dimensions differ from the image"),
     "meta.structure": ("red", "the JPEG structure is irregular"),
     "video.timestamps": ("red", "frame timestamps go backwards"),
+    "prov.ai_declared": ("red", "the file declares AI generation"),
+    "prov.c2pa_invalid": ("red", "the Content Credentials do not validate against the file"),
+    "vint.repeated_segment": ("red", "a run of moving frames appears twice"),
     "meta.editor": ("yellow", "the Software tag names an image editor"),
     "meta.xmp_history": ("yellow", "XMP carries editing history"),
     "meta.date_mismatch": ("yellow", "modification time differs from capture time"),
@@ -35,6 +38,11 @@ RULES: dict[str, tuple[str, str]] = {
     "djpg.double": ("yellow", "the JPEG was decoded and saved again"),
     "nadjpg.global": ("yellow", "the image was cropped or re-gridded between JPEG saves"),
     "video.gaps": ("yellow", "there are gaps in the frame timestamps"),
+    "prov.ai_named": ("yellow", "metadata names an AI generator or tool"),
+    "prov.c2pa_edits": ("yellow", "the Content Credentials record edits"),
+    "vint.jump": ("yellow", "an abrupt change far above the surrounding motion"),
+    "vint.gaps": ("yellow", "there are gaps in the frame timestamps"),
+    "venc.double": ("yellow", "the video was encoded twice"),
 }
 
 RANK = {"green": 0, "yellow": 1, "red": 2}

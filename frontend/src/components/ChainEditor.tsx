@@ -1,6 +1,9 @@
 import { useMemo, useState } from "react";
 import type { Chain, ChainNode, FilterSchema, Graph, ParamSchema, StepInfo } from "../types";
+import { urls } from "../api";
 import { ParamForm } from "./ParamForm";
+
+const MIN_JUSTIFICATION = 20;
 
 interface Props {
   filters: FilterSchema[];
@@ -20,6 +23,7 @@ interface Props {
   onRender: () => void;
   onVerify: () => void;
   onAccept: () => void;
+  frame?: number;
 }
 
 function defaults(f: FilterSchema) {
@@ -37,6 +41,8 @@ export function ChainEditor(props: Props) {
   }, [filters]);
   const stepHash = Object.fromEntries(steps.map((s) => [s.node_id, s]));
   const pending = graph.nodes.filter((n) => n.enabled && n.proposed_by && !n.accepted_by);
+  const generative = graph.nodes.filter((n) => n.enabled && byId[n.filter]?.generative);
+  const unjustified = generative.filter((n) => (n.justification ?? "").trim().length < MIN_JUSTIFICATION);
 
   const update = (nodes: ChainNode[]) => props.onChange({ ...graph, nodes });
   const setNode = (id: string, patch: Partial<ChainNode>) =>
@@ -88,6 +94,16 @@ export function ChainEditor(props: Props) {
         </div>
       )}
 
+      {generative.length > 0 && (
+        <div className="generative-banner">
+          <b>Illustrative only.</b> This chain has {generative.length} generative AI step(s) that can add detail the camera never
+          recorded. Results are watermarked and cannot be measured on.{" "}
+          {unjustified.length > 0
+            ? `Write a justification on ${unjustified.length === 1 ? "that step" : "each such step"} before it can be accepted or exported.`
+            : "Each has a justification, which is logged and printed in the report."}
+        </div>
+      )}
+
       <ol className="nodes">
         <li className={`node source${selected === null ? " selected" : ""}`} onClick={() => props.onSelect(null)}>
           <span className="node-name">Source</span>
@@ -118,6 +134,8 @@ export function ChainEditor(props: Props) {
               <span className="node-name">
                 {i + 1}. {f?.name ?? n.filter}
                 {f?.input_kind === "stack" && <span className="badge">multi-frame</span>}
+                {f?.ai && <span className="badge ai" title="Runs a learned model">AI</span>}
+                {f?.generative && <span className="badge bad" title="Can add detail that was not recorded">generative</span>}
                 {n.proposed_by && <span className={`badge ${n.accepted_by ? "" : "warn"}`}>{n.accepted_by ? "accepted" : "proposed"}</span>}
               </span>
               {st && <span className="hash small" title={`Output after this step: ${st.output_hash}`}>{st.shape.slice(-3, -1).reverse().join("×")}</span>}
@@ -155,6 +173,7 @@ export function ChainEditor(props: Props) {
                     onClick={() => add(f)}
                   >
                     {f.name}
+                    {f.generative && <span className="badge bad">generative</span>}
                   </button>
                 ))}
               </div>
@@ -180,6 +199,22 @@ export function ChainEditor(props: Props) {
             <span className="param-label">Examiner note</span>
             <input type="text" value={sel.note ?? ""} placeholder="Why this step (printed in the report)" onChange={(e) => setNode(sel.id, { note: e.target.value || undefined })} />
           </label>
+          {selFilter.generative && (
+            <label className="param justification">
+              <span className="param-label">Justification for using a generative step (required, logged)</span>
+              <textarea
+                rows={3}
+                value={sel.justification ?? ""}
+                placeholder="Why this illustration is needed and what it must not be used to show"
+                onChange={(e) => setNode(sel.id, { justification: e.target.value || undefined })}
+              />
+              <span className="muted small">
+                {(sel.justification ?? "").trim().length < MIN_JUSTIFICATION
+                  ? `At least ${MIN_JUSTIFICATION} characters. Agents cannot write this.`
+                  : "Recorded in the audit log when you save."}
+              </span>
+            </label>
+          )}
           <p className="muted small reference">Reference: {selFilter.reference}</p>
           {sel.proposed_by && <p className="muted small">Proposed by {sel.proposed_by}{sel.accepted_by ? `, accepted by ${sel.accepted_by}` : ""}</p>}
         </div>
@@ -193,6 +228,19 @@ export function ChainEditor(props: Props) {
         <button onClick={props.onVerify} disabled={busy || dirty || !chain.output_hash} title="Re-run from the original and check the output is bit-identical">
           Verify reproducibility
         </button>
+        <a
+          className={`button${dirty || !chain.output_hash || unjustified.length || pending.length ? " disabled" : ""}`}
+          href={urls.exportPng(chain.id, props.frame ?? 0)}
+          target="_blank"
+          rel="noreferrer"
+          title={
+            unjustified.length
+              ? "Blocked: a generative step has no justification"
+              : "Lossless PNG of the rendered result, re-computed and hash-checked; logged"
+          }
+        >
+          Export PNG
+        </a>
       </div>
       {status && <p className={`status ${status.kind}`}>{status.text}</p>}
     </div>

@@ -58,9 +58,14 @@ class Analysis:
     fn: Callable[[AnalysisContext, dict], AnalysisResult]
     params: tuple[Param, ...] = ()
     reading_guide: str = ""
+    # Returns why the analysis cannot run here (e.g. no model installed), or None when it can.
+    unavailable: Callable[[], str | None] | None = None
+    ai: bool = False  # runs a learned model: flagged "AI-assisted" in the UI and the report
 
     def schema(self) -> dict:
         return {
+            "unavailable": self.unavailable() if self.unavailable else None,
+            "ai": self.ai,
             "id": self.id,
             "name": self.name,
             "version": self.version,

@@ -1,0 +1,40 @@
+{
+  "detector": "video.frame_integrity",
+  "name": "Frame duplication and deletion",
+  "version": "1.0.0",
+  "validated_on": "2026-10-14",
+  "corpus": "synthetic photo-like scenes generated from fixed seeds (forensic.validation.run.scene)",
+  "seeded": true,
+  "results": {
+    "detection": {
+      "task": "Were frames removed, or a segment repeated?",
+      "positives": "16 8 s clips from four synthetic sources with 1, 5 or 20 frames removed at frame 90, and with frames 40-59 inserted again after frame 119",
+      "negatives": "the same 16 clips unedited",
+      "threshold": 8.0,
+      "true_positive_rate": 0.5625,
+      "false_positive_rate": 0.0,
+      "deletion_located_at_cut": 0.5208,
+      "tpr_by_condition": {
+        "1 frame(s) deleted": 0.25,
+        "5 frame(s) deleted": 0.5625,
+        "20 frame(s) deleted": 0.75
+      },
+      "repeated_segment_found": 1.0,
+      "repeated_segment_false_positive_rate": 0.0
+    }
+  },
+  "known_failure_modes": [
+    "A jump can be a cut, camera switch, light change or a dropped frame. Static scenes, and busy scenes where every frame already changes a lot (the cellular-automaton source here), hide deletions.",
+    "Single-frame deletions in slow scenes are often missed (see tpr_by_condition).",
+    "Synthetic sources only; CCTV with repeated frames needs the duplicates reading first."
+  ],
+  "software": {
+    "forensic_workbench": "0.3.0",
+    "numpy": "2.5.3",
+    "opencv": "5.0.0",
+    "pillow": "12.3.0",
+    "pywavelets": "1.8.0",
+    "python": "3.13.16"
+  },
+  "how_to_reproduce": "python -m forensic.validation run"
+}

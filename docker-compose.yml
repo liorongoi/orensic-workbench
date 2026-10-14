@@ -1,0 +1,29 @@
+# Single-examiner deployment. The workbench needs no outbound network: models are bundled,
+# C2PA is validated offline, and agents connect to the MCP servers from inside the network.
+services:
+  workbench:
+    image: forensic-workbench:0.3.0
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"   # local browser only; put a TLS proxy in front for a lab network
+    volumes:
+      - ./data:/data            # cases, originals (read-only after ingest), derived outputs, audit log
+      - ./import:/import:ro     # the only folder agents may ingest from
+      # - ./trust/c2pa-anchors.pem:/trust/c2pa-anchors.pem:ro
+    environment:
+      # FORENSIC_C2PA_TRUST_ANCHORS: /trust/c2pa-anchors.pem
+      FORENSIC_MODELS_DIR: /data/models   # lab-installed models (python -m forensic.models install)
+    networks: [internal]
+
+  # Optional: the MCP servers for an agent (e.g. a self-hosted LLM client) on the same internal network.
+  mcp-authenticate:
+    image: forensic-workbench:0.3.0
+    command: ["python", "-m", "forensic.mcp_server", "authenticate", "--http", "8103", "--host", "0.0.0.0"]
+    volumes: ["./data:/data", "./import:/import:ro"]
+    environment: { FORENSIC_MODELS_DIR: /data/models }
+    networks: [internal]
+    profiles: [agents]
+
+networks:
+  internal:
+    internal: true   # no route to the internet

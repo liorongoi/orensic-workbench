@@ -87,7 +87,7 @@ def _thumbnail(data: bytes, markers: list[dict]) -> bytes | None:
 @register(
     "file.metadata",
     name="File structure and metadata",
-    version="1.0.0",
+    version="1.1.0",
     category="File analysis",
     description="Reads EXIF, GPS and XMP metadata, walks the JPEG marker structure, extracts the "
     "quantisation tables and embedded thumbnail, and checks them for internal consistency. For video "
@@ -136,7 +136,7 @@ def file_metadata(ctx: AnalysisContext, p: dict) -> AnalysisResult:
         if "photoshop:" in xmp or "History" in xmp:
             flags.append({"code": "meta.xmp_history", "level": "warning", "text": "XMP contains editing history or Photoshop fields."})
     if b"c2pa" in data[:200000] or b"jumb" in data[:200000]:
-        flags.append({"code": "meta.c2pa", "level": "info", "text": "File appears to carry a C2PA / JUMBF manifest (Content Credentials). Validation comes in a later release."})
+        flags.append({"code": "meta.c2pa", "level": "info", "text": "File appears to carry a C2PA / JUMBF manifest (Content Credentials). Run 'Content credentials and AI provenance' to validate it."})
 
     if is_jpeg(data):
         jp = parse_markers(data)

@@ -10,6 +10,23 @@ These numbers come from a seeded synthetic corpus. They show each detector behav
 | NA-DJPG grid | crop between saves | 1.0 | 0.55 | 0.0 | 0.8744 |
 | PRNU | same camera, full frame | PCE 60.0 | 1.0 | 0.0 | 1.0 |
 | PRNU | same camera, quarter crop, searched | PCE 60.0 | 1.0 | 0.0 | 1.0 |
+| CFA traces | demosaicing present (lossless) | 0.15 | 1.0 | 0.0 | 1.0 |
+| Resampling | scaled x1.5 after capture | 9.0 | 1.0 | 0.0 | 1.0 |
+| Face consistency | region with different noise/detail | 4.0 | 1.0 | 0.0125 | 1.0 |
+| VPF | H.264 double encoding | 4.0 | 0.75 | 0.0 | – |
+| Frame integrity | 5 frames deleted | 8.0 | 0.5625 | 0.0 | – |
+
+Phase 3 checks:
+
+CFA traces by storage: {'lossless': 1.0, 'jpeg 98': 1.0, 'jpeg 95': 0.7875, 'jpeg 90': 0.2125}; after downscaling to 75 %: 0.0.
+
+Resampling by factor: {'x1.1': 1.0, 'x1.25': 1.0, 'x1.5': 1.0, 'x2.0': 0.0, 'x0.8': 0.9875, 'x1.5 then jpeg 95': 0.0}.
+
+Face consistency by manipulation: {'smoothed (sigma 1.5)': 1.0, 'smoothed, noise re-added': 0.0875, 'sharper (unsharp mask)': 1.0, 'jpeg 60 patch in jpeg 90': 0.95}.
+
+Double encoding by condition: {'first gop 10': 1.0, 'first gop 15': 1.0, 'first gop 20': 1.0, 'first gop 30': 0.0, 'second gop 100, 2 B': 0.5, 'second gop 250, no B': 1.0}; first GOP within ±1 when detected: 0.6667.
+
+Frame deletion by size: {'1 frame(s) deleted': 0.25, '5 frame(s) deleted': 0.5625, '20 frame(s) deleted': 0.75}; repeated segment found: 1.0 (false positives 0.0).
 
 A-DJPG first-quality estimate within ±3: 0.9417 (mean error 0.64). Detection when Q1 > Q2 (expected to fail): 0.25.
 

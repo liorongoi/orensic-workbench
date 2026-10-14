@@ -286,11 +286,17 @@ FAILURE_MODES = {
 def write_cards(results: dict, out_dir: Path, meta: dict) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     written = []
+    from .phase3 import FAILURE_MODES as P3_MODES
+    from .phase3 import phase3_cards
+
     detectors = {
         "tamper.double_jpeg": {"detection": results["adjpg"], "localisation": results["adjpg_local"]},
         "tamper.nonaligned_grid": {"detection": results["nadjpg"]},
         "camera.prnu": {"identification": results["prnu"]},
     }
+    if "phase3" in results:
+        detectors |= phase3_cards(results["phase3"])
+    modes = FAILURE_MODES | P3_MODES
     for det, res in detectors.items():
         a = ANALYSES[det]
         card = {
@@ -301,7 +307,7 @@ def write_cards(results: dict, out_dir: Path, meta: dict) -> list[Path]:
             "corpus": meta["corpus"],
             "seeded": True,
             "results": res,
-            "known_failure_modes": FAILURE_MODES[det],
+            "known_failure_modes": modes[det],
             "software": meta["software"],
             "how_to_reproduce": meta["command"],
         }
@@ -322,7 +328,10 @@ def run(quick: bool = False, pristine: Path | None = None, out_dir: Path = CARD_
     nadjpg = eval_nadjpg(src, n)
     log("PRNU camera identification…")
     pr = eval_prnu(2 if quick else 4, 4 if quick else 20, size=(192, 256) if quick else (384, 512))
-    results = {"adjpg": adjpg, "adjpg_local": adjpg_local, "nadjpg": nadjpg, "prnu": pr}
+    from .phase3 import run_phase3
+
+    results = {"adjpg": adjpg, "adjpg_local": adjpg_local, "nadjpg": nadjpg, "prnu": pr,
+               "phase3": run_phase3(src, quick, log=log)}
     import PIL
     import pywt
 
@@ -358,6 +367,7 @@ def summary_markdown(out: dict) -> str:
         f"| NA-DJPG grid | crop between saves | {r['nadjpg']['threshold']} | {r['nadjpg']['true_positive_rate']} | {r['nadjpg']['false_positive_rate']} | {r['nadjpg']['auc']} |",
         f"| PRNU | same camera, full frame | PCE {r['prnu']['threshold']} | {r['prnu']['full_frame']['true_positive_rate']} | {r['prnu']['full_frame']['false_positive_rate']} | {r['prnu']['full_frame']['auc']} |",
         f"| PRNU | same camera, quarter crop, searched | PCE {r['prnu']['threshold']} | {r['prnu']['cropped_quarter_frame_with_search']['true_positive_rate']} | {r['prnu']['cropped_quarter_frame_with_search']['false_positive_rate']} | {r['prnu']['cropped_quarter_frame_with_search']['auc']} |",
+    ] + _phase3_rows(r.get("phase3")) + [
         "",
         f"A-DJPG first-quality estimate within ±3: {r['adjpg']['first_quality_within_3']} (mean error {r['adjpg']['first_quality_mean_abs_error']}). "
         f"Detection when Q1 > Q2 (expected to fail): {r['adjpg']['tpr_when_q1_above_q2']}.",
@@ -371,3 +381,32 @@ def summary_markdown(out: dict) -> str:
         "",
     ]
     return "\n".join(lines)
+
+
+def _phase3_rows(p3: dict | None) -> list[str]:
+    if not p3:
+        return []
+    rows = [("CFA traces", "demosaicing present (lossless)", p3["cfa"]),
+            ("Resampling", "scaled x1.5 after capture", p3["resampling"]),
+            ("Face consistency", "region with different noise/detail", p3["faces"]),
+            ("VPF", "H.264 double encoding", p3["double_encoding"]),
+            ("Frame integrity", "5 frames deleted", p3["frame_integrity"])]
+    out = [f"| {n} | {t} | {r['threshold']} | {r['true_positive_rate']} | {r['false_positive_rate']} | {r.get('auc', '–')} |"
+           for n, t, r in rows]
+    out += [
+        "",
+        "Phase 3 checks:",
+        "",
+        f"CFA traces by storage: {p3['cfa']['tpr_by_condition']}; after downscaling to 75 %: {p3['cfa']['present_after_downscaling_to_75pct']}.",
+        "",
+        f"Resampling by factor: {p3['resampling']['tpr_by_condition']}.",
+        "",
+        f"Face consistency by manipulation: {p3['faces']['tpr_by_condition']}.",
+        "",
+        f"Double encoding by condition: {p3['double_encoding']['tpr_by_condition']}; first GOP within ±1 when detected: "
+        f"{p3['double_encoding']['first_gop_within_1_when_detected']}.",
+        "",
+        f"Frame deletion by size: {p3['frame_integrity']['tpr_by_condition']}; repeated segment found: "
+        f"{p3['frame_integrity']['repeated_segment_found']} (false positives {p3['frame_integrity']['repeated_segment_false_positive_rate']}).",
+    ]
+    return out

@@ -13,7 +13,7 @@ import html
 import io
 import json
 
-from . import media
+from . import media, policy
 from .analysis import get_analysis
 from .audit import Actor
 from .db import canonical_json, now_iso
@@ -51,6 +51,8 @@ def build_bundle(wb: Workbench, case_id: str, actor: Actor, verify: bool = True)
                 "description": f.description,
                 "reference": f.reference,
                 "generative": f.generative,
+                "ai": f.ai,
+                "justification": node.get("justification") if f.generative else None,
                 "proposed_by": node.get("proposed_by"),
                 "accepted_by": node.get("accepted_by"),
                 "note": node.get("note"),
@@ -66,6 +68,8 @@ def build_bundle(wb: Workbench, case_id: str, actor: Actor, verify: bool = True)
             "output_hash": ch["output_hash"],
             "graph": ch["graph"],
             "steps": steps,
+            "policy": policy.status(ch["graph"]),
+            "models": wb.chain_models(ch["graph"]),
         }
         if ch["output_hash"] and verify:
             entry["reproducibility"] = wb.verify_chain(ch["id"], actor)
@@ -91,6 +95,7 @@ def build_bundle(wb: Workbench, case_id: str, actor: Actor, verify: bool = True)
             "actor": a["actor"],
             "created_at": a["created_at"],
             "validation": card_summary(spec.id),
+            "ai": spec.ai,
         })
     audit_check = wb.audit.verify()
     bundle = {
@@ -107,6 +112,7 @@ def build_bundle(wb: Workbench, case_id: str, actor: Actor, verify: bool = True)
         "measurements": wb.list_measurements(case_id),
         "triage": wb.list_triage(case_id),
         "triage_rules": {"version": RULES_VERSION, "rules": rules_table()},
+        "review": wb.latest_review(case_id),
         "audit": {"verification": audit_check, "entries": wb.audit_entries(case_id)},
     }
     digest = hashlib.sha256(canonical_json(bundle).encode()).hexdigest()
@@ -160,6 +166,22 @@ def measurement_rows(bundle: dict) -> list[dict]:
     return rows
 
 
+def generative_banner(ch: dict) -> list[tuple[str, str]]:
+    """(css class, text) lines that must appear above a chain with generative steps."""
+    pol = ch.get("policy") or {}
+    if not pol.get("illustrative_only"):
+        return []
+    lines = [("bad", "ILLUSTRATIVE ONLY: this chain contains a generative AI step that can add detail the camera never "
+              "recorded. Its result is watermarked, was not measured on, and must not be read as showing what was recorded.")]
+    if pol.get("unjustified_steps"):
+        lines.append(("bad", "NOT JUSTIFIED: step(s) " + ", ".join(pol["unjustified_steps"]) + " have no examiner "
+                      "justification; the result is excluded from evidential export."))
+    else:
+        lines.append(("muted", "The examiner recorded a justification for each generative step (below); the "
+                      "watermarked result may be exported."))
+    return lines
+
+
 # Images ---------------------------------------------------------------------------
 
 
@@ -178,6 +200,8 @@ def _before_after(wb: Workbench, chain: dict):
     try:
         before = wb.source_frame(chain["evidence_id"], fr)
         after = frame_of(wb.engine.run(chain["graph"]).data) if chain["output_hash"] else None
+        if after is not None and policy.generative_nodes(chain["graph"]):
+            after = policy.watermark(after)
     except Exception:  # noqa: BLE001 - a missing image must not stop the report
         return None, None
     return before, after
@@ -190,7 +214,7 @@ body{font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;colo
 h1{font-size:24px;margin:0 0 4px}h2{font-size:18px;margin:32px 0 8px;border-bottom:1px solid #d5dbe3;padding-bottom:4px}
 h3{font-size:15px;margin:20px 0 6px}code,.hash{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;word-break:break-all}
 table{border-collapse:collapse;width:100%;margin:8px 0}td,th{border:1px solid #d5dbe3;padding:4px 8px;text-align:left;vertical-align:top;font-size:13px}
-th{background:#f2f4f7}.ok{color:#11733b;font-weight:600}.bad{color:#b42318;font-weight:600}.muted{color:#5b6573}
+th{background:#f2f4f7}.ai{color:#5b3fb5;font-size:12px}.ok{color:#11733b;font-weight:600}.bad{color:#b42318;font-weight:600}.muted{color:#5b6573}
 .flag-warning{color:#9a5b00}.pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}.pair img,.map img{max-width:100%;border:1px solid #d5dbe3}
 figure{margin:0}figcaption{font-size:12px;color:#5b6573}
 """
@@ -230,6 +254,7 @@ def render_html(wb: Workbench, bundle: dict) -> str:
         out.append(f"<h3>2.{i} {e(ch['name'])} <span class='muted'>on {e(ev.get('filename', '?'))}{frames}</span></h3>")
         if ch["pending_proposals"]:
             out.append("<p class='bad'>This chain contains agent-proposed steps an examiner has not accepted. It is shown for transparency and is not part of the findings.</p>")
+        out.extend(f"<p class='{cls}'>{e(t)}</p>" for cls, t in generative_banner(ch))
         rep = ch.get("reproducibility")
         if rep:
             out.append(f"<p>Re-run from the original at report time: " + ("<span class='ok'>reproduced bit for bit</span>" if rep["reproduced"] else "<span class='bad'>DID NOT REPRODUCE</span>") + "</p>")
@@ -242,6 +267,14 @@ def render_html(wb: Workbench, bundle: dict) -> str:
                 status = f"accepted by {e(st['accepted_by'])}" if st.get("accepted_by") else "<span class='bad'>NOT ACCEPTED</span>"
                 tag += f" <span class='muted'>(proposed by {e(st['proposed_by'])}; {status})</span>"
             note = f"<br><em>Examiner note: {e(st['note'])}</em>" if st.get("note") else ""
+            if st.get("ai"):
+                tag += " <b class='ai'>AI-assisted</b>" + (" <b class='bad'>generative</b>" if st["generative"] else "")
+            if st.get("generative"):
+                note += (f"<br><em>Examiner's justification: {e(st['justification'])}</em>" if st.get("justification")
+                         else "<br><span class='bad'>No justification recorded.</span>")
+            for m in ch["models"]:
+                if m["node"] == st["id"]:
+                    note += f"<br><span class='muted'>Model {e(m['model'])} · weights SHA-256 <span class='hash'>{m['sha256']}</span> · {e(m['licence'])}</span>"
             out.append(f"<tr><td>{n}</td><td>{e(st['name'])}<br><span class='muted'>{e(st['filter'])} v{e(st['version'])}</span>{tag}</td><td>{params}</td><td>{e(st['description'])}<br><span class='muted'>{e(st['reference'])}</span>{note}</td></tr>")
         out.append("</table>")
         before, after = _before_after(wb, ch)
@@ -249,7 +282,9 @@ def render_html(wb: Workbench, bundle: dict) -> str:
             out.append("<div class='pair'>")
             out.append(f"<figure><img src='data:image/jpeg;base64,{_jpeg_b64(before)}'><figcaption>Original (decoded, unprocessed)</figcaption></figure>")
             if after is not None:
-                out.append(f"<figure><img src='data:image/jpeg;base64,{_jpeg_b64(after)}'><figcaption>Result (preview; the evidential output is the lossless PNG with the hash above)</figcaption></figure>")
+                cap = ("Result, ILLUSTRATIVE ONLY: contains AI-generated detail and is watermarked" if ch["policy"]["illustrative_only"]
+                       else "Result (preview; the evidential output is the lossless PNG with the hash above)")
+                out.append(f"<figure><img src='data:image/jpeg;base64,{_jpeg_b64(after)}'><figcaption>{cap}</figcaption></figure>")
             out.append("</div>")
 
     out.append("<h2>3. Authentication analyses</h2>")
@@ -257,7 +292,8 @@ def render_html(wb: Workbench, bundle: dict) -> str:
         out.append("<p class='muted'>No analyses run.</p>")
     for i, a in enumerate(bundle["analyses"], 1):
         ev = ev_by_id.get(a["evidence_id"], {})
-        out.append(f"<h3>3.{i} {e(a['name'])} <span class='muted'>on {e(ev.get('filename', '?'))}</span></h3>")
+        ai = " <b class='ai'>AI-assisted</b>" if a.get("ai") else ""
+        out.append(f"<h3>3.{i} {e(a['name'])}{ai} <span class='muted'>on {e(ev.get('filename', '?'))}</span></h3>")
         out.append(f"<p><strong>{e(a['summary'])}</strong></p>")
         if a["flags"]:
             out.append("<ul>" + "".join(f"<li class='flag-{e(f['level'])}'>{e(f['text'])}</li>" for f in a["flags"]) + "</ul>")
@@ -307,7 +343,22 @@ def render_html(wb: Workbench, bundle: dict) -> str:
                    + "".join(f"<tr><td>{e(r['code'])}</td><td>{e(r['level'])}</td><td>{e(r['reason'])}</td></tr>" for r in bundle["triage_rules"]["rules"])
                    + "</table></details>")
 
-    out.append("<h2>6. Audit trail</h2>")
+    out.append("<h2>6. Independent review</h2>")
+    rv = bundle.get("review")
+    if not rv:
+        out.append("<p class='muted'>The reviewer agent has not been run on this case.</p>")
+    else:
+        r = rv["result"]
+        cls = {"pass": "ok", "warn": "flag-warning", "fail": "bad"}[rv["level"]]
+        out.append(f"<p><b class='{cls}'>{e(rv['level'].upper())}</b>: {e(r['line'])} <span class='muted'>Reviewer v{e(r['reviewer_version'])}, "
+                   f"run {e(rv['created_at'])} by {e(rv['actor'])}; it re-ran the case from the originals and compared hashes.</span></p>")
+        out.append("<table><tr><th>Check</th><th>Result</th><th>Detail</th></tr>")
+        for it in r["items"]:
+            c = {"pass": "ok", "warn": "flag-warning", "fail": "bad"}[it["level"]]
+            out.append(f"<tr><td>{e(it['check'])}</td><td class='{c}'>{e(it['level'])}</td><td>{e(it['text'])}</td></tr>")
+        out.append("</table>")
+
+    out.append("<h2>7. Audit trail</h2>")
     av = bundle["audit"]["verification"]
     out.append("<p>Audit log hash chain: " + (f"<span class='ok'>intact</span> ({av['entries']} entries in the log)" if av["ok"] else f"<span class='bad'>BROKEN at entry {av['broken_at']}</span>") + "</p>")
     out.append("<table><tr><th>#</th><th>Time (UTC)</th><th>Who</th><th>Action</th><th>Output hash</th></tr>")
@@ -317,7 +368,7 @@ def render_html(wb: Workbench, bundle: dict) -> str:
     out.append("</table>")
 
     env = bundle["environment"]
-    out.append("<h2>7. Software environment</h2><table>" + "".join(f"<tr><th>{e(k)}</th><td>{e(str(v))}</td></tr>" for k, v in env.items()) + "</table>")
+    out.append("<h2>8. Software environment</h2><table>" + "".join(f"<tr><th>{e(k)}</th><td>{e(str(v))}</td></tr>" for k, v in env.items()) + "</table>")
     out.append(f"<p class='hash'>Report bundle SHA-256 {bundle['bundle_sha256']}</p></body></html>")
     return "".join(out)
 
@@ -379,6 +430,8 @@ def render_pdf(wb: Workbench, bundle: dict) -> bytes:
         s.append(Paragraph(f"2.{i} {e(ch['name'])} — {e(ev.get('filename', '?'))}", h3))
         if ch["pending_proposals"]:
             s.append(Paragraph("<b>Contains agent-proposed steps not accepted by an examiner; not part of the findings.</b>", body))
+        for cls, text in generative_banner(ch):
+            s.append(Paragraph(f"<b>{e(text)}</b>" if cls == "bad" else e(text), body if cls == "bad" else small))
         rep = ch.get("reproducibility")
         if rep:
             s.append(Paragraph("Re-run from the original at report time: " + ("<b>reproduced bit for bit</b>" if rep["reproduced"] else "<b>DID NOT REPRODUCE</b>"), body))
@@ -386,19 +439,29 @@ def render_pdf(wb: Workbench, bundle: dict) -> bytes:
         rows = [["#", "Step", "Parameters", "Description and reference"]]
         for n, st in enumerate(ch["steps"], 1):
             params = "<br/>".join(f"{e(k)} = {e(json.dumps(v))}" for k, v in st["params"].items()) or "–"
-            rows.append([str(n), f"{e(st['name'])}<br/><font size='7'>{e(st['filter'])} v{e(st['version'])}</font>", params,
-                         f"{e(st['description'])}<br/><font size='7' color='#5b6573'>{e(st['reference'])}</font>"])
+            tag = ""
+            if st.get("ai"):
+                tag = "<br/><font size='7' color='#5b3fb5'><b>AI-assisted" + (", generative" if st["generative"] else "") + "</b></font>"
+            extra = ""
+            if st.get("generative"):
+                extra += (f"<br/><i>Examiner's justification: {e(st['justification'])}</i>" if st.get("justification")
+                          else "<br/><b>No justification recorded.</b>")
+            for m in ch["models"]:
+                if m["node"] == st["id"]:
+                    extra += f"<br/><font size='6.5' color='#5b6573'>Model {e(m['model'])} · weights SHA-256 <font name='Courier'>{m['sha256']}</font></font>"
+            rows.append([str(n), f"{e(st['name'])}<br/><font size='7'>{e(st['filter'])} v{e(st['version'])}</font>{tag}", params,
+                         f"{e(st['description'])}<br/><font size='7' color='#5b6573'>{e(st['reference'])}</font>{extra}"])
         s.append(table(rows, [0.05 * width, 0.2 * width, 0.25 * width, 0.5 * width]))
         before, after = _before_after(wb, ch)
         if before is not None and after is not None:
             s.append(Spacer(1, 4))
-            pair = Table([[image(before, width / 2 - 6), image(after, width / 2 - 6)], [Paragraph("Original", small), Paragraph("Result", small)]], colWidths=[width / 2, width / 2])
+            pair = Table([[image(before, width / 2 - 6), image(after, width / 2 - 6)], [Paragraph("Original", small), Paragraph("Result, ILLUSTRATIVE ONLY (watermarked)" if ch["policy"]["illustrative_only"] else "Result", small)]], colWidths=[width / 2, width / 2])
             s.append(pair)
 
     s.append(Paragraph("3. Authentication analyses", h2))
     for i, a in enumerate(bundle["analyses"], 1):
         ev = ev_by_id.get(a["evidence_id"], {})
-        s.append(Paragraph(f"3.{i} {e(a['name'])} — {e(ev.get('filename', '?'))}", h3))
+        s.append(Paragraph(f"3.{i} {e(a['name'])}" + (" (AI-assisted)" if a.get("ai") else "") + f" — {e(ev.get('filename', '?'))}", h3))
         s.append(Paragraph(f"<b>{e(a['summary'])}</b>", body))
         for f in a["flags"]:
             s.append(Paragraph(("<b>Warning:</b> " if f["level"] == "warning" else "• ") + e(f["text"]), body))
@@ -444,7 +507,18 @@ def render_pdf(wb: Workbench, bundle: dict) -> bytes:
     else:
         s.append(Paragraph("Triage not run.", small))
 
-    s.append(Paragraph("6. Audit trail", h2))
+    s.append(Paragraph("6. Independent review", h2))
+    rv = bundle.get("review")
+    if not rv:
+        s.append(Paragraph("The reviewer agent has not been run on this case.", small))
+    else:
+        r = rv["result"]
+        s.append(Paragraph(f"<b>{e(rv['level'].upper())}</b>: {e(r['line'])}", body))
+        s.append(Paragraph(f"Reviewer v{e(r['reviewer_version'])}, run {e(rv['created_at'])}; re-ran the case from the originals and compared hashes.", small))
+        s.append(table([["Check", "Result", "Detail"]] + [[e(it["check"]), e(it["level"]), e(it["text"])] for it in r["items"]],
+                       [0.2 * width, 0.1 * width, 0.7 * width]))
+
+    s.append(Paragraph("7. Audit trail", h2))
     av = bundle["audit"]["verification"]
     s.append(Paragraph("Audit log hash chain: " + ("intact" if av["ok"] else f"BROKEN at entry {av['broken_at']}"), body))
     rows = [["#", "Time (UTC)", "Who", "Action", "Output hash"]]
@@ -452,7 +526,7 @@ def render_pdf(wb: Workbench, bundle: dict) -> bytes:
         rows.append([str(en["seq"]), e(en["ts"]), e(en["actor"]) + (" (agent)" if en["actor_kind"] == "agent" else ""), e(en["action"]), f"<font name='Courier' size='6.5'>{(en['output_hash'] or '')[:16]}</font>"])
     s.append(table(rows, [0.06 * width, 0.27 * width, 0.22 * width, 0.2 * width, 0.25 * width]))
 
-    s.append(Paragraph("7. Software environment", h2))
+    s.append(Paragraph("8. Software environment", h2))
     s.append(table([["Component", "Version"]] + [[e(k), e(str(v))] for k, v in bundle["environment"].items()], [0.3 * width, 0.7 * width]))
     s.append(Spacer(1, 6))
     s.append(Paragraph(f"Report bundle SHA-256 {bundle['bundle_sha256']}", mono))

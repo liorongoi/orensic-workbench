@@ -13,7 +13,7 @@ from typing import BinaryIO
 
 import numpy as np
 
-from . import __version__, formats, media, prnu
+from . import __version__, formats, media, models, policy, prnu
 from . import measure as measure_mod
 from .analysis import ANALYSES, AnalysisContext, get_analysis
 from .audit import Actor, AuditLog
@@ -49,6 +49,10 @@ class Workbench:
             "numpy": np.__version__,
             "pillow": PIL.__version__,
             "pywavelets": __import__("pywt").__version__,
+            "onnxruntime": __import__("onnxruntime").__version__,
+            "c2pa": _c2pa_version(),
+            "models": ", ".join(f"{m['id']} {m['sha256'][:12]}" for m in models.manifest()),
+            "network": "none used at run time (all models bundled or installed locally)",
         }
 
     # Catalogues -------------------------------------------------------------
@@ -56,6 +60,11 @@ class Workbench:
     @staticmethod
     def filters() -> list[dict]:
         return [f.schema() for f in REGISTRY.values()]
+
+    @staticmethod
+    def model_catalogue() -> list[dict]:
+        checks = {v["id"]: v for v in models.verify_all()}
+        return [models.public(m) | {"verified": checks[m["id"]]["ok"]} for m in models.manifest()]
 
     @staticmethod
     def analyses() -> list[dict]:
@@ -244,11 +253,20 @@ class Workbench:
 
     @staticmethod
     def _tag_agent_nodes(g: dict, actor: Actor, old: dict | None = None) -> dict:
-        """Nodes an agent adds or changes are proposals until an examiner accepts them."""
+        """Nodes an agent adds or changes are proposals until an examiner accepts them.
+
+        Agents can never write the justification that lets a generative step into evidential output.
+        """
         if actor.kind != "agent":
             return g
         before = {n["id"]: n for n in (old or {}).get("nodes", [])}
         for n in g["nodes"]:
+            prev_j = (before.get(n["id"]) or {}).get("justification")
+            if n.get("justification") != prev_j:
+                if prev_j:
+                    n["justification"] = prev_j
+                else:
+                    n.pop("justification", None)
             prev = before.get(n["id"])
             same = prev is not None and all(prev.get(k) == n.get(k) for k in ("filter", "version", "params", "enabled"))
             if not same:
@@ -299,6 +317,9 @@ class Workbench:
         gh = graph_hash(g)
         if gh == old["graph_hash"] and (name is None or name == old["name"]):
             return old
+        old_j = {n["id"]: n.get("justification") for n in old["graph"]["nodes"]}
+        justified = [{"node": n["id"], "filter": n["filter"], "justification": n["justification"]}
+                     for n in g["nodes"] if n.get("justification") and n["justification"] != old_j.get(n["id"])]
         self.db.execute(
             "UPDATE chains SET graph_json = ?, graph_hash = ?, name = ?, output_hash = NULL, updated_at = ? WHERE id = ?",
             (canonical_json(g), gh, (name or old["name"]).strip(), now_iso(), chain_id),
@@ -307,6 +328,9 @@ class Workbench:
             actor, "chain.update", case_id=old["case_id"], target=chain_id,
             params={"previous_graph_hash": old["graph_hash"], "graph_hash": gh, "changes": _diff_nodes(old["graph"], g), "graph": g},
         )
+        for j in justified:
+            self.audit.append(actor, "chain.generative_justification", case_id=old["case_id"], target=chain_id,
+                              params=j | {"graph_hash": gh})
         return self.get_chain(chain_id)
 
     def accept_proposals(self, chain_id: str, actor: Actor, node_ids: list[str] | None = None) -> dict:
@@ -315,6 +339,11 @@ class Workbench:
             raise ValueError("only an examiner can accept proposed steps")
         ch = self.get_chain(chain_id)
         g = ch["graph"]
+        blocked = [n["id"] for n in g["nodes"] if n.get("proposed_by") and not n.get("accepted_by")
+                   and (node_ids is None or n["id"] in node_ids) and n["id"] in policy.unjustified(g)]
+        if blocked:
+            raise ValueError(f"step(s) {', '.join(blocked)} run a generative AI filter: write a justification on each "
+                             f"(at least {policy.MIN_JUSTIFICATION} characters) before accepting it")
         accepted = []
         for n in g["nodes"]:
             if n.get("proposed_by") and not n.get("accepted_by") and (node_ids is None or n["id"] in node_ids):
@@ -335,20 +364,26 @@ class Workbench:
         """Run the saved chain, store its output and record the result hashes."""
         ch = self.get_chain(chain_id)
         res = self.engine.run(ch["graph"])
+        pol = policy.status(ch["graph"])
         outputs = []
         frames = res.data if res.is_stack else res.data[None]
         for i, fr in enumerate(frames):
-            digest, _ = self.store.put_derived(media.encode_png(fr), "png")
-            outputs.append({"frame": i, "png": digest})
+            # Generative results are stored watermarked; the pixel hash is of the unmarked result.
+            digest, _ = self.store.put_derived(media.encode_png(policy.watermark(fr) if pol["illustrative_only"] else fr), "png")
+            outputs.append({"frame": i, "png": digest, "watermarked": pol["illustrative_only"]})
         self.db.execute("UPDATE chains SET output_hash = ? WHERE id = ?", (res.output_hash, chain_id))
         steps = [s.__dict__ | {"shape": list(s.shape)} for s in res.steps]
+        used = self.chain_models(ch["graph"])
         self.audit.append(
             actor, "chain.render", case_id=ch["case_id"], target=chain_id,
-            params={"graph_hash": res.graph_hash, "source_hash": res.source_hash, "steps": steps, "outputs": outputs},
+            params={"graph_hash": res.graph_hash, "source_hash": res.source_hash, "steps": steps, "outputs": outputs,
+                    "models": used, "policy": pol},
             output_hash=res.output_hash,
         )
         return {
             "chain_id": chain_id,
+            "policy": pol,
+            "models": used,
             "pending_proposals": pending_proposals(normalise(ch["graph"])),
             "graph_hash": res.graph_hash,
             "source_hash": res.source_hash,
@@ -372,6 +407,51 @@ class Workbench:
         )
         return {"reproduced": ok, "expected_hash": ch["output_hash"], "rerun_hash": fresh.output_hash, "graph_hash": fresh.graph_hash}
 
+    @staticmethod
+    def chain_models(graph: dict) -> list[dict]:
+        """The learned models an enabled step of the chain runs, with their pinned weights hashes."""
+        from .filters import get_filter
+
+        used = []
+        for n in graph["nodes"]:
+            if not n.get("enabled", True):
+                continue
+            f = get_filter(n["filter"])
+            for mid in f.model_ids(n["params"]):
+                m = models.get(mid)
+                used.append({"node": n["id"], "model": mid, "sha256": m["sha256"], "licence": m["licence"],
+                             "source": m["source"], "generative": bool(m.get("generative"))})
+        return used
+
+    def export_chain(self, chain_id: str, actor: Actor, frame: int = 0) -> tuple[bytes, dict]:
+        """The rendered result as a lossless PNG for disclosure.
+
+        Generative results are watermarked, and blocked unless every generative step carries
+        a written justification. The output is re-computed and must match the recorded hash.
+        """
+        ch = self.get_chain(chain_id)
+        if not ch["output_hash"]:
+            raise ValueError("render the chain before exporting it")
+        if pending_proposals(normalise(ch["graph"])):
+            raise ValueError("the chain contains agent-proposed steps nobody has accepted")
+        pol = policy.status(ch["graph"])
+        if not pol["evidential_export"]:
+            raise PermissionError("this chain contains a generative AI step without a written justification; "
+                                  "its result is illustrative only and cannot be exported as evidence")
+        res = self.engine.run(ch["graph"])
+        if res.output_hash != ch["output_hash"]:
+            raise ValueError("re-computed result does not match the recorded output hash; verify the chain")
+        img = frame_of(res.data, frame)
+        if pol["illustrative_only"]:
+            img = policy.watermark(img)
+        png = media.encode_png(img)
+        digest = hashlib.sha256(png).hexdigest()
+        info = {"chain_id": chain_id, "frame": frame, "output_hash": res.output_hash, "png_sha256": digest,
+                "watermarked": pol["illustrative_only"], "justifications": [
+                    {"node": n["id"], "justification": n.get("justification")} for n in policy.generative_nodes(ch["graph"])]}
+        self.audit.append(actor, "chain.export", case_id=ch["case_id"], target=chain_id, params=info, output_hash=digest)
+        return png, info
+
     def preview(self, graph: dict, evidence_id: str, upto: str | None = None, frame: int = 0) -> tuple[np.ndarray, dict]:
         """Live preview: not stored and not audited, so it is never evidential."""
         g = self._normalise_for(evidence_id, graph)
@@ -391,16 +471,10 @@ class Workbench:
         if row["media_type"] not in a.applies_to:
             raise ValueError(f"{a.name} does not apply to {row['media_type']} evidence")
         p = a.validate(params)
-        probe = json.loads(row["probe_json"])
-        ctx = AnalysisContext(path=Path(row["stored_path"]), probe=probe, settings=self.settings,
-                              resolve=lambda kind, rid: self._resolve(row["case_id"], kind, rid))
-        result = a.fn(ctx, p)
-        maps = {}
-        for name, img in result.maps.items():
-            digest, _ = self.store.put_derived(media.encode_png(img), "png")
-            maps[name] = digest
-        payload = {"summary": result.summary, "findings": result.findings, "flags": result.flags, "maps": maps}
-        out_hash = hashlib.sha256(canonical_json(payload).encode()).hexdigest()
+        payload, out_hash, map_png = self.compute_analysis(row, a, p)
+        for data in map_png:
+            self.store.put_derived(data, "png")
+        maps = payload["maps"]
         aid = new_id()
         self.db.execute(
             "INSERT INTO analyses (id, case_id, evidence_id, name, version, params_json, result_json, output_hash, actor, created_at)"
@@ -413,6 +487,22 @@ class Workbench:
             output_hash=out_hash,
         )
         return self.get_analysis_result(aid)
+
+    def compute_analysis(self, row: dict, a, p: dict) -> tuple[dict, str, list[bytes]]:
+        """Run an analysis without storing or logging anything: the payload, its hash and the map PNGs."""
+        if a.unavailable and (why := a.unavailable()):
+            raise ValueError(why)
+        probe = json.loads(row["probe_json"])
+        ctx = AnalysisContext(path=Path(row["stored_path"]), probe=probe, settings=self.settings,
+                              resolve=lambda kind, rid: self._resolve(row["case_id"], kind, rid))
+        result = a.fn(ctx, p)
+        maps, pngs = {}, []
+        for name, img in result.maps.items():
+            data = media.encode_png(img)
+            maps[name] = hash_bytes(data)
+            pngs.append(data)
+        payload = {"summary": result.summary, "findings": result.findings, "flags": result.flags, "maps": maps}
+        return payload, hashlib.sha256(canonical_json(payload).encode()).hexdigest(), pngs
 
     def get_analysis_result(self, analysis_id: str) -> dict:
         row = self.db.one("SELECT * FROM analyses WHERE id = ?", (analysis_id,))
@@ -500,6 +590,9 @@ class Workbench:
             ch = self.get_chain(chain_id)
             if ch["evidence_id"] != evidence_id:
                 raise ValueError("that chain belongs to another evidence item")
+            if policy.generative_nodes(ch["graph"]):
+                raise ValueError("this chain contains a generative AI step: its detail may not have been recorded, "
+                                 "so it cannot be measured on. Measure on the original or a classical chain.")
         times = None
         if kind == "speed":
             if row["media_type"] != "video":
@@ -538,12 +631,15 @@ class Workbench:
 
     def smart_report(self, evidence_id: str, actor: Actor) -> dict:
         """Run the triage battery on one item and record a traffic-light reading with its reasons."""
+        from .analysis.video import VPF_CODECS
         from .triage import BATTERY, assess
 
         row = self._evidence_row(evidence_id)
         runs = []
         for aid, params in BATTERY.get(row["media_type"], []):
             if aid.startswith("tamper.") and row["media_type"] == "image" and not formats_is_jpeg(Path(row["stored_path"])):
+                continue
+            if aid == "video.double_encoding" and json.loads(row["probe_json"]).get("codec") not in VPF_CODECS:
                 continue
             runs.append(self.run_analysis(evidence_id, aid, params, actor))
         result = assess(row["media_type"], runs)
@@ -571,6 +667,31 @@ class Workbench:
             if t:
                 out.append(t)
         return out
+
+    # Reviews ----------------------------------------------------------------------------------
+
+    def review_case(self, case_id: str, actor: Actor | None = None, rerun_analyses: bool = True) -> dict:
+        from .agents.reviewer import review_case
+
+        return review_case(self, case_id, rerun_analyses=rerun_analyses, actor=actor)
+
+    def record_review(self, case_id: str, result: dict, actor: Actor) -> dict:
+        out_hash = hashlib.sha256(canonical_json(result).encode()).hexdigest()
+        rid = new_id()
+        self.db.execute(
+            "INSERT INTO reviews (id, case_id, level, result_json, output_hash, actor, created_at) VALUES (?,?,?,?,?,?,?)",
+            (rid, case_id, result["level"], json.dumps(result), out_hash, actor.label, now_iso()),
+        )
+        self.audit.append(actor, "review.run", case_id=case_id, target=rid,
+                          params={"review_id": rid, "level": result["level"], "counts": result["counts"],
+                                  "line": result["line"]}, output_hash=out_hash)
+        return self.latest_review(case_id)
+
+    def latest_review(self, case_id: str) -> dict | None:
+        row = self.db.one("SELECT * FROM reviews WHERE case_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1", (case_id,))
+        if row:
+            row["result"] = json.loads(row.pop("result_json"))
+        return row
 
     # Audit ---------------------------------------------------------------------------------
 
@@ -612,3 +733,12 @@ def _diff_nodes(old: dict, new: dict) -> list[str]:
     if old.get("source") != new.get("source"):
         changes.append("changed source frames")
     return changes
+
+
+def _c2pa_version() -> str:
+    try:
+        from importlib.metadata import version
+
+        return version("c2pa-python")
+    except Exception:  # noqa: BLE001 - optional at run time
+        return "not installed"

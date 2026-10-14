@@ -3,7 +3,7 @@
 A browser-based workbench for forensic image and video work: **Enhance** (clarify
 footage and photos) and **Authenticate** (check whether an image is what it claims
 to be), on one audited processing core. This is Phase 0 (foundations), Phase 1
-(MVP) and Phase 2 (depth) of the build plan *Forensic Image & Video Platform: Build Plan*.
+(MVP), Phase 2 (depth) and Phase 3 (AI, deepfake checks, full parity) of the build plan *Forensic Image & Video Platform: Build Plan*.
 
 Assumed user: a general forensic examiner working alone on one machine (the plan's
 open question about target users is not answered yet). Multi-user access control,
@@ -33,7 +33,10 @@ FORENSIC_DATA_DIR=./data uvicorn forensic.api:app --port 8000
 For front-end development run `npm run dev` in `frontend/` (port 5173, proxies `/api`
 to port 8000).
 
-Tests: `cd backend && pytest` (about 40 tests, under a minute; includes a quick
+Docker and air-gapped installation: see [docs/deployment.md](docs/deployment.md). After any
+installation, `python -m forensic.selftest` checks the tools, models and a full case end to end.
+
+Tests: `cd backend && pytest` (about 60 tests, a couple of minutes; includes a quick
 validation run that fails if detector accuracy drops below the published floor).
 
 ## What is in it
@@ -70,6 +73,20 @@ validation run that fails if detector accuracy drops below the published floor).
 | Planner agent | `forensic/agents/planner.py` | Given a goal ("make the plate readable", "brighten the dark scene"), picks a workflow, renders candidate chains on the region of interest, scores them with no-reference quality metrics and proposes the best two as chains whose steps the examiner must accept. |
 | **Gate: detector accuracy published** | `forensic/validation/`, `docs/validation/` | `python -m forensic.validation run` measures every authentication detector on a seeded corpus and writes a detector card (task, threshold, TPR, FPR, AUC, conditions, known failure modes). The app shows each card's headline next to the detector and the report prints it. Add `--pristine <folder of camera JPEGs>` to measure on real images. |
 
+**AI, deepfake checks and full parity (Phase 3)**
+
+| Plan item | Where | How |
+|---|---|---|
+| AI models | `forensic/models/`, [docs/ai-models.md](docs/ai-models.md) | A pinned manifest: every model's weights SHA-256, source, licence, training data and limits. Weights ship in the package and are verified before every load; inference is CPU, single-thread ONNX Runtime, so results reproduce bit for bit. Labs add their own models with a model card (`python -m forensic.models install`). |
+| AI-assisted enhancement | `forensic/filters/ai.py`, `forensic/policy.py` | AI super resolution (FSRCNN / ESPCN, 2-4x) and face redaction (YuNet). Both are badged "AI" in the UI and report with the model's hash. Super resolution is *generative*: watermarked "illustrative only", measurement refused, and it cannot be accepted or exported until an examiner writes a justification, which is logged. Agents cannot write one. |
+| AI-generated images | `forensic/analysis/synthetic.py` | Content Credentials (C2PA) read and validated offline, AI-generation declarations in IPTC/XMP and generator text chunks; camera-pipeline traces (CFA demosaicing and resampling); a slot for a learned detector the lab licenses and validates (none is bundled; see the licence policy). |
+| Deepfake / face swap | `forensic/analysis/faces.py` | Faces found by YuNet (or marked by hand) are compared with 200 random places in the same image for noise and detail, and with the image's double-JPEG history; on video, faces are tracked over sampled frames and flicker is measured. Results are z-scores with a reliability grade by face size. |
+| Video authentication | `forensic/analysis/video.py` | Double encoding from the variation of prediction footprint (former I-frames re-coded as P-frames), with the first GOP estimated; frame deletion (jumps), duplication (repeated moving segments), repeated frames and timestamp gaps. |
+| Photogrammetry | `forensic/measure.py` | Height by camera resection: at least six surveyed 3D points give focal length, position and pose; the target's height is read where the ray through its top meets the vertical through its base. Monte Carlo interval from clicking and survey uncertainty. |
+| Reviewer agent | `forensic/agents/reviewer.py` | Re-hashes originals, checks the audit chain, re-runs every rendered chain twice from the originals, re-runs analyses and measurements and compares hashes, checks model weights, and flags generative, unjustified and unaccepted steps. Its review is logged, shown in the Audit tab and printed in the report. |
+| Air-gapped deployment | `Dockerfile`, `docker-compose.yml`, `deploy/airgap/`, `forensic/selftest.py` | A container on an internal-only network, or an offline bundle (wheels, UI, models, `SHA256SUMS`) installed with `pip --no-index` and accepted by the self-test. Nothing calls out at run time; an LLM agent connects through MCP, so a self-hosted model works. |
+| Validation | `forensic/validation/phase3.py` | Cards for camera traces, face consistency, double encoding and frame integrity, with the conditions where each fails. |
+
 ## Rules the code enforces
 
 - Originals are never written after ingest; all work is on derived, content-addressed outputs.
@@ -78,6 +95,8 @@ validation run that fails if detector accuracy drops below the published floor).
 - Agents can only ingest files from `FORENSIC_IMPORT_DIR`. Text read from evidence (EXIF comments, XMP, filenames) is returned to agents wrapped as untrusted file content.
 - OpenCV runs single-threaded with OpenCL off (`FORENSIC_DETERMINISTIC=1`, the default) so results do not depend on thread scheduling.
 - Authentication findings are worded "consistent / inconsistent with", with a reading guide per analysis; no single score is presented as proof.
+- Learned models run only from pinned, verified weights; their id and hash are printed next to every result they produced, and AI-assisted steps and analyses are labelled as such.
+- Generative steps are illustrative only: watermarked, never measured on, and exported only with an examiner's logged justification.
 
 ## Connecting an agent
 
@@ -96,9 +115,11 @@ validation run that fails if detector accuracy drops below the published floor).
 
 Set `FORENSIC_AGENT_NAME` and `FORENSIC_AGENT_MODEL` so the audit log records which agent and model acted.
 
-## Not yet (later phases of the plan)
+## Not yet
 
-Clone detection, C2PA validation, deeper video authentication, AI-based enhancement and AI / deepfake detectors (Phase 3), the reviewer agent, OCR, native parsers for vendor formats FFmpeg cannot demux (they are carved instead), full photogrammetry from several views, Postgres + S3 Object Lock + job queue, user accounts and SSO, sandboxed parsers, and air-gapped packaging. Detector accuracy is so far measured on a synthetic corpus only; run the validation with real pristine images before relying on a detector in casework. Chains are linear; branching graphs use the same document format later.
+- No learned AI-image or deepfake detector is bundled: the published ones reviewed carry non-commercial licences or lack validation on current generators. The slot (`synthetic.learned`) takes one the lab licenses and validates.
+- Every detector is so far validated on synthetic data only, including the phase 3 checks; no real photographs, real face swaps or recorder footage have been run. Run the validation with real material before relying on a detector in casework.
+- Clone detection, OCR, multi-view triangulation, native parsers for vendor formats FFmpeg cannot demux (they are carved instead), Postgres + S3 Object Lock + job queue, user accounts and SSO, and sandboxed parsers. Chains are linear; branching graphs use the same document format later.
 
 ## Layout
 
@@ -108,19 +129,27 @@ backend/
     api.py          HTTP API (FastAPI)
     workbench.py    service layer shared by the API and MCP servers
     graph.py        filter-graph engine, hashing, cache
-    filters/        enhancement filters (exposure, geometry, denoise, deblur, multi-frame, SR)
-    analysis/       authentication analyses (metadata, JPEG structure, ELA, Ghost, double JPEG, PRNU)
+    filters/        enhancement filters (exposure, geometry, denoise, deblur, multi-frame, SR, AI)
+    analysis/       authentication analyses (metadata, JPEG, ELA, Ghost, double JPEG, PRNU,
+                    provenance and camera traces, faces, video double encoding and frame integrity)
+    models/         pinned model manifest, bundled weights and licences
+    policy.py       rules for generative (AI) steps
+    selftest.py     installation acceptance test
     formats.py      recorder export identification, remux and carving
     measure.py      height, distance and speed with uncertainty
     prnu.py         sensor fingerprint estimation and matching
     triage.py       Smart Report rules
-    agents/         triage and planner agents
+    agents/         triage, planner and reviewer agents
     validation/     detector validation lab and detector cards
     store.py        write-once evidence store
     audit.py        hash-chained audit log
     report.py       bundle, HTML and PDF reports
     mcp_server.py   MCP servers for agents
+  tools/            model conversion (source graphs to ONNX)
   tests/
+deploy/airgap/      offline bundle build and install scripts
 frontend/           React + TypeScript viewer (Vite)
 docs/validation/    latest published validation results
+docs/ai-models.md   bundled models, generative policy, installing a lab detector
+docs/deployment.md  Docker, air-gapped installation, self-test
 ```
