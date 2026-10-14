@@ -25,10 +25,10 @@ $ProgressPreference = "SilentlyContinue"
 # here, and every hash is recorded in BUILDINFO.txt inside the installation.
 $PythonVersion = "3.12.10"
 $PythonUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip"
-$PythonSha256 = ""
+$PythonSha256 = "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3"
 $FfmpegVersion = "7.1.1"
 $FfmpegUrl = "https://github.com/GyanD/codexffmpeg/releases/download/$FfmpegVersion/ffmpeg-$FfmpegVersion-essentials_build.zip"
-$FfmpegSha256 = ""
+$FfmpegSha256 = "04861d3339c5ebe38b56c19a15cf2c0cc97f5de4fa8910e4d47e5e6404e4a2d4"
 $VcRedistUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 
 $Repo = (Resolve-Path "$PSScriptRoot\..\..").Path
