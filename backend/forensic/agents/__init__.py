@@ -8,6 +8,7 @@ them as tools and explain or extend their results.
 """
 
 from .planner import WORKFLOWS, plan_enhancement
+from .reviewer import review_case
 from .triage import triage_case
 
-__all__ = ["WORKFLOWS", "plan_enhancement", "triage_case"]
+__all__ = ["WORKFLOWS", "plan_enhancement", "review_case", "triage_case"]

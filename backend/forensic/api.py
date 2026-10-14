@@ -44,6 +44,11 @@ async def _nf(_: Request, exc: NotFound):
     return JSONResponse({"detail": str(exc)}, status_code=404)
 
 
+@app.exception_handler(PermissionError)
+async def _forbidden(_: Request, exc: PermissionError):
+    return JSONResponse({"detail": str(exc)}, status_code=403)
+
+
 @app.exception_handler(FilterError)
 @app.exception_handler(media.MediaError)
 @app.exception_handler(ValueError)
@@ -141,6 +146,12 @@ def filters():
 @app.get("/api/analyses")
 def analyses():
     return wb().analyses()
+
+
+@app.get("/api/models")
+def models_list():
+    """Learned models with their pinned weights hashes, sources, licences and a fresh hash check."""
+    return wb().model_catalogue()
 
 
 @app.get("/api/catalogue")
@@ -326,6 +337,14 @@ def render_chain(chain_id: str, x_examiner: str | None = Header(None)):
 @app.post("/api/chains/{chain_id}/verify")
 def verify_chain(chain_id: str, x_examiner: str | None = Header(None)):
     return wb().verify_chain(chain_id, actor(x_examiner))
+
+
+@app.get("/api/chains/{chain_id}/export.png")
+def export_chain(chain_id: str, frame: int = 0, x_examiner: str | None = Header(None), examiner: str | None = None):
+    png, info = wb().export_chain(chain_id, actor(x_examiner or examiner), frame=frame)
+    return Response(png, media_type="image/png", headers={
+        "Content-Disposition": f'attachment; filename="chain-{chain_id}-frame{frame}.png"',
+        "X-Output-Hash": info["output_hash"], "X-PNG-SHA256": info["png_sha256"]})
 
 
 # Derived files and reports -------------------------------------------------------------------

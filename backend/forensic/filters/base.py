@@ -100,6 +100,12 @@ class Filter:
     input_kind: str = "image"  # "image": applied per frame; "stack": consumes (N,H,W,3)
     output_kind: str = "image"  # for stack filters: "image" or "stack"
     generative: bool = False  # can invent detail; excluded from evidential export
+    ai: bool = False  # runs a learned model (printed as AI-assisted in the report)
+    # For AI filters: the model ids a given parameter set runs (their weights hashes go in the report).
+    models: Callable[[dict], list[str]] | None = None
+
+    def model_ids(self, params: dict) -> list[str]:
+        return list(self.models(params)) if self.models else []
 
     def schema(self) -> dict:
         return {
@@ -112,6 +118,7 @@ class Filter:
             "input_kind": self.input_kind,
             "output_kind": self.output_kind if self.input_kind == "stack" else self.input_kind,
             "generative": self.generative,
+            "ai": self.ai,
             "params": [p.schema() for p in self.params],
         }
 
@@ -139,6 +146,8 @@ def register(
     input_kind: str = "image",
     output_kind: str = "image",
     generative: bool = False,
+    ai: bool = False,
+    models: Callable[[dict], list[str]] | None = None,
 ):
     def deco(fn):
         if id in REGISTRY:
@@ -155,6 +164,8 @@ def register(
             input_kind=input_kind,
             output_kind=output_kind,
             generative=generative,
+            ai=ai,
+            models=models,
         )
         return fn
 

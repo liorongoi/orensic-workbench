@@ -73,6 +73,8 @@ def normalise(graph: dict) -> dict:
         }
         if raw.get("note"):
             node["note"] = str(raw["note"])
+        if raw.get("justification") and f.generative:
+            node["justification"] = str(raw["justification"]).strip()[:4000]
         if raw.get("proposed_by"):
             node["proposed_by"] = str(raw["proposed_by"])
             if raw.get("accepted_by"):

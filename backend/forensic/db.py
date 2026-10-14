@@ -111,6 +111,15 @@ CREATE TABLE IF NOT EXISTS triage (
     actor TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS reviews (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    level TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    output_hash TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 # Columns added after the first release; applied to existing databases on open.
