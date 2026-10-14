@@ -8,10 +8,15 @@ docker compose up            # http://127.0.0.1:8000
 docker compose --profile agents up   # also the authenticate MCP server on the internal network
 ```
 
-Case data lives in `./data`; `./import` is the only folder agents may ingest from. On Linux,
-create both folders before the first start and give them to the container's user
-(`mkdir -p data import && sudo chown 10001 data`), or Docker creates them owned by root and
-the workbench cannot write its cases.
+Case data lives in `./data`; `./import` is the only folder agents may ingest from. The
+container starts as root only to hand `/data` to its unprivileged `forensic` user (Docker
+creates a missing bind-mounted folder owned by root), then runs the workbench as that user.
+
+Without Compose:
+
+```bash
+docker run -p 127.0.0.1:8000:8000 -v "$PWD/data:/data" forensic-workbench:0.3.0
+```
 
 The workbench joins a plain network so its port can reach your browser (Docker does not
 publish ports from internal-only networks) and an internal network shared with the MCP
