@@ -108,19 +108,19 @@ def file_metadata(ctx: AnalysisContext, p: dict) -> AnalysisResult:
     findings["exif"] = exif
     tags = {**exif["image"], **exif["exif"]}
     if not exif["image"] and not exif["exif"]:
-        flags.append({"level": "warning", "text": "No EXIF metadata. Common after editing software, screenshots or social-media upload."})
+        flags.append({"code": "meta.no_exif", "level": "warning", "text": "No EXIF metadata. Common after editing software, screenshots or social-media upload."})
     if sw := tags.get("Software"):
         flags.append({"level": "info", "text": f"Software tag: '{sw}'."})
         if re.search(r"photoshop|gimp|lightroom|snapseed|picsart|affinity|paint", str(sw), re.I):
-            flags.append({"level": "warning", "text": f"Software tag names an image editor ('{sw}')."})
+            flags.append({"code": "meta.editor", "level": "warning", "text": f"Software tag names an image editor ('{sw}')."})
     if tags.get("Make") or tags.get("Model"):
         findings["camera"] = f"{tags.get('Make', '')} {tags.get('Model', '')}".strip()
     dt, dto = tags.get("DateTime"), tags.get("DateTimeOriginal")
     if dt and dto and dt != dto:
-        flags.append({"level": "warning", "text": f"Modification time ({dt}) differs from capture time ({dto})."})
+        flags.append({"code": "meta.date_mismatch", "level": "warning", "text": f"Modification time ({dt}) differs from capture time ({dto})."})
     px, py = tags.get("ExifImageWidth"), tags.get("ExifImageHeight")
     if isinstance(px, int) and isinstance(py, int) and (px, py) != (findings["width"], findings["height"]):
-        flags.append({"level": "warning", "text": f"EXIF dimensions {px}x{py} differ from the image ({findings['width']}x{findings['height']})."})
+        flags.append({"code": "meta.dimensions", "level": "warning", "text": f"EXIF dimensions {px}x{py} differ from the image ({findings['width']}x{findings['height']})."})
     if exif["gps"]:
         findings["gps"] = _gps_decimal(exif["gps"])
         if findings["gps"]:
@@ -134,9 +134,9 @@ def file_metadata(ctx: AnalysisContext, p: dict) -> AnalysisResult:
             tool = m.group(1) or m.group(2)
             flags.append({"level": "info", "text": f"XMP creator tool: '{tool}'."})
         if "photoshop:" in xmp or "History" in xmp:
-            flags.append({"level": "warning", "text": "XMP contains editing history or Photoshop fields."})
+            flags.append({"code": "meta.xmp_history", "level": "warning", "text": "XMP contains editing history or Photoshop fields."})
     if b"c2pa" in data[:200000] or b"jumb" in data[:200000]:
-        flags.append({"level": "info", "text": "File appears to carry a C2PA / JUMBF manifest (Content Credentials). Validation comes in a later release."})
+        flags.append({"code": "meta.c2pa", "level": "info", "text": "File appears to carry a C2PA / JUMBF manifest (Content Credentials). Validation comes in a later release."})
 
     if is_jpeg(data):
         jp = parse_markers(data)
@@ -148,7 +148,7 @@ def file_metadata(ctx: AnalysisContext, p: dict) -> AnalysisResult:
         elif q["estimated_quality"]:
             flags.append({"level": "info", "text": f"Non-standard quantisation tables (closest libjpeg quality {q['estimated_quality']}); typical of camera firmware or specific software."})
         for w in jp["warnings"]:
-            flags.append({"level": "warning", "text": f"JPEG structure: {w}."})
+            flags.append({"code": "meta.structure", "level": "warning", "text": f"JPEG structure: {w}."})
         names = [m["name"] for m in jp["markers"]]
         findings["marker_sequence"] = " ".join(names)
         thumb = _thumbnail(data, jp["markers"])
@@ -159,11 +159,11 @@ def file_metadata(ctx: AnalysisContext, p: dict) -> AnalysisResult:
                 findings["thumbnail"] = {"width": tw, "height": th, "bytes": len(thumb)}
                 main_ar = findings["width"] / findings["height"]
                 if abs(tw / th - main_ar) / main_ar > 0.02 and abs(th / tw - main_ar) / main_ar > 0.02:
-                    flags.append({"level": "warning", "text": f"Embedded thumbnail aspect ratio ({tw}x{th}) does not match the image; the image may have been cropped after capture."})
+                    flags.append({"code": "meta.thumbnail", "level": "warning", "text": f"Embedded thumbnail aspect ratio ({tw}x{th}) does not match the image; the image may have been cropped after capture."})
                 thumb_img = media.to_float(np.asarray(Image.open(io.BytesIO(thumb)).convert("RGB")))
                 maps = {"thumbnail": thumb_img}
             except Exception:  # noqa: BLE001
-                flags.append({"level": "warning", "text": "Embedded thumbnail could not be decoded."})
+                flags.append({"code": "meta.thumbnail_bad", "level": "warning", "text": "Embedded thumbnail could not be decoded."})
                 maps = {}
         else:
             maps = {}
@@ -191,11 +191,11 @@ def _video_metadata(ctx: AnalysisContext) -> AnalysisResult:
         typical = sorted(deltas)[len(deltas) // 2]
         gaps = [{"after_frame": i, "gap_s": round(d, 4)} for i, d in enumerate(deltas) if typical > 0 and d > 1.9 * typical]
         if gaps:
-            flags.append({"level": "warning", "text": f"{len(gaps)} timestamp gap(s) larger than twice the typical frame interval; possible dropped or removed frames, or a variable-rate recorder."})
+            flags.append({"code": "video.gaps", "level": "warning", "text": f"{len(gaps)} timestamp gap(s) larger than twice the typical frame interval; possible dropped or removed frames, or a variable-rate recorder."})
         if any(d <= 0 for d in deltas):
-            flags.append({"level": "warning", "text": "Timestamps are not strictly increasing."})
+            flags.append({"code": "video.timestamps", "level": "warning", "text": "Timestamps are not strictly increasing."})
     if len(set(gops)) > 1:
-        flags.append({"level": "info", "text": f"Irregular GOP lengths ({min(gops)} to {max(gops)} frames)."})
+        flags.append({"code": "video.gop", "level": "info", "text": f"Irregular GOP lengths ({min(gops)} to {max(gops)} frames)."})
     tags = pr.get("container", {}).get("tags", {})
     if enc := tags.get("encoder"):
         flags.append({"level": "info", "text": f"Encoder tag: '{enc}'."})

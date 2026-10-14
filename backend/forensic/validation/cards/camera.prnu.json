@@ -1,0 +1,43 @@
+{
+  "detector": "camera.prnu",
+  "name": "Camera identification (PRNU)",
+  "version": "1.0.0",
+  "validated_on": "2026-10-14",
+  "corpus": "synthetic photo-like scenes generated from fixed seeds (forensic.validation.run.scene)",
+  "seeded": true,
+  "results": {
+    "identification": {
+      "task": "Was the image taken by the camera of the reference?",
+      "cameras": "4 simulated sensors, PRNU std 0.005 (typical of real sensors), 384x512",
+      "references": "15 flat-field images per camera, JPEG quality 95",
+      "tests": "20 scenes per camera, JPEG quality 75-95; each matched to its own and to another camera's reference",
+      "threshold": 60.0,
+      "full_frame": {
+        "true_positive_rate": 1.0,
+        "false_positive_rate": 0.0,
+        "auc": 1.0,
+        "median_pce_same": 3008.6
+      },
+      "cropped_quarter_frame_with_search": {
+        "true_positive_rate": 1.0,
+        "false_positive_rate": 0.0,
+        "auc": 1.0,
+        "median_pce_same": 640.4
+      }
+    }
+  },
+  "known_failure_modes": [
+    "Simulated sensors follow the classical multiplicative PRNU model; modern phones' multi-frame and AI processing can suppress or imitate it. Validate per phone model before relying on a match.",
+    "Strong compression, resizing and denoising weaken the fingerprint; searching crops and scales raises the chance of an accidental match.",
+    "A reference built from few or textured images is noisy; 20 or more flat, bright images is recommended."
+  ],
+  "software": {
+    "forensic_workbench": "0.2.0",
+    "numpy": "2.5.4",
+    "opencv": "5.0.0",
+    "pillow": "12.3.0",
+    "pywavelets": "1.8.0",
+    "python": "3.13.16"
+  },
+  "how_to_reproduce": "python -m forensic.validation run"
+}

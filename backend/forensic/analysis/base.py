@@ -24,6 +24,8 @@ class AnalysisContext:
     path: Path
     probe: dict
     settings: Settings
+    # Looks up case resources an analysis needs (e.g. a PRNU camera reference): resolve(kind, id).
+    resolve: Callable[[str, str], Any] | None = None
 
     @cached_property
     def data(self) -> bytes:

@@ -1,11 +1,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fetchPreview, urls } from "../api";
-import type { AnalysisRun, AnalysisSchema, Case, Chain, Evidence, FilterSchema, FrameInfo, Graph, ParamSchema, StepInfo } from "../types";
+import type {
+  AnalysisRun,
+  AnalysisSchema,
+  CameraReference,
+  Case,
+  Catalogue,
+  Chain,
+  Evidence,
+  FilterSchema,
+  FrameInfo,
+  Graph,
+  Measurement,
+  ParamSchema,
+  StepInfo,
+  Triage,
+} from "../types";
 import { AuditPanel } from "./AuditPanel";
 import { AuthPanel } from "./AuthPanel";
 import { ChainEditor } from "./ChainEditor";
+import { ConvertPanel } from "./ConvertPanel";
 import { FrameStrip } from "./FrameStrip";
-import { Viewer } from "./Viewer";
+import { MEASURE_FIELDS, MeasurePanel, type PointFields } from "./MeasurePanel";
+import { PlannerPanel } from "./PlannerPanel";
+import { Viewer, type Overlay } from "./Viewer";
 
 interface Props {
   caseId: string;
@@ -13,7 +31,10 @@ interface Props {
   analyses: AnalysisSchema[];
 }
 
-type Tab = "enhance" | "authenticate" | "audit";
+type Tab = "enhance" | "authenticate" | "measure" | "audit";
+type ExtPick = { field: string; count: number };
+
+const PROPRIETARY = new Set(["dahua_dav", "hikvision", "mpeg_ps", "annexb_h264", "annexb_hevc"]);
 type View = { kind: "chain" } | { kind: "map"; digest: string; label: string };
 
 const sameGraph = (a: Graph, b: Graph) => JSON.stringify(a) === JSON.stringify(b);
@@ -23,6 +44,15 @@ export function Workspace({ caseId, filters, analyses }: Props) {
   const [evidence, setEvidence] = useState<Evidence[]>([]);
   const [chains, setChains] = useState<Chain[]>([]);
   const [runs, setRuns] = useState<AnalysisRun[]>([]);
+  const [references, setReferences] = useState<CameraReference[]>([]);
+  const [measurements, setMeasurements] = useState<Measurement[]>([]);
+  const [triage, setTriage] = useState<Triage[]>([]);
+  const [catalogue, setCatalogue] = useState<Catalogue | null>(null);
+  const [mpoints, setMpoints] = useState<PointFields>({});
+  const [mkind, setMkind] = useState("height");
+  const [measureOnChain, setMeasureOnChain] = useState(false);
+  const [extPick, setExtPick] = useState<ExtPick | null>(null);
+  const [triageBusy, setTriageBusy] = useState(false);
   const [evId, setEvId] = useState<string | null>(null);
   const [chainId, setChainId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Graph | null>(null);
@@ -54,8 +84,15 @@ export function Workspace({ caseId, filters, analyses }: Props) {
     setEvidence(d.evidence);
     setChains(d.chains);
     setRuns(d.analyses);
+    setReferences(d.camera_references);
+    setMeasurements(d.measurements);
+    setTriage(d.triage);
     return d;
   }, [caseId]);
+
+  useEffect(() => {
+    api.catalogue().then(setCatalogue).catch(() => setCatalogue(null));
+  }, []);
 
   useEffect(() => {
     reload().then((d) => {
@@ -68,6 +105,8 @@ export function Workspace({ caseId, filters, analyses }: Props) {
     setEvId(id);
     setView({ kind: "chain" });
     setPicking(null);
+    setExtPick(null);
+    setMpoints({});
     setStatus(null);
     setSelected(null);
     const c = allChains.filter((x) => x.evidence_id === id);
@@ -90,7 +129,7 @@ export function Workspace({ caseId, filters, analyses }: Props) {
     const ctrl = new AbortController();
     let graph: Graph;
     let upto: string | null = null;
-    if (!draft) {
+    if (!draft || (tab === "measure" && !measureOnChain)) {
       graph = { source: { frames: isVideo ? { start: frame, end: frame } : null }, nodes: [] };
     } else if (picking) {
       // Points are picked on the image as it enters the step being edited.
@@ -118,11 +157,14 @@ export function Workspace({ caseId, filters, analyses }: Props) {
       clearTimeout(t);
       ctrl.abort();
     };
-  }, [ev?.id, draft, frame, picking, view.kind, selected, showUpto]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ev?.id, draft, frame, picking, view.kind, selected, showUpto, tab, measureOnChain]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPicking(null);
+      if (e.key === "Escape") {
+        setPicking(null);
+        setExtPick(null);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -245,7 +287,24 @@ export function Workspace({ caseId, filters, analyses }: Props) {
     if (draft) setDraft({ ...draft, nodes: draft.nodes.map((n) => (n.id === nodeId ? { ...n, params: { ...n.params, [p.name]: [] } } : n)) });
   };
 
+  const startExtPick = (field: string, count: number, reset: boolean) => {
+    if (extPick?.field === field) {
+      setExtPick(null);
+      return;
+    }
+    setPicking(null);
+    setView({ kind: "chain" });
+    if (reset) setMpoints((m) => ({ ...m, [field]: [] }));
+    setExtPick({ field, count });
+  };
+
   const onPick = (x: number, y: number) => {
+    if (extPick) {
+      const pts = [...(mpoints[extPick.field] ?? []), [x, y]];
+      setMpoints((m) => ({ ...m, [extPick.field]: pts }));
+      if (pts.length >= extPick.count) setExtPick(null);
+      return;
+    }
     if (!picking || !draft) return;
     const node = draft.nodes.find((n) => n.id === picking.nodeId);
     if (!node) return;
@@ -258,6 +317,34 @@ export function Workspace({ caseId, filters, analyses }: Props) {
   const pickPoints = (pickNode?.params[picking!.param] as number[][] | undefined) ?? undefined;
 
   const evChains = useMemo(() => chains.filter((c) => c.evidence_id === evId), [chains, evId]);
+  const triageBy = useMemo(() => Object.fromEntries(triage.map((t) => [t.evidence_id, t])), [triage]);
+
+  const overlays: Overlay[] = [];
+  if (tab === "measure") {
+    for (const f of MEASURE_FIELDS[mkind] ?? []) {
+      const pts = mpoints[f.key] ?? [];
+      overlays.push({ points: pts, color: f.color, mode: f.kind === "lines" ? "segments" : "points", label: f.kind === "lines" ? undefined : f.label });
+    }
+  } else if (tab === "enhance" && mpoints.plan_roi?.length) {
+    overlays.push({ points: mpoints.plan_roi, color: "#3fe08a", mode: "rect", label: "planner region" });
+  }
+  const extHint = extPick
+    ? `Click on the image: ${extPick.field.replace(/_/g, " ")} (${mpoints[extPick.field]?.length ?? 0}/${extPick.count}). Esc to stop.`
+    : null;
+
+  const runTriage = async () => {
+    setTriageBusy(true);
+    try {
+      const r = await api.triage(caseId);
+      setStatus({ kind: "info", text: `Triage: ${r.counts.red ?? 0} red, ${r.counts.yellow ?? 0} yellow, ${r.counts.green ?? 0} green.` });
+      await reload();
+      setAuditKey((k) => k + 1);
+    } catch (e) {
+      setStatus({ kind: "bad", text: (e as Error).message });
+    } finally {
+      setTriageBusy(false);
+    }
+  };
   const sourceFrame = range ? range.start : frame;
 
   const setRange = (which: "start" | "end") => {
@@ -276,6 +363,9 @@ export function Workspace({ caseId, filters, analyses }: Props) {
       <aside className="left">
         <div className="panel-title">
           Evidence <span className="spacer" />
+          <button onClick={runTriage} className="small-btn" disabled={triageBusy || !evidence.length} title="Smart Report on every item: where to look first">
+            {triageBusy ? "Triage…" : "Triage all"}
+          </button>
           <button onClick={() => fileInput.current?.click()} className="primary small-btn">+ Add</button>
           <input ref={fileInput} type="file" multiple hidden onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
         </div>
@@ -293,11 +383,15 @@ export function Workspace({ caseId, filters, analyses }: Props) {
           {evidence.map((e) => (
             <li key={e.id} className={e.id === evId ? "selected" : ""} onClick={() => selectEvidence(e.id)}>
               <div className="ev-name">
-                <span className={`kind ${e.media_type}`}>{e.media_type === "video" ? "VID" : "IMG"}</span> {e.filename}
+                {triageBy[e.id] && <span className={`light ${triageBy[e.id].level}`} title={triageBy[e.id].result.line} />}
+                <span className={`kind ${e.media_type}`}>{e.media_type === "video" ? "VID" : e.media_type === "container" ? "REC" : "IMG"}</span> {e.filename}
               </div>
               <div className="muted small">
-                {e.probe.width}×{e.probe.height}
-                {e.media_type === "video" && ` · ${e.probe.frame_count} frames · ${e.probe.codec}`} · {(e.size / 1024).toFixed(0)} KB
+                {e.media_type === "container"
+                  ? `${e.probe.format} · needs conversion`
+                  : `${e.probe.width}×${e.probe.height}` + (e.media_type === "video" ? ` · ${e.probe.frame_count} frames · ${e.probe.codec}` : "")}{" "}
+                · {(e.size / 1024).toFixed(0)} KB
+                {e.derived_from && " · working copy"}
               </div>
               <div className="hash small" title={`SHA-256 ${e.sha256}\nMD5 ${e.md5}`}>SHA-256 {e.sha256.slice(0, 16)}…</div>
             </li>
@@ -319,18 +413,31 @@ export function Workspace({ caseId, filters, analyses }: Props) {
             </a>
           </div>
         )}
+        {ev && catalogue && !ev.derived_from && (ev.media_type === "container" || PROPRIETARY.has(ev.probe.identified?.family ?? "") || ["h264", "hevc"].includes(ev.probe.format ?? "")) && (
+          <ConvertPanel
+            key={ev.id}
+            evidence={ev}
+            methods={catalogue.conversion_methods}
+            onConverted={async (c) => {
+              const d = await reload();
+              selectEvidence(c.id, d.chains);
+              setAuditKey((k) => k + 1);
+            }}
+          />
+        )}
       </aside>
 
       <main className="center">
         <Viewer
-          src={view.kind === "map" ? urls.derived(view.digest) : preview.url}
+          src={view.kind === "map" ? urls.derived(view.digest) : ev?.media_type === "container" ? null : preview.url}
+          overlays={view.kind === "chain" ? overlays : undefined}
           compareSrc={ev ? urls.frame(ev.id, sourceFrame) : null}
           label={view.kind === "map" ? view.label : draft ? (showUpto && selected ? `Result up to step ${selected}` : "Result (live preview)") : "Original"}
           busy={view.kind === "chain" && preview.busy}
           error={view.kind === "chain" ? preview.error : null}
           points={picking ? pickPoints : undefined}
-          pickHint={picking ? `Click on the image to place points${picking.count ? ` (${pickPoints?.length ?? 0}/${picking.count})` : ""}. Esc to stop.` : null}
-          onPick={picking ? onPick : undefined}
+          pickHint={picking ? `Click on the image to place points${picking.count ? ` (${pickPoints?.length ?? 0}/${picking.count})` : ""}. Esc to stop.` : extHint}
+          onPick={picking || extPick ? onPick : undefined}
         />
         {view.kind === "map" && (
           <div className="map-bar">
@@ -356,15 +463,54 @@ export function Workspace({ caseId, filters, analyses }: Props) {
 
       <aside className="right">
         <div className="tabs">
-          {(["enhance", "authenticate", "audit"] as Tab[]).map((t) => (
-            <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
+          {(["enhance", "authenticate", "measure", "audit"] as Tab[]).map((t) => (
+            <button
+              key={t}
+              className={tab === t ? "active" : ""}
+              onClick={() => {
+                setTab(t);
+                setExtPick(null);
+              }}
+            >
               {t[0].toUpperCase() + t.slice(1)}
             </button>
           ))}
         </div>
         <div className="tab-body">
-          {tab === "enhance" && ev && (
+          {tab !== "audit" && ev?.media_type === "container" && (
+            <p className="muted">This recorder export cannot be opened directly. Make a working copy with the panel on the left; the original stays untouched.</p>
+          )}
+          {tab === "enhance" && ev && ev.media_type !== "container" && (
             <>
+              {catalogue && (
+                <PlannerPanel
+                  key={ev.id}
+                  caseId={caseId}
+                  evidence={ev}
+                  frame={frame}
+                  range={draft?.source.frames ?? null}
+                  roi={mpoints.plan_roi}
+                  picking={extPick?.field === "plan_roi"}
+                  workflows={catalogue.planner_workflows}
+                  graph={draft}
+                  onPickRoi={() => startExtPick("plan_roi", 2, true)}
+                  onClearRoi={() => setMpoints((m) => ({ ...m, plan_roi: [] }))}
+                  onPlanned={async () => {
+                    await reload();
+                    setAuditKey((k) => k + 1);
+                  }}
+                  onOpenChain={(id) => {
+                    reload().then((d) => {
+                      const c = d.chains.find((x) => x.id === id);
+                      if (c) {
+                        setChainId(c.id);
+                        setDraft(c.graph);
+                        setSelected(null);
+                      }
+                    });
+                  }}
+                />
+              )}
               <div className="chain-picker">
                 <select value={chainId ?? ""} onChange={(e) => switchChain(e.target.value)} disabled={!evChains.length}>
                   {!evChains.length && <option value="">No chains yet</option>}
@@ -406,9 +552,22 @@ export function Workspace({ caseId, filters, analyses }: Props) {
               )}
             </>
           )}
-          {tab === "authenticate" && ev && (
+          {tab === "authenticate" && ev && ev.media_type !== "container" && (
             <AuthPanel
+              caseId={caseId}
               evidence={ev}
+              allEvidence={evidence}
+              references={references}
+              triage={triageBy[ev.id] ?? null}
+              onTriage={(t) => {
+                setTriage((ts) => [...ts.filter((x) => x.evidence_id !== t.evidence_id), t]);
+                reload();
+                setAuditKey((k) => k + 1);
+              }}
+              onReference={(r) => {
+                setReferences((rs) => [...rs, r]);
+                setAuditKey((k) => k + 1);
+              }}
               catalogue={analyses}
               runs={runs}
               activeMap={view.kind === "map" ? view.digest : null}
@@ -419,6 +578,32 @@ export function Workspace({ caseId, filters, analyses }: Props) {
                 if (first) setView({ kind: "map", digest: first[1], label: first[0] });
               }}
               onShowMap={(digest, label) => setView({ kind: "map", digest, label })}
+            />
+          )}
+          {tab === "measure" && ev && ev.media_type !== "container" && catalogue && (
+            <MeasurePanel
+              evidence={ev}
+              frame={frame}
+              chain={chain}
+              chainDirty={dirty}
+              methods={catalogue.measurements}
+              measurements={measurements}
+              points={mpoints}
+              kind={mkind}
+              picking={extPick?.field ?? null}
+              onChain={measureOnChain && !!chain && !dirty}
+              onOnChain={setMeasureOnChain}
+              onKind={(k) => {
+                setMkind(k);
+                setMpoints({});
+                setExtPick(null);
+              }}
+              onPoints={(p) => setMpoints(p)}
+              onStartPick={startExtPick}
+              onDone={(m) => {
+                setMeasurements((ms) => [...ms, m]);
+                setAuditKey((k) => k + 1);
+              }}
             />
           )}
           {tab === "audit" && <AuditPanel caseId={caseId} refreshKey={auditKey} />}

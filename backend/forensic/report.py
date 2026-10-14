@@ -19,6 +19,8 @@ from .audit import Actor
 from .db import canonical_json, now_iso
 from .filters import get_filter
 from .graph import frame_of
+from .triage import RULES_VERSION, rules_table
+from .validation import load_card
 from .workbench import Workbench
 
 STANDARDS = (
@@ -84,9 +86,11 @@ def build_bundle(wb: Workbench, case_id: str, actor: Actor, verify: bool = True)
             "summary": a["result"]["summary"],
             "flags": a["result"]["flags"],
             "maps": a["result"]["maps"],
+            "findings": a["result"]["findings"],
             "output_hash": a["output_hash"],
             "actor": a["actor"],
             "created_at": a["created_at"],
+            "validation": card_summary(spec.id),
         })
     audit_check = wb.audit.verify()
     bundle = {
@@ -99,12 +103,61 @@ def build_bundle(wb: Workbench, case_id: str, actor: Actor, verify: bool = True)
         "evidence": evidence,
         "chains": chains,
         "analyses": analyses,
+        "camera_references": wb.list_camera_references(case_id),
+        "measurements": wb.list_measurements(case_id),
+        "triage": wb.list_triage(case_id),
+        "triage_rules": {"version": RULES_VERSION, "rules": rules_table()},
         "audit": {"verification": audit_check, "entries": wb.audit_entries(case_id)},
     }
     digest = hashlib.sha256(canonical_json(bundle).encode()).hexdigest()
     wb.audit.append(actor, "report.generate", case_id=case_id, target=case_id, params={"verified": verify}, output_hash=digest)
     bundle["bundle_sha256"] = digest
     return bundle
+
+
+def card_summary(detector_id: str) -> str | None:
+    """One sentence from the detector card: what accuracy was measured, on what."""
+    card = load_card(detector_id)
+    if not card:
+        return None
+    res = card["results"]
+    main = res.get("detection") or res.get("identification", {}).get("full_frame") or {}
+    if "true_positive_rate" not in main:
+        return None
+    thr = main.get("threshold", res.get("identification", {}).get("threshold"))
+    return (f"Validated {card['validated_on']} on {card['corpus']}: true-positive rate {main['true_positive_rate']:.0%}, "
+            f"false-positive rate {main['false_positive_rate']:.1%}" + (f" at threshold {thr}" if thr is not None else "")
+            + ". Known limits: " + " ".join(card["known_failure_modes"][:2]))
+
+
+def conversion_text(ev: dict, names: dict) -> str | None:
+    conv = ev.get("conversion")
+    if not conv:
+        return None
+    src = names.get(ev.get("derived_from"), ev.get("derived_from"))
+    text = (f"Working copy made from {src} (SHA-256 {conv.get('source_sha256')}) by {conv['method']}: {conv['description']}"
+            + (f" Command: {conv['command']}." if conv.get("command") else "")
+            + (f" Carving kept {conv['carve']['nal_units_kept']} NAL units and dropped {conv['carve']['nal_units_dropped']};"
+               f" frame times are synthetic at {conv['frame_rate']:g} fps." if conv.get("carve") else "")
+            + f" {conv.get('ffmpeg', '')}.")
+    return text
+
+
+def measurement_rows(bundle: dict) -> list[dict]:
+    ev_by_id = {x["id"]: x for x in bundle["evidence"]}
+    rows = []
+    for m in bundle["measurements"]:
+        r = m["result"]
+        lo, hi = r["interval_95"]
+        value = f"{r['value']:.3f} {r['unit']} (95 % interval {lo:.3f} to {hi:.3f})"
+        if r.get("value_kmh") is not None:
+            klo, khi = r["interval_95_kmh"]
+            value += f" = {r['value_kmh']:.1f} km/h ({klo:.1f} to {khi:.1f})"
+        rows.append({"label": m["label"] or m["kind"], "file": ev_by_id.get(m["evidence_id"], {}).get("filename", "?"),
+                     "value": value, "method": f"{r['name']} v{r['version']}", "reference": r["reference"],
+                     "assumptions": r["assumptions"], "on": f"output of chain {m['chain_id']}" if m["chain_id"] else "original frame",
+                     "actor": m["actor"], "hash": m["output_hash"], "warning": r.get("warning")})
+    return rows
 
 
 # Images ---------------------------------------------------------------------------
@@ -147,6 +200,7 @@ def render_html(wb: Workbench, bundle: dict) -> str:
     e = html.escape
     case = bundle["case"]
     ev_by_id = {x["id"]: x for x in bundle["evidence"]}
+    names = {x["id"]: x["filename"] for x in bundle["evidence"]}
     out = [f"<!doctype html><html><head><meta charset='utf-8'><title>Report: {e(case['name'])}</title><style>{CSS}</style></head><body>"]
     out.append(f"<h1>Examination report: {e(case['name'])}</h1>")
     out.append(f"<p class='muted'>Examiner {e(case['examiner'])} · generated {e(bundle['generated_at'])} by {e(bundle['generated_by'])}</p>")
@@ -158,8 +212,10 @@ def render_html(wb: Workbench, bundle: dict) -> str:
         status = "not checked" if not chk else ("<span class='ok'>hash matches, stored read-only</span>" if chk["ok"] and chk["read_only"] else "<span class='bad'>FAILED</span>")
         dims = f"{ev['probe'].get('width')}x{ev['probe'].get('height')}"
         extra = f", {ev['probe'].get('frame_count')} frames, {e(str(ev['probe'].get('codec')))}" if ev["media_type"] == "video" else ""
+        conv = conversion_text(ev, names)
+        conv_html = f"<br><span class='muted'>{e(conv)}</span>" if conv else ""
         out.append(
-            f"<tr><td>{e(ev['filename'])}<br><span class='muted'>{ev['size']:,} bytes · ingested {e(ev['ingested_at'])} by {e(ev['ingested_by'])}</span></td>"
+            f"<tr><td>{e(ev['filename'])}<br><span class='muted'>{ev['size']:,} bytes · ingested {e(ev['ingested_at'])} by {e(ev['ingested_by'])}</span>{conv_html}</td>"
             f"<td>{e(ev['media_type'])} ({dims}{extra})</td><td class='hash'>{ev['sha256']}<br>{ev['md5']}</td><td>{status}</td></tr>"
         )
     out.append("</table>")
@@ -209,12 +265,49 @@ def render_html(wb: Workbench, bundle: dict) -> str:
         out.append(f"<p class='muted'>{e(a['analysis'])} v{e(a['version'])} · {e(params)} · run by {e(a['actor'])}<br>{e(a['description'])}<br>Reference: {e(a['reference'])}</p>")
         if a["reading_guide"]:
             out.append(f"<p><em>How to read this: {e(a['reading_guide'])}</em></p>")
+        if a.get("validation"):
+            out.append(f"<p class='muted'>{e(a['validation'])}</p>")
         for name, digest in a["maps"].items():
             img = _derived_png(wb, digest)
             if img is not None:
                 out.append(f"<figure class='map'><img src='data:image/jpeg;base64,{_jpeg_b64(img)}'><figcaption>{e(name)} · <span class='hash'>{digest}</span></figcaption></figure>")
 
-    out.append("<h2>4. Audit trail</h2>")
+    if bundle["camera_references"]:
+        out.append("<h3>Camera references (PRNU)</h3><table><tr><th>Name</th><th>Built from</th><th>Size</th><th>Fingerprint SHA-256</th></tr>")
+        for r in bundle["camera_references"]:
+            src = ", ".join(e(names.get(x, x)) for x in r["evidence"])
+            out.append(f"<tr><td>{e(r['name'])}<br><span class='muted'>{e(r['camera'])} · by {e(r['actor'])}</span></td><td>{src}</td>"
+                       f"<td>{r['width']}x{r['height']}</td><td class='hash'>{r['fingerprint_sha256']}</td></tr>")
+        out.append("</table>")
+
+    out.append("<h2>4. Measurements</h2>")
+    rows = measurement_rows(bundle)
+    if not rows:
+        out.append("<p class='muted'>No measurements.</p>")
+    for i, m in enumerate(rows, 1):
+        out.append(f"<h3>4.{i} {e(m['label'])} <span class='muted'>on {e(m['file'])}, {e(m['on'])}</span></h3>")
+        out.append(f"<p><strong>{e(m['value'])}</strong></p>")
+        if m["warning"]:
+            out.append(f"<p class='bad'>{e(m['warning'])}</p>")
+        out.append("<p>Assumptions:</p><ul>" + "".join(f"<li>{e(a)}</li>" for a in m["assumptions"]) + "</ul>")
+        out.append(f"<p class='muted'>{e(m['method'])} · by {e(m['actor'])} · Reference: {e(m['reference'])}<br>"
+                   f"Interval from Monte Carlo propagation of point and survey uncertainty (seeded). <span class='hash'>{m['hash']}</span></p>")
+
+    out.append("<h2>5. Triage (Smart Report)</h2>")
+    if not bundle["triage"]:
+        out.append("<p class='muted'>Triage not run.</p>")
+    else:
+        out.append("<p>Triage sorts items by where to look first. A colour is not a finding: green means no check in the battery "
+                   f"found an inconsistency, not that the item is authentic. Rules v{e(bundle['triage_rules']['version'])} are listed below.</p>")
+        out.append("<table><tr><th>File</th><th>Level</th><th>Why</th><th>By</th></tr>")
+        for t in bundle["triage"]:
+            out.append(f"<tr><td>{e(names.get(t['evidence_id'], '?'))}</td><td><b>{e(t['level'].upper())}</b></td>"
+                       f"<td>{e(t['result']['line'])}</td><td>{e(t['actor'])}</td></tr>")
+        out.append("</table><details><summary>Triage rules</summary><table><tr><th>Code</th><th>Level</th><th>Reason</th></tr>"
+                   + "".join(f"<tr><td>{e(r['code'])}</td><td>{e(r['level'])}</td><td>{e(r['reason'])}</td></tr>" for r in bundle["triage_rules"]["rules"])
+                   + "</table></details>")
+
+    out.append("<h2>6. Audit trail</h2>")
     av = bundle["audit"]["verification"]
     out.append("<p>Audit log hash chain: " + (f"<span class='ok'>intact</span> ({av['entries']} entries in the log)" if av["ok"] else f"<span class='bad'>BROKEN at entry {av['broken_at']}</span>") + "</p>")
     out.append("<table><tr><th>#</th><th>Time (UTC)</th><th>Who</th><th>Action</th><th>Output hash</th></tr>")
@@ -224,7 +317,7 @@ def render_html(wb: Workbench, bundle: dict) -> str:
     out.append("</table>")
 
     env = bundle["environment"]
-    out.append("<h2>5. Software environment</h2><table>" + "".join(f"<tr><th>{e(k)}</th><td>{e(str(v))}</td></tr>" for k, v in env.items()) + "</table>")
+    out.append("<h2>7. Software environment</h2><table>" + "".join(f"<tr><th>{e(k)}</th><td>{e(str(v))}</td></tr>" for k, v in env.items()) + "</table>")
     out.append(f"<p class='hash'>Report bundle SHA-256 {bundle['bundle_sha256']}</p></body></html>")
     return "".join(out)
 
@@ -265,6 +358,7 @@ def render_pdf(wb: Workbench, bundle: dict) -> bytes:
 
     case = bundle["case"]
     ev_by_id = {x["id"]: x for x in bundle["evidence"]}
+    names = {x["id"]: x["filename"] for x in bundle["evidence"]}
     s = [Paragraph(f"Examination report: {e(case['name'])}", h1),
          Paragraph(f"Examiner {e(case['examiner'])} · generated {e(bundle['generated_at'])}", small), Spacer(1, 4),
          Paragraph(e(bundle["standards"]), body)]
@@ -274,7 +368,9 @@ def render_pdf(wb: Workbench, bundle: dict) -> bytes:
     for ev in bundle["evidence"]:
         chk = ev.get("integrity")
         status = "not checked" if not chk else ("hash matches, read-only" if chk["ok"] and chk["read_only"] else "<b>FAILED</b>")
-        rows.append([f"{e(ev['filename'])}<br/>{ev['size']:,} bytes", e(ev["media_type"]), f"<font name='Courier' size='6.5'>{ev['sha256']}<br/>{ev['md5']}</font>", status])
+        conv = conversion_text(ev, names)
+        conv_txt = f"<br/><font size='6.5' color='#5b6573'>{e(conv)}</font>" if conv else ""
+        rows.append([f"{e(ev['filename'])}<br/>{ev['size']:,} bytes{conv_txt}", e(ev["media_type"]), f"<font name='Courier' size='6.5'>{ev['sha256']}<br/>{ev['md5']}</font>", status])
     s.append(table(rows, [0.25 * width, 0.12 * width, 0.45 * width, 0.18 * width]))
 
     s.append(Paragraph("2. Enhancement", h2))
@@ -309,13 +405,46 @@ def render_pdf(wb: Workbench, bundle: dict) -> bytes:
         s.append(Paragraph(f"{e(a['analysis'])} v{e(a['version'])} · {e(a['reference'])}", small))
         if a["reading_guide"]:
             s.append(Paragraph(f"<i>How to read this: {e(a['reading_guide'])}</i>", small))
+        if a.get("validation"):
+            s.append(Paragraph(e(a["validation"]), small))
         for name, digest in a["maps"].items():
             img = _derived_png(wb, digest)
             if img is not None:
                 s.append(image(img, width * 0.7))
                 s.append(Paragraph(f"{e(name)} · {digest}", mono))
 
-    s.append(Paragraph("4. Audit trail", h2))
+    if bundle["camera_references"]:
+        s.append(Paragraph("Camera references (PRNU)", h3))
+        rows = [["Name", "Built from", "Size", "Fingerprint SHA-256"]]
+        for r in bundle["camera_references"]:
+            rows.append([f"{e(r['name'])}<br/>{e(r['camera'])}", ", ".join(e(names.get(x, x)) for x in r["evidence"]),
+                         f"{r['width']}x{r['height']}", f"<font name='Courier' size='6.5'>{r['fingerprint_sha256']}</font>"])
+        s.append(table(rows, [0.2 * width, 0.35 * width, 0.12 * width, 0.33 * width]))
+
+    s.append(Paragraph("4. Measurements", h2))
+    mrows = measurement_rows(bundle)
+    if not mrows:
+        s.append(Paragraph("No measurements.", small))
+    for i, m in enumerate(mrows, 1):
+        s.append(Paragraph(f"4.{i} {e(m['label'])} — {e(m['file'])}, {e(m['on'])}", h3))
+        s.append(Paragraph(f"<b>{e(m['value'])}</b>", body))
+        if m["warning"]:
+            s.append(Paragraph(f"<b>{e(m['warning'])}</b>", body))
+        for a in m["assumptions"]:
+            s.append(Paragraph(f"• {e(a)}", small))
+        s.append(Paragraph(f"{e(m['method'])} · {e(m['reference'])} · {m['hash']}", small))
+
+    s.append(Paragraph("5. Triage (Smart Report)", h2))
+    if bundle["triage"]:
+        s.append(Paragraph("A colour is where to look first, not a finding: green means no check in the battery found an inconsistency.", small))
+        rows = [["File", "Level", "Why"]]
+        for t in bundle["triage"]:
+            rows.append([e(names.get(t["evidence_id"], "?")), e(t["level"].upper()), e(t["result"]["line"])])
+        s.append(table(rows, [0.25 * width, 0.1 * width, 0.65 * width]))
+    else:
+        s.append(Paragraph("Triage not run.", small))
+
+    s.append(Paragraph("6. Audit trail", h2))
     av = bundle["audit"]["verification"]
     s.append(Paragraph("Audit log hash chain: " + ("intact" if av["ok"] else f"BROKEN at entry {av['broken_at']}"), body))
     rows = [["#", "Time (UTC)", "Who", "Action", "Output hash"]]
@@ -323,7 +452,7 @@ def render_pdf(wb: Workbench, bundle: dict) -> bytes:
         rows.append([str(en["seq"]), e(en["ts"]), e(en["actor"]) + (" (agent)" if en["actor_kind"] == "agent" else ""), e(en["action"]), f"<font name='Courier' size='6.5'>{(en['output_hash'] or '')[:16]}</font>"])
     s.append(table(rows, [0.06 * width, 0.27 * width, 0.22 * width, 0.2 * width, 0.25 * width]))
 
-    s.append(Paragraph("5. Software environment", h2))
+    s.append(Paragraph("7. Software environment", h2))
     s.append(table([["Component", "Version"]] + [[e(k), e(str(v))] for k, v in bundle["environment"].items()], [0.3 * width, 0.7 * width]))
     s.append(Spacer(1, 6))
     s.append(Paragraph(f"Report bundle SHA-256 {bundle['bundle_sha256']}", mono))

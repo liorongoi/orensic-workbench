@@ -13,14 +13,15 @@ from typing import BinaryIO
 
 import numpy as np
 
-from . import __version__, media
+from . import __version__, formats, media, prnu
+from . import measure as measure_mod
 from .analysis import ANALYSES, AnalysisContext, get_analysis
 from .audit import Actor, AuditLog
 from .config import Settings, load_settings
 from .db import Database, canonical_json, new_id, now_iso
 from .filters import REGISTRY, FilterError
 from .graph import Engine, frame_of, graph_hash, normalise, pending_proposals
-from .store import EvidenceStore
+from .store import EvidenceStore, hash_bytes
 
 
 class NotFound(LookupError):
@@ -47,6 +48,7 @@ class Workbench:
             "opencv": cv2.__version__,
             "numpy": np.__version__,
             "pillow": PIL.__version__,
+            "pywavelets": __import__("pywt").__version__,
         }
 
     # Catalogues -------------------------------------------------------------
@@ -57,7 +59,9 @@ class Workbench:
 
     @staticmethod
     def analyses() -> list[dict]:
-        return [a.schema() for a in ANALYSES.values()]
+        from .validation import load_card
+
+        return [a.schema() | {"card": load_card(a.id)} for a in ANALYSES.values()]
 
     # Cases --------------------------------------------------------------------
 
@@ -90,29 +94,71 @@ class Workbench:
     def ingest(self, case_id: str, src: BinaryIO, filename: str, actor: Actor) -> dict:
         self.get_case(case_id)
         stored = self.store.ingest(src, filename)
+        with open(stored["path"], "rb") as f:
+            identified = formats.sniff(f.read(1 << 16))
         try:
             info = media.probe(stored["path"], self.settings)
         except media.MediaError as e:
-            self.audit.append(
-                actor, "evidence.rejected", case_id=case_id, target=filename,
-                params={"reason": str(e)[:500], "sha256": stored["sha256"]},
-            )
-            raise
+            if not (identified["family"] or identified["elementary_codec"]):
+                self.audit.append(
+                    actor, "evidence.rejected", case_id=case_id, target=filename,
+                    params={"reason": str(e)[:500], "sha256": stored["sha256"]},
+                )
+                raise
+            # A recorder export FFmpeg cannot open directly: keep it so it can be converted.
+            info = {"media_type": "container", "format": identified["label"] or "unknown container",
+                    "width": 0, "height": 0, "frame_count": 0, "probe_error": str(e)[-500:]}
+        if info["media_type"] == "video" or info["media_type"] == "container":
+            info["identified"] = identified
+        return self._insert_evidence(case_id, filename, stored, info, actor)
+
+    def _insert_evidence(self, case_id: str, filename: str, stored: dict, info: dict, actor: Actor,
+                         derived_from: str | None = None, conversion: dict | None = None) -> dict:
         eid = new_id()
         self.db.execute(
             "INSERT INTO evidence (id, case_id, filename, sha256, md5, size, media_type, stored_path,"
-            " probe_json, ingested_by, ingested_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            " probe_json, ingested_by, ingested_at, derived_from, conversion_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 eid, case_id, Path(filename).name, stored["sha256"], stored["md5"], stored["size"],
                 info["media_type"], str(stored["path"]), json.dumps(info), actor.label, now_iso(),
+                derived_from, json.dumps(conversion) if conversion else None,
             ),
         )
-        self.audit.append(
-            actor, "evidence.ingest", case_id=case_id, target=eid,
-            params={"filename": Path(filename).name, "sha256": stored["sha256"], "md5": stored["md5"], "size": stored["size"]},
-            output_hash=stored["sha256"],
-        )
+        params = {"filename": Path(filename).name, "sha256": stored["sha256"], "md5": stored["md5"], "size": stored["size"],
+                  "media_type": info["media_type"]}
+        if derived_from:
+            params.update(derived_from=derived_from, conversion=conversion)
+        self.audit.append(actor, "evidence.convert" if derived_from else "evidence.ingest", case_id=case_id,
+                          target=eid, params=params, output_hash=stored["sha256"])
         return self.get_evidence(eid)
+
+    def convert_evidence(self, evidence_id: str, method: str, actor: Actor, frame_rate: float = 25.0,
+                         codec: str | None = None) -> dict:
+        """Convert a recorder export into a standard container as a new, linked evidence item.
+
+        The original is only read. The working copy records its source hash, the method and
+        the exact command, and is itself hashed and stored write-once like any evidence.
+        """
+        import tempfile
+
+        row = self._evidence_row(evidence_id)
+        src = Path(row["stored_path"])
+        if method == "carve" and not codec:
+            codec = formats.guess_codec(src.read_bytes())
+        ext = formats.output_extension(method, codec)
+        with tempfile.TemporaryDirectory(dir=self.settings.data_dir) as tmp:
+            dest = Path(tmp) / f"converted.{ext}"
+            record = formats.convert(src, dest, method, self.settings, frame_rate=frame_rate, codec=codec)
+            record["source_sha256"] = row["sha256"]
+            info = media.probe(dest, self.settings)
+            if method == "carve":
+                info["frame_rate"] = f"{frame_rate:g}"
+                info["timestamps"] = "synthetic"
+            with open(dest, "rb") as f:
+                stored = self.store.ingest(f, f"converted.{ext}")
+        name = f"{Path(row['filename']).stem} ({method}).{ext}"
+        record["output_sha256"] = stored["sha256"]
+        return self._insert_evidence(row["case_id"], name, stored, info, actor, derived_from=evidence_id, conversion=record)
 
     def ingest_path(self, case_id: str, path: Path, actor: Actor) -> dict:
         with open(path, "rb") as f:
@@ -125,20 +171,14 @@ class Workbench:
         return row
 
     def get_evidence(self, evidence_id: str) -> dict:
-        row = self._evidence_row(evidence_id)
-        row["probe"] = json.loads(row.pop("probe_json"))
-        row.pop("stored_path")
-        return row
+        return _public_evidence(self._evidence_row(evidence_id))
 
     def evidence_path(self, evidence_id: str) -> Path:
         return Path(self._evidence_row(evidence_id)["stored_path"])
 
     def list_evidence(self, case_id: str) -> list[dict]:
         rows = self.db.all("SELECT * FROM evidence WHERE case_id = ? ORDER BY ingested_at", (case_id,))
-        for r in rows:
-            r["probe"] = json.loads(r.pop("probe_json"))
-            r.pop("stored_path")
-        return rows
+        return [_public_evidence(r) for r in rows]
 
     def verify_evidence(self, evidence_id: str, actor: Actor) -> dict:
         row = self._evidence_row(evidence_id)
@@ -152,9 +192,18 @@ class Workbench:
 
     def frame_table(self, evidence_id: str) -> list[dict]:
         row = self._evidence_row(evidence_id)
+        if row["media_type"] == "container":
+            return []
         if row["media_type"] != "video":
             return [{"n": 0, "type": "I", "key": True, "time": 0.0, "size": row["size"], "interlaced": False}]
-        return media.frame_table(Path(row["stored_path"]), self.settings)
+        table = media.frame_table(Path(row["stored_path"]), self.settings)
+        conv = json.loads(row["conversion_json"]) if row.get("conversion_json") else None
+        if conv and conv.get("method") == "carve":
+            # A carved elementary stream has no timestamps of its own.
+            for f in table:
+                f["time"] = round(f["n"] / conv["frame_rate"], 6)
+                f["synthetic_time"] = True
+        return table
 
     def source_frame(self, evidence_id: str, n: int = 0) -> np.ndarray:
         data = self._load_source({"evidence_id": evidence_id, "frames": {"start": n, "end": n}})
@@ -165,6 +214,8 @@ class Workbench:
         if source.get("sha256") and source["sha256"] != row["sha256"]:
             raise FilterError("chain was built on a different file (SHA-256 mismatch)")
         path = Path(row["stored_path"])
+        if row["media_type"] == "container":
+            raise FilterError("this recorder export must be converted to a standard container first")
         if row["media_type"] == "image":
             return media.decode_image(path)
         probe = json.loads(row["probe_json"])
@@ -341,7 +392,8 @@ class Workbench:
             raise ValueError(f"{a.name} does not apply to {row['media_type']} evidence")
         p = a.validate(params)
         probe = json.loads(row["probe_json"])
-        ctx = AnalysisContext(path=Path(row["stored_path"]), probe=probe, settings=self.settings)
+        ctx = AnalysisContext(path=Path(row["stored_path"]), probe=probe, settings=self.settings,
+                              resolve=lambda kind, rid: self._resolve(row["case_id"], kind, rid))
         result = a.fn(ctx, p)
         maps = {}
         for name, img in result.maps.items():
@@ -377,6 +429,149 @@ class Workbench:
             ids = self.db.all("SELECT id FROM analyses WHERE case_id = ? ORDER BY created_at", (case_id,))
         return [self.get_analysis_result(r["id"]) for r in ids]
 
+    def _resolve(self, case_id: str, kind: str, rid: str):
+        if kind == "prnu_reference":
+            ref = self.get_camera_reference(rid)
+            if ref["case_id"] != case_id:
+                raise ValueError("that camera reference belongs to another case")
+            return ref, self.load_fingerprint(ref)
+        raise ValueError(f"unknown resource kind {kind}")
+
+    # Camera references (PRNU) ----------------------------------------------------------------
+
+    def create_camera_reference(self, case_id: str, name: str, evidence_ids: list[str], actor: Actor,
+                                camera: str = "") -> dict:
+        """Estimate a PRNU fingerprint from known images of one camera and store it with its provenance."""
+        self.get_case(case_id)
+        if not name.strip():
+            raise ValueError("give the camera reference a name")
+        if len(set(evidence_ids)) < 2:
+            raise ValueError("select at least two images from the camera (20 or more flat, bright images is best)")
+        rows = [self._evidence_row(e) for e in dict.fromkeys(evidence_ids)]
+        for r in rows:
+            if r["case_id"] != case_id or r["media_type"] != "image":
+                raise ValueError("camera references are built from still images in this case")
+        K, stats = prnu.estimate_fingerprint([media.decode_image(Path(r["stored_path"])) for r in rows])
+        digest, _ = self.store.put_derived(prnu.to_bytes(K), "npy")
+        rid = new_id()
+        ids = [r["id"] for r in rows]
+        stats["source_sha256"] = [r["sha256"] for r in rows]
+        self.db.execute(
+            "INSERT INTO camera_references (id, case_id, name, camera, evidence_json, width, height, fingerprint_sha256,"
+            " stats_json, version, actor, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (rid, case_id, name.strip(), camera.strip(), json.dumps(ids), stats["width"], stats["height"], digest,
+             json.dumps(stats), "1.0.0", actor.label, now_iso()),
+        )
+        self.audit.append(actor, "prnu.reference", case_id=case_id, target=rid,
+                          params={"name": name.strip(), "camera": camera.strip(), "evidence": ids, "images": len(ids)},
+                          output_hash=digest)
+        return self.get_camera_reference(rid)
+
+    def get_camera_reference(self, ref_id: str) -> dict:
+        row = self.db.one("SELECT * FROM camera_references WHERE id = ?", (ref_id,))
+        if not row:
+            raise NotFound(f"camera reference {ref_id} not found")
+        row["evidence"] = json.loads(row.pop("evidence_json"))
+        row["stats"] = json.loads(row.pop("stats_json"))
+        return row
+
+    def list_camera_references(self, case_id: str) -> list[dict]:
+        ids = self.db.all("SELECT id FROM camera_references WHERE case_id = ? ORDER BY created_at", (case_id,))
+        return [self.get_camera_reference(r["id"]) for r in ids]
+
+    def load_fingerprint(self, ref: dict) -> np.ndarray:
+        path = self.store.derived_path(ref["fingerprint_sha256"], "npy")
+        data = path.read_bytes()
+        if hash_bytes(data) != ref["fingerprint_sha256"]:
+            raise ValueError("stored camera fingerprint does not match its recorded hash")
+        return prnu.from_bytes(data)
+
+    # Measurements -------------------------------------------------------------------------------
+
+    def measure(self, evidence_id: str, kind: str, inputs: dict, actor: Actor, label: str = "",
+                chain_id: str | None = None, frame: int = 0) -> dict:
+        """Run a measurement on clicked points and record inputs, result and hash.
+
+        Points are in the pixel coordinates of the image they were clicked on: the
+        original frame, or the output of `chain_id` if given (e.g. after lens correction).
+        """
+        row = self._evidence_row(evidence_id)
+        if chain_id:
+            ch = self.get_chain(chain_id)
+            if ch["evidence_id"] != evidence_id:
+                raise ValueError("that chain belongs to another evidence item")
+        times = None
+        if kind == "speed":
+            if row["media_type"] != "video":
+                raise ValueError("speed needs a video")
+            times = {f["n"]: f["time"] for f in self.frame_table(evidence_id) if f["time"] is not None}
+        result = measure_mod.measure(kind, inputs, times)
+        record = {"kind": kind, "inputs": inputs, "result": result, "chain_id": chain_id,
+                  "chain_graph_hash": self.get_chain(chain_id)["graph_hash"] if chain_id else None}
+        out_hash = hashlib.sha256(canonical_json(record).encode()).hexdigest()
+        mid = new_id()
+        self.db.execute(
+            "INSERT INTO measurements (id, case_id, evidence_id, chain_id, kind, label, frame, inputs_json, result_json,"
+            " output_hash, actor, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (mid, row["case_id"], evidence_id, chain_id, kind, label.strip()[:200], int(frame), canonical_json(inputs),
+             json.dumps(result), out_hash, actor.label, now_iso()),
+        )
+        self.audit.append(actor, "measurement.run", case_id=row["case_id"], target=evidence_id,
+                          params={"measurement_id": mid, "kind": kind, "label": label, "chain_id": chain_id,
+                                  "value": result["value"], "unit": result["unit"], "interval_95": result["interval_95"]},
+                          output_hash=out_hash)
+        return self.get_measurement(mid)
+
+    def get_measurement(self, mid: str) -> dict:
+        row = self.db.one("SELECT * FROM measurements WHERE id = ?", (mid,))
+        if not row:
+            raise NotFound(f"measurement {mid} not found")
+        row["inputs"] = json.loads(row.pop("inputs_json"))
+        row["result"] = json.loads(row.pop("result_json"))
+        return row
+
+    def list_measurements(self, case_id: str) -> list[dict]:
+        ids = self.db.all("SELECT id FROM measurements WHERE case_id = ? ORDER BY created_at", (case_id,))
+        return [self.get_measurement(r["id"]) for r in ids]
+
+    # Triage (Smart Report) ----------------------------------------------------------------------
+
+    def smart_report(self, evidence_id: str, actor: Actor) -> dict:
+        """Run the triage battery on one item and record a traffic-light reading with its reasons."""
+        from .triage import BATTERY, assess
+
+        row = self._evidence_row(evidence_id)
+        runs = []
+        for aid, params in BATTERY.get(row["media_type"], []):
+            if aid.startswith("tamper.") and row["media_type"] == "image" and not formats_is_jpeg(Path(row["stored_path"])):
+                continue
+            runs.append(self.run_analysis(evidence_id, aid, params, actor))
+        result = assess(row["media_type"], runs)
+        out_hash = hashlib.sha256(canonical_json(result).encode()).hexdigest()
+        tid = new_id()
+        self.db.execute(
+            "INSERT INTO triage (id, case_id, evidence_id, level, result_json, output_hash, actor, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            (tid, row["case_id"], evidence_id, result["level"], json.dumps(result), out_hash, actor.label, now_iso()),
+        )
+        self.audit.append(actor, "triage.smart_report", case_id=row["case_id"], target=evidence_id,
+                          params={"triage_id": tid, "level": result["level"], "line": result["line"]}, output_hash=out_hash)
+        return self.latest_triage(evidence_id)
+
+    def latest_triage(self, evidence_id: str) -> dict | None:
+        row = self.db.one("SELECT * FROM triage WHERE evidence_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1", (evidence_id,))
+        if row:
+            row["result"] = json.loads(row.pop("result_json"))
+        return row
+
+    def list_triage(self, case_id: str) -> list[dict]:
+        out = []
+        for ev in self.db.all("SELECT id FROM evidence WHERE case_id = ? ORDER BY ingested_at", (case_id,)):
+            t = self.latest_triage(ev["id"])
+            if t:
+                out.append(t)
+        return out
+
     # Audit ---------------------------------------------------------------------------------
 
     def audit_entries(self, case_id: str) -> list[dict]:
@@ -385,6 +580,19 @@ class Workbench:
     def note(self, case_id: str, text: str, actor: Actor) -> dict:
         self.get_case(case_id)
         return self.audit.append(actor, "case.note", case_id=case_id, params={"text": text[:5000]})
+
+
+def formats_is_jpeg(path: Path) -> bool:
+    with open(path, "rb") as f:
+        return f.read(3) == b"\xff\xd8\xff"
+
+
+def _public_evidence(row: dict) -> dict:
+    row["probe"] = json.loads(row.pop("probe_json"))
+    conv = row.pop("conversion_json", None)
+    row["conversion"] = json.loads(conv) if conv else None
+    row.pop("stored_path")
+    return row
 
 
 def _diff_nodes(old: dict, new: dict) -> list[str]:

@@ -1,0 +1,42 @@
+{
+  "detector": "tamper.nonaligned_grid",
+  "name": "Non-aligned JPEG grid (NA-DJPG)",
+  "version": "1.0.0",
+  "validated_on": "2026-10-14",
+  "corpus": "synthetic photo-like scenes generated from fixed seeds (forensic.validation.run.scene)",
+  "seeded": true,
+  "results": {
+    "detection": {
+      "task": "Was the JPEG compressed before on a different 8x8 grid (cropped or shifted, then re-saved)?",
+      "positives": "120 images saved at Q1 in {60, 75, 90}, cropped by a random non-zero (dx, dy), saved at Q2 = 90",
+      "negatives": "240 images: saved once at {75, 90, 95}, or aligned double compressed (Q1, then 90)",
+      "threshold": 1.0,
+      "threshold_note": "score = dip z-score / 10.0 for offsets off the final grid's axes, / 30.0 on them",
+      "true_positive_rate": 0.55,
+      "false_positive_rate": 0.0,
+      "auc": 0.8744,
+      "threshold_for_1pct_fpr": 0.814,
+      "tpr_by_first_quality": {
+        "Q1=60": 0.9722,
+        "Q1=75": 0.8378,
+        "Q1=90": 0.0
+      },
+      "offset_correct_when_detected": 1.0
+    }
+  },
+  "known_failure_modes": [
+    "Weak when the first save was at high quality (see tpr_by_first_quality).",
+    "Periodic scene content (brick, fences, text) can mimic a secondary grid.",
+    "Half-block offsets (4 px) are the most prone to false alarms.",
+    "Synthetic corpus: real-camera figures must be measured with --pristine or public datasets."
+  ],
+  "software": {
+    "forensic_workbench": "0.2.0",
+    "numpy": "2.5.4",
+    "opencv": "5.0.0",
+    "pillow": "12.3.0",
+    "pywavelets": "1.8.0",
+    "python": "3.13.16"
+  },
+  "how_to_reproduce": "python -m forensic.validation run"
+}
