@@ -73,7 +73,51 @@ CREATE TABLE IF NOT EXISTS audit (
     entry_hash TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS audit_case ON audit(case_id, seq);
+CREATE TABLE IF NOT EXISTS camera_references (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    name TEXT NOT NULL,
+    camera TEXT NOT NULL DEFAULT '',
+    evidence_json TEXT NOT NULL,
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    fingerprint_sha256 TEXT NOT NULL,
+    stats_json TEXT NOT NULL,
+    version TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS measurements (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    evidence_id TEXT NOT NULL REFERENCES evidence(id),
+    chain_id TEXT,
+    kind TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    frame INTEGER NOT NULL DEFAULT 0,
+    inputs_json TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    output_hash TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS triage (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    evidence_id TEXT NOT NULL REFERENCES evidence(id),
+    level TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    output_hash TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
+
+# Columns added after the first release; applied to existing databases on open.
+MIGRATIONS = [
+    ("evidence", "derived_from", "TEXT"),
+    ("evidence", "conversion_json", "TEXT"),
+]
 
 
 def now_iso() -> str:
@@ -98,6 +142,10 @@ class Database:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(SCHEMA)
+        for table, column, kind in MIGRATIONS:
+            cols = {r[1] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+            if column not in cols:
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
 
     def execute(self, sql: str, params: tuple | dict = ()) -> sqlite3.Cursor:
         with self._lock:

@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+export interface Overlay {
+  points: number[][];
+  mode: "segments" | "points" | "rect";
+  color: string;
+  label?: string;
+}
+
 interface Props {
   src: string | null;
+  overlays?: Overlay[];
   compareSrc?: string | null;
   compareLabel?: string;
   label?: string;
@@ -40,7 +48,7 @@ function load(src: string): Promise<Loaded> {
 }
 
 /** Pixel-exact viewer: nearest-neighbour above 100 %, wheel zoom around the cursor, drag to pan. */
-export function Viewer({ src, compareSrc, compareLabel = "Original", label, busy, error, points, pickHint, onPick }: Props) {
+export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", label, busy, error, points, pickHint, onPick }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [main, setMain] = useState<Loaded | null>(null);
@@ -156,7 +164,38 @@ export function Viewer({ src, compareSrc, compareLabel = "Original", label, busy
         cx.fillText(String(i + 1), sx + 6, sy - 6);
       });
     }
-  }, [shown, view, points, showCompare]);
+    if (overlays && !showCompare) {
+      const at = ([x, y]: number[]) => [view.x + (x + 0.5) * view.zoom, view.y + (y + 0.5) * view.zoom];
+      cx.lineWidth = 2;
+      cx.font = "12px system-ui, sans-serif";
+      for (const o of overlays) {
+        if (!o.points.length) continue;
+        cx.strokeStyle = o.color;
+        cx.fillStyle = o.color;
+        if (o.mode === "segments") {
+          for (let i = 0; i + 1 < o.points.length; i += 2) {
+            const [ax, ay] = at(o.points[i]);
+            const [bx, by] = at(o.points[i + 1]);
+            cx.beginPath();
+            cx.moveTo(ax, ay);
+            cx.lineTo(bx, by);
+            cx.stroke();
+          }
+        } else if (o.mode === "rect" && o.points.length === 2) {
+          const [ax, ay] = at(o.points[0]);
+          const [bx, by] = at(o.points[1]);
+          cx.strokeRect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay));
+        }
+        o.points.forEach((p, i) => {
+          const [sx, sy] = at(p);
+          cx.beginPath();
+          cx.arc(sx, sy, 3.5, 0, Math.PI * 2);
+          cx.fill();
+          if (o.label && (o.mode === "points" || i === 0)) cx.fillText(o.label, sx + 6, sy - 6);
+        });
+      }
+    }
+  }, [shown, view, points, showCompare, overlays]);
 
   useEffect(() => {
     const onResize = () => setView((v) => ({ ...v }));

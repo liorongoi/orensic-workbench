@@ -169,3 +169,33 @@ code.block { display: block; white-space: pre-wrap; max-height: 260px; overflow:
 @media (max-width: 1100px) {
   .workspace { grid-template-columns: 220px minmax(0, 1fr) 320px; }
 }
+
+/* Phase 2: triage, planner, measurement, conversion, camera references */
+.kind.container { background: #4d3a2b; color: #ffc48a; }
+.light { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: middle; background: var(--line); }
+.light.green { background: var(--ok); }
+.light.yellow { background: var(--warn); }
+.light.red { background: var(--bad); }
+.triage-box { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-bottom: 8px; background: var(--panel-2); }
+.triage-box.red { border-color: var(--bad); }
+.triage-box.yellow { border-color: #8a7224; }
+.triage-box p { margin: 6px 0 0; }
+.card-line { margin-top: 4px; }
+.ref-select { width: 100%; margin-top: 6px; }
+.references { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin: 10px 0; }
+.ref-list { padding-left: 16px; margin: 6px 0; }
+.ref-form { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.ref-images { max-height: 180px; overflow: auto; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
+.planner { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-bottom: 10px; background: var(--panel-2); }
+.planner summary { cursor: pointer; }
+.planner > input { width: 100%; margin: 8px 0 6px; }
+.planner .row, .measure-panel .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 6px 0; }
+.plan-result ol { padding-left: 18px; margin: 6px 0; }
+.convert-panel { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.convert-panel p { margin: 0; }
+.measure-fields { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.measure-field { display: flex; align-items: center; gap: 6px; }
+.measure-field .grow { flex: 1; }
+.measure-panel table.world input { width: 80px; }
+.frame-pick { margin: 6px 0; display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.measure-result div { margin-top: 2px; }

@@ -1,18 +1,82 @@
 import { useState } from "react";
 import { api, urls } from "../api";
-import type { AnalysisRun, AnalysisSchema, Evidence } from "../types";
+import type { AnalysisRun, AnalysisSchema, CameraReference, Evidence, Triage } from "../types";
 import { ParamForm } from "./ParamForm";
+import { ReferencePanel } from "./ReferencePanel";
 
 interface Props {
+  caseId: string;
   evidence: Evidence;
+  allEvidence: Evidence[];
+  references: CameraReference[];
+  triage: Triage | null;
   catalogue: AnalysisSchema[];
   runs: AnalysisRun[];
   activeMap: string | null;
   onRun: (r: AnalysisRun) => void;
   onShowMap: (digest: string, label: string) => void;
+  onTriage: (t: Triage) => void;
+  onReference: (r: CameraReference) => void;
 }
 
-export function AuthPanel({ evidence, catalogue, runs, activeMap, onRun, onShowMap }: Props) {
+function cardLine(a: AnalysisSchema): string | null {
+  const c = a.card;
+  if (!c) return null;
+  const r = (c.results.detection ?? (c.results.identification as Record<string, unknown> | undefined)?.full_frame) as
+    | { true_positive_rate?: number; false_positive_rate?: number }
+    | undefined;
+  if (!r || r.true_positive_rate === undefined) return null;
+  return `Validated ${c.validated_on}: detects ${Math.round((r.true_positive_rate ?? 0) * 100)} %, false alarms ${((r.false_positive_rate ?? 0) * 100).toFixed(1)} % (synthetic corpus; see card)`;
+}
+
+function TriageBox({ evidence, triage, onTriage }: { evidence: Evidence; triage: Triage | null; onTriage: (t: Triage) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className={`triage-box ${triage?.level ?? ""}`}>
+      <div className="detector-head">
+        <span className={`light ${triage?.level ?? "none"}`} />
+        <b>Smart Report</b>
+        <span className="spacer" />
+        <button
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            setError(null);
+            try {
+              onTriage(await api.smartReport(evidence.id));
+            } catch (e) {
+              setError((e as Error).message);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? "Running…" : triage ? "Re-run" : "Run"}
+        </button>
+      </div>
+      {triage ? (
+        <>
+          <p className="small">{triage.result.line}</p>
+          {triage.result.reasons.length > 0 && (
+            <ul className="flags">
+              {triage.result.reasons.map((r, i) => (
+                <li key={i} className={`flag ${r.level === "red" ? "warning" : "info"}`} title={r.detail}>
+                  {r.reason} <span className="muted">({r.analysis ?? "file"})</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      ) : (
+        <p className="muted small">Runs metadata and JPEG compression checks and sorts the item green, yellow or red. A colour is where to look first, never a finding.</p>
+      )}
+      {error && <p className="error small">{error}</p>}
+    </div>
+  );
+}
+
+export function AuthPanel({ caseId, evidence, allEvidence, references, triage, catalogue, runs, activeMap, onRun, onShowMap, onTriage, onReference }: Props) {
   const applicable = catalogue.filter((a) => a.applies_to.includes(evidence.media_type));
   const [open, setOpen] = useState<string | null>(null);
   const [params, setParams] = useState<Record<string, Record<string, unknown>>>({});
@@ -36,6 +100,7 @@ export function AuthPanel({ evidence, catalogue, runs, activeMap, onRun, onShowM
 
   return (
     <div className="auth-panel">
+      <TriageBox evidence={evidence} triage={triage} onTriage={onTriage} />
       <div className="detectors">
         {applicable.map((a) => (
           <div key={a.id} className="detector">
@@ -50,11 +115,26 @@ export function AuthPanel({ evidence, catalogue, runs, activeMap, onRun, onShowM
                 {busy === a.id ? "Running…" : "Run"}
               </button>
             </div>
+            {a.id === "camera.prnu" && (
+              <select
+                className="ref-select"
+                value={String(params[a.id]?.reference_id ?? "")}
+                onChange={(e) => setParams((p) => ({ ...p, [a.id]: { ...(p[a.id] ?? {}), reference_id: e.target.value } }))}
+              >
+                <option value="">Choose a camera reference…</option>
+                {references.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name} ({r.width}×{r.height})
+                  </option>
+                ))}
+              </select>
+            )}
+            {cardLine(a) && <div className="muted small card-line" title={a.card?.known_failure_modes.join("\n")}>{cardLine(a)}</div>}
             {open === a.id && (
               <>
                 <p className="small">{a.description}</p>
                 <ParamForm
-                  params={a.params}
+                  params={a.params.filter((p) => p.name !== "reference_id")}
                   values={params[a.id] ?? {}}
                   onChange={(n, v) => setParams((p) => ({ ...p, [a.id]: { ...(p[a.id] ?? {}), [n]: v } }))}
                 />
@@ -64,6 +144,7 @@ export function AuthPanel({ evidence, catalogue, runs, activeMap, onRun, onShowM
         ))}
       </div>
       {error && <p className="error">{error}</p>}
+      {evidence.media_type === "image" && <ReferencePanel caseId={caseId} evidence={allEvidence} references={references} onCreated={onReference} />}
 
       <h3>Results</h3>
       {mine.length === 0 && <p className="muted small">No analyses run on this item yet.</p>}

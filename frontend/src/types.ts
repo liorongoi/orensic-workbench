@@ -36,6 +36,16 @@ export interface AnalysisSchema {
   applies_to: string[];
   reading_guide: string;
   params: ParamSchema[];
+  card?: DetectorCard | null;
+}
+
+export interface DetectorCard {
+  detector: string;
+  version: string;
+  validated_on: string;
+  corpus: string;
+  results: Record<string, Record<string, unknown>>;
+  known_failure_modes: string[];
 }
 
 export interface Case {
@@ -47,8 +57,10 @@ export interface Case {
   evidence_count?: number;
 }
 
+export type MediaType = "image" | "video" | "container";
+
 export interface Probe {
-  media_type: "image" | "video";
+  media_type: MediaType;
   format?: string;
   width: number;
   height: number;
@@ -57,6 +69,19 @@ export interface Probe {
   frame_rate?: string;
   duration?: number;
   field_order?: string;
+  timestamps?: string;
+  identified?: { family: string | null; label: string | null; elementary_codec: string | null };
+}
+
+export interface Conversion {
+  method: string;
+  description: string;
+  source_sha256: string;
+  output_sha256: string;
+  command?: string;
+  codec?: string;
+  frame_rate?: number;
+  carve?: { nal_units_kept: number; nal_units_dropped: number; nal_units_trimmed: number };
 }
 
 export interface Evidence {
@@ -66,10 +91,12 @@ export interface Evidence {
   sha256: string;
   md5: string;
   size: number;
-  media_type: "image" | "video";
+  media_type: MediaType;
   probe: Probe;
   ingested_by: string;
   ingested_at: string;
+  derived_from?: string | null;
+  conversion?: Conversion | null;
 }
 
 export interface ChainNode {
@@ -104,6 +131,7 @@ export interface Chain {
 export interface Flag {
   level: "info" | "warning";
   text: string;
+  code?: string;
 }
 
 export interface AnalysisRun {
@@ -137,6 +165,81 @@ export interface FrameInfo {
   key: boolean;
   time: number | null;
   size: number | null;
+  synthetic_time?: boolean;
+}
+
+export interface CameraReference {
+  id: string;
+  case_id: string;
+  name: string;
+  camera: string;
+  evidence: string[];
+  width: number;
+  height: number;
+  fingerprint_sha256: string;
+  stats: { images: number };
+  actor: string;
+  created_at: string;
+}
+
+export interface MeasureMethod {
+  name: string;
+  version: string;
+  reference: string;
+  description: string;
+  assumptions: string[];
+}
+
+export interface Measurement {
+  id: string;
+  evidence_id: string;
+  chain_id: string | null;
+  kind: string;
+  label: string;
+  frame: number;
+  inputs: Record<string, unknown>;
+  result: {
+    value: number;
+    unit: string;
+    interval_95: [number, number];
+    value_kmh?: number;
+    interval_95_kmh?: [number, number];
+    time_s?: number;
+    distance_m?: number;
+    name: string;
+    assumptions: string[];
+    warning?: string;
+    plane_fit_residual_m?: number;
+  };
+  output_hash: string;
+  actor: string;
+  created_at: string;
+}
+
+export type TriageLevel = "green" | "yellow" | "red";
+
+export interface Triage {
+  id: string;
+  evidence_id: string;
+  level: TriageLevel;
+  result: { level: TriageLevel; line: string; reasons: { code: string; level: TriageLevel; reason: string; detail: string; analysis: string | null }[] };
+  actor: string;
+  created_at: string;
+}
+
+export interface Catalogue {
+  conversion_methods: Record<string, string>;
+  measurements: Record<string, MeasureMethod>;
+  planner_workflows: Record<string, string>;
+  triage_rules: { version: string; rules: { code: string; level: TriageLevel; reason: string }[] };
+}
+
+export interface PlanResult {
+  workflow: string;
+  workflow_description: string;
+  candidates: { label: string; score: number | null; error?: string; chain_id?: string }[];
+  proposed_chains: string[];
+  score_note: string;
 }
 
 export interface StepInfo {

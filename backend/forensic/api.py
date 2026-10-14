@@ -13,7 +13,9 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import __version__, media
+from . import __version__, formats, media
+from . import measure as measure_mod
+from .agents import WORKFLOWS, plan_enhancement, triage_case
 from .audit import Actor
 from .filters import FilterError
 from .report import build_bundle, render_html, render_pdf
@@ -84,6 +86,45 @@ class NoteIn(BaseModel):
     text: str
 
 
+class ConvertIn(BaseModel):
+    method: str
+    frame_rate: float = 25.0
+    codec: str | None = None
+
+
+class ReferenceIn(BaseModel):
+    name: str
+    camera: str = ""
+    evidence_ids: list[str]
+
+
+class MeasureIn(BaseModel):
+    kind: str
+    inputs: dict[str, Any]
+    label: str = ""
+    chain_id: str | None = None
+    frame: int = 0
+
+
+class TriageIn(BaseModel):
+    evidence_ids: list[str] | None = None
+
+
+class PlanIn(BaseModel):
+    evidence_id: str
+    goal: str
+    roi: list[int] | None = None
+    frames: dict[str, int] | None = None
+    workflow: str | None = None
+
+
+class BlurIn(BaseModel):
+    graph: dict[str, Any] | None = None
+    upto: str | None = None
+    frame: int = 0
+    roi: list[int] | None = None
+
+
 # Catalogue and health --------------------------------------------------------------
 
 
@@ -100,6 +141,20 @@ def filters():
 @app.get("/api/analyses")
 def analyses():
     return wb().analyses()
+
+
+@app.get("/api/catalogue")
+def catalogue():
+    """Everything else the UI offers: conversion methods, measurement methods, planner workflows, triage rules."""
+    from .triage import RULES_VERSION, rules_table
+
+    return {
+        "conversion_methods": formats.METHODS,
+        "container_families": [{"family": f, "label": l, "notes": n} for f, l, _, n in formats.SIGNATURES],
+        "measurements": measure_mod.METHODS,
+        "planner_workflows": WORKFLOWS,
+        "triage_rules": {"version": RULES_VERSION, "rules": rules_table()},
+    }
 
 
 # Cases ----------------------------------------------------------------------------------
@@ -123,7 +178,26 @@ def get_case(case_id: str):
         "evidence": w.list_evidence(case_id),
         "chains": w.list_chains(case_id),
         "analyses": w.list_analysis_results(case_id),
+        "camera_references": w.list_camera_references(case_id),
+        "measurements": w.list_measurements(case_id),
+        "triage": w.list_triage(case_id),
     }
+
+
+@app.post("/api/cases/{case_id}/triage")
+def triage(case_id: str, body: TriageIn, x_examiner: str | None = Header(None)):
+    return triage_case(wb(), case_id, body.evidence_ids, actor(x_examiner))
+
+
+@app.post("/api/cases/{case_id}/plan")
+def plan(case_id: str, body: PlanIn, x_examiner: str | None = Header(None)):
+    actor(x_examiner)  # the examiner asks; the planner agent proposes
+    return plan_enhancement(wb(), case_id, body.evidence_id, body.goal, roi=body.roi, frames=body.frames, workflow=body.workflow)
+
+
+@app.post("/api/cases/{case_id}/camera-references")
+def create_reference(case_id: str, body: ReferenceIn, x_examiner: str | None = Header(None)):
+    return wb().create_camera_reference(case_id, body.name, body.evidence_ids, actor(x_examiner), camera=body.camera)
 
 
 @app.post("/api/cases/{case_id}/notes")
@@ -177,6 +251,39 @@ def original(evidence_id: str):
 def preview(evidence_id: str, body: PreviewIn):
     img, info = wb().preview(body.graph, evidence_id, upto=body.upto, frame=body.frame)
     return Response(_fast_png(img), media_type="image/png", headers={"X-Preview-Info": json.dumps(info)})
+
+
+@app.post("/api/evidence/{evidence_id}/convert")
+def convert(evidence_id: str, body: ConvertIn, x_examiner: str | None = Header(None)):
+    return wb().convert_evidence(evidence_id, body.method, actor(x_examiner), frame_rate=body.frame_rate, codec=body.codec)
+
+
+@app.post("/api/evidence/{evidence_id}/measurements")
+def measure(evidence_id: str, body: MeasureIn, x_examiner: str | None = Header(None)):
+    return wb().measure(evidence_id, body.kind, body.inputs, actor(x_examiner), label=body.label,
+                        chain_id=body.chain_id, frame=body.frame)
+
+
+@app.post("/api/evidence/{evidence_id}/smart-report")
+def smart_report(evidence_id: str, x_examiner: str | None = Header(None)):
+    return wb().smart_report(evidence_id, actor(x_examiner))
+
+
+@app.post("/api/evidence/{evidence_id}/estimate-blur")
+def estimate_blur(evidence_id: str, body: BlurIn):
+    """Suggest motion-blur length and angle for the deblur filters (not stored, not evidential)."""
+    from .filters.deblur import estimate_motion_blur
+    from .filters.base import luminance
+
+    w = wb()
+    graph = body.graph or {"source": {"frames": None}, "nodes": []}
+    img, _ = w.preview(graph, evidence_id, upto=body.upto, frame=body.frame)
+    if body.roi:
+        x, y, rw, rh = body.roi
+        img = img[max(0, y) : y + rh, max(0, x) : x + rw]
+    if min(img.shape[:2]) < 32:
+        raise ValueError("region is too small to estimate blur (at least 32 pixels each side)")
+    return estimate_motion_blur(luminance(img))
 
 
 @app.post("/api/evidence/{evidence_id}/analyses")

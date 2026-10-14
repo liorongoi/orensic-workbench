@@ -1,4 +1,9 @@
 import type {
+  CameraReference,
+  Catalogue,
+  Measurement,
+  PlanResult,
+  Triage,
   AnalysisRun,
   AnalysisSchema,
   AuditEntry,
@@ -58,8 +63,34 @@ export const api = {
   cases: () => req<Case[]>("GET", "/api/cases"),
   createCase: (name: string, examinerName: string) =>
     req<Case>("POST", "/api/cases", { name, examiner: examinerName }),
+  catalogue: () => req<Catalogue>("GET", "/api/catalogue"),
   caseDetail: (id: string) =>
-    req<{ case: Case; evidence: Evidence[]; chains: Chain[]; analyses: AnalysisRun[] }>("GET", `/api/cases/${id}`),
+    req<{
+      case: Case;
+      evidence: Evidence[];
+      chains: Chain[];
+      analyses: AnalysisRun[];
+      camera_references: CameraReference[];
+      measurements: Measurement[];
+      triage: Triage[];
+    }>("GET", `/api/cases/${id}`),
+  convert: (evidenceId: string, method: string, frameRate: number) =>
+    req<Evidence>("POST", `/api/evidence/${evidenceId}/convert`, { method, frame_rate: frameRate }),
+  triage: (caseId: string, evidenceIds?: string[]) =>
+    req<{ counts: Record<string, number>; items: { evidence_id: string; level: string; line: string }[] }>(
+      "POST",
+      `/api/cases/${caseId}/triage`,
+      { evidence_ids: evidenceIds ?? null },
+    ),
+  smartReport: (evidenceId: string) => req<Triage>("POST", `/api/evidence/${evidenceId}/smart-report`),
+  createReference: (caseId: string, name: string, camera: string, evidenceIds: string[]) =>
+    req<CameraReference>("POST", `/api/cases/${caseId}/camera-references`, { name, camera, evidence_ids: evidenceIds }),
+  measure: (evidenceId: string, body: { kind: string; inputs: Record<string, unknown>; label: string; chain_id: string | null; frame: number }) =>
+    req<Measurement>("POST", `/api/evidence/${evidenceId}/measurements`, body),
+  plan: (caseId: string, body: { evidence_id: string; goal: string; roi: number[] | null; frames: { start: number; end: number } | null; workflow?: string | null }) =>
+    req<PlanResult>("POST", `/api/cases/${caseId}/plan`, body),
+  estimateBlur: (evidenceId: string, body: { graph: Graph | null; frame: number; roi: number[] | null }) =>
+    req<{ length: number; angle: number; strength: number; note: string }>("POST", `/api/evidence/${evidenceId}/estimate-blur`, body),
   upload: (caseId: string, file: File) => {
     const fd = new FormData();
     fd.append("file", file);
