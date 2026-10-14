@@ -191,6 +191,7 @@ def _flags(results, prefix="") -> list[dict]:
     "(blending boundary); T. Bianchi and A. Piva, IEEE TIFS 7(3), 2012 (double JPEG); J. Immerkaer, 'Fast Noise "
     "Variance Estimation', CVIU 64(2), 1996; W. Wu, H. Peng and S. Yu, 'YuNet', Machine Intelligence Research 20, 2023.",
     applies_to=("image", "video"),
+    ai=True,
     reading_guide="A large z (4 or more) means the face differs from its surroundings more than almost any other "
     "region of the image does from its own: consistent with a face rendered or edited separately, but also with "
     "make-up, motion blur, focus on the face or local denoising by a phone. A small z is not evidence of "

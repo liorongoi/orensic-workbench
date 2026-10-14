@@ -192,12 +192,28 @@ def get_case(case_id: str):
         "camera_references": w.list_camera_references(case_id),
         "measurements": w.list_measurements(case_id),
         "triage": w.list_triage(case_id),
+        "review": w.latest_review(case_id),
     }
 
 
 @app.post("/api/cases/{case_id}/triage")
 def triage(case_id: str, body: TriageIn, x_examiner: str | None = Header(None)):
     return triage_case(wb(), case_id, body.evidence_ids, actor(x_examiner))
+
+
+class ReviewIn(BaseModel):
+    rerun_analyses: bool = True
+
+
+@app.post("/api/cases/{case_id}/review")
+def review(case_id: str, body: ReviewIn, x_examiner: str | None = Header(None)):
+    actor(x_examiner)  # the examiner asks; the reviewer agent re-checks the case
+    return wb().review_case(case_id, rerun_analyses=body.rerun_analyses)
+
+
+@app.get("/api/cases/{case_id}/review")
+def latest_review(case_id: str):
+    return wb().latest_review(case_id)
 
 
 @app.post("/api/cases/{case_id}/plan")

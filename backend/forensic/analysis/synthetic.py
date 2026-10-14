@@ -442,6 +442,7 @@ def _activate(raw: np.ndarray, spec: dict) -> float:
     "generators change: check the training date and the validation on the model card, and treat images from "
     "generators released after it with caution. Compression, resizing and screenshots move scores.",
     params=[Param("model", "text", "", "Detector model id", help="From python -m forensic.models list (kind detector)")],
+    ai=True,
     unavailable=lambda: None if _detectors() else "No learned detector installed (see docs/ai-models.md).",
 )
 def learned(ctx: AnalysisContext, p: dict) -> AnalysisResult:
