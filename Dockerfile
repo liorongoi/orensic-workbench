@@ -23,8 +23,9 @@ ENV FORENSIC_DATA_DIR=/data \
     FORENSIC_IMPORT_DIR=/import \
     FORENSIC_FRONTEND_DIST=/app/frontend/dist \
     FORENSIC_DETERMINISTIC=1
-USER forensic
+COPY deploy/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 VOLUME ["/data"]
 EXPOSE 8000
 HEALTHCHECK CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/cases')" || exit 1
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["uvicorn", "forensic.api:app", "--host", "0.0.0.0", "--port", "8000"]
