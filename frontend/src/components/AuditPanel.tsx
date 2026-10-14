@@ -1,15 +1,37 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { AuditEntry } from "../types";
+import type { AuditEntry, Review } from "../types";
 
-export function AuditPanel({ caseId, refreshKey }: { caseId: string; refreshKey: number }) {
+export function AuditPanel({ caseId, refreshKey, onChanged }: { caseId: string; refreshKey: number; onChanged?: () => void }) {
   const [data, setData] = useState<{ verification: { ok: boolean; entries: number; broken_at: number | null }; entries: AuditEntry[] } | null>(null);
   const [note, setNote] = useState("");
   const [tick, setTick] = useState(0);
+  const [review, setReview] = useState<Review | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [showPassed, setShowPassed] = useState(false);
 
   useEffect(() => {
     api.audit(caseId).then(setData).catch(() => setData(null));
   }, [caseId, refreshKey, tick]);
+
+  useEffect(() => {
+    api.caseDetail(caseId).then((d) => setReview(d.review)).catch(() => setReview(null));
+  }, [caseId]);
+
+  const runReview = async () => {
+    setReviewing(true);
+    setReviewError(null);
+    try {
+      setReview(await api.review(caseId));
+      setTick((t) => t + 1);
+      onChanged?.();
+    } catch (e) {
+      setReviewError((e as Error).message);
+    } finally {
+      setReviewing(false);
+    }
+  };
 
   if (!data) return <p className="muted">Loading…</p>;
   return (
@@ -19,6 +41,45 @@ export function AuditPanel({ caseId, refreshKey }: { caseId: string; refreshKey:
           ? `Hash chain intact (${data.verification.entries} entries in the log).`
           : `Hash chain BROKEN at entry ${data.verification.broken_at}. The log has been altered.`}
       </p>
+      <div className={`review-box ${review?.level ?? ""}`}>
+        <div className="row">
+          <b>Independent review</b>
+          <span className="spacer" />
+          <button className="primary" onClick={runReview} disabled={reviewing}>
+            {reviewing ? "Reviewing…" : review ? "Review again" : "Run reviewer"}
+          </button>
+        </div>
+        <p className="muted small">
+          The reviewer agent re-hashes the originals, checks this log, re-runs every rendered chain twice from the originals,
+          re-runs analyses and measurements and compares hashes, checks model weights, and flags generative, unjustified or
+          unaccepted steps. It changes nothing but its own logged review.
+        </p>
+        {reviewError && <p className="status bad">{reviewError}</p>}
+        {review && (
+          <>
+            <p className="small">
+              <b className={`lvl ${review.level}`}>{review.level.toUpperCase()}</b> · {review.result.line}{" "}
+              <span className="muted">
+                ({review.result.counts.pass} passed, {review.result.counts.warn} to explain, {review.result.counts.fail} failed ·{" "}
+                {new Date(review.created_at).toLocaleString()})
+              </span>
+            </p>
+            <ul className="review-items">
+              {review.result.items
+                .filter((i) => showPassed || i.level !== "pass")
+                .map((i, k) => (
+                  <li key={k} className="small">
+                    <span className={`lvl ${i.level}`}>{i.level}</span>
+                    <span>{i.text}</span>
+                  </li>
+                ))}
+            </ul>
+            <button className="link small" onClick={() => setShowPassed((v) => !v)}>
+              {showPassed ? "Hide passed checks" : `Show ${review.result.counts.pass} passed checks`}
+            </button>
+          </>
+        )}
+      </div>
       <form
         className="note-form"
         onSubmit={async (e) => {
@@ -71,6 +132,12 @@ function describe(e: AuditEntry): string {
       return p.ok ? " · hash matches" : " · HASH MISMATCH";
     case "approval.requested":
       return ` · ${p.reason}`;
+    case "review.run":
+      return ` · ${String(p.level).toUpperCase()}: ${p.line}`;
+    case "chain.generative_justification":
+      return ` · ${p.node}: ${p.justification}`;
+    case "chain.export":
+      return p.watermarked ? " · watermarked (illustrative only)" : "";
     default:
       return "";
   }

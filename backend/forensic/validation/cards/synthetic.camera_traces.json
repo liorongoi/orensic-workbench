@@ -1,0 +1,58 @@
+{
+  "detector": "synthetic.camera_traces",
+  "name": "Camera-pipeline traces (CFA and resampling)",
+  "version": "1.0.0",
+  "validated_on": "2026-10-14",
+  "corpus": "synthetic photo-like scenes generated from fixed seeds (forensic.validation.run.scene)",
+  "seeded": true,
+  "results": {
+    "detection": {
+      "task": "Does the image carry colour-filter-array demosaicing traces at native resolution?",
+      "positives": "80 scenes re-shot through an RGGB Bayer mosaic and demosaiced (bilinear), stored lossless",
+      "negatives": "the same 80 scenes never mosaiced (as a renderer or generator outputs them)",
+      "threshold": 0.15,
+      "true_positive_rate": 1.0,
+      "false_positive_rate": 0.0,
+      "auc": 1.0,
+      "tpr_by_condition": {
+        "lossless": 1.0,
+        "jpeg 98": 1.0,
+        "jpeg 95": 0.7875,
+        "jpeg 90": 0.2125
+      },
+      "present_after_downscaling_to_75pct": 0.0
+    },
+    "resampling": {
+      "task": "Was the image scaled after capture (periodic interpolation correlations)?",
+      "positives": "80 scenes scaled by 1.5 (bilinear), lossless; other factors in tpr_by_condition",
+      "negatives": "the same 80 scenes unscaled; also each saved once as JPEG 90 (grid peaks excluded)",
+      "threshold": 9.0,
+      "true_positive_rate": 1.0,
+      "false_positive_rate": 0.0,
+      "auc": 1.0,
+      "tpr_by_condition": {
+        "x1.1": 1.0,
+        "x1.25": 1.0,
+        "x1.5": 1.0,
+        "x2.0": 0.0,
+        "x0.8": 0.9875,
+        "x1.5 then jpeg 95": 0.0
+      },
+      "false_positive_rate_jpeg_90": 0.0
+    }
+  },
+  "known_failure_modes": [
+    "CFA traces do not survive JPEG at quality 95 or below, nor resizing (see tpr_by_condition): their absence says little about most delivered images.",
+    "Simulated with bilinear demosaicing; camera pipelines use adaptive demosaicing, denoising and sharpening that weaken the pattern, and a generator could imitate it. Measure on camera originals before relying on absence.",
+    "Resampling detection fails for down-scaling and after JPEG compression at common qualities."
+  ],
+  "software": {
+    "forensic_workbench": "0.3.0",
+    "numpy": "2.5.3",
+    "opencv": "5.0.0",
+    "pillow": "12.3.0",
+    "pywavelets": "1.8.0",
+    "python": "3.13.16"
+  },
+  "how_to_reproduce": "python -m forensic.validation run"
+}

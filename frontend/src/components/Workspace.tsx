@@ -325,6 +325,10 @@ export function Workspace({ caseId, filters, analyses }: Props) {
       const pts = mpoints[f.key] ?? [];
       overlays.push({ points: pts, color: f.color, mode: f.kind === "lines" ? "segments" : "points", label: f.kind === "lines" ? undefined : f.label });
     }
+  } else if (tab === "authenticate") {
+    for (const [k, pts] of Object.entries(mpoints)) {
+      if (k.startsWith("auth:") && pts.length) overlays.push({ points: pts, color: "#ffcf3f", mode: "rect", label: k.split(":")[2] });
+    }
   } else if (tab === "enhance" && mpoints.plan_roi?.length) {
     overlays.push({ points: mpoints.plan_roi, color: "#3fe08a", mode: "rect", label: "planner region" });
   }
@@ -438,6 +442,7 @@ export function Workspace({ caseId, filters, analyses }: Props) {
           points={picking ? pickPoints : undefined}
           pickHint={picking ? `Click on the image to place points${picking.count ? ` (${pickPoints?.length ?? 0}/${picking.count})` : ""}. Esc to stop.` : extHint}
           onPick={picking || extPick ? onPick : undefined}
+          illustrative={view.kind === "chain" && !!draft && draft.nodes.some((n) => n.enabled && filters.find((f) => f.id === n.filter)?.generative)}
         />
         {view.kind === "map" && (
           <div className="map-bar">
@@ -545,6 +550,7 @@ export function Workspace({ caseId, filters, analyses }: Props) {
                     onRender={render}
                     onVerify={verify}
                     onAccept={accept}
+                    frame={Math.max(0, frame - (draft.source.frames?.start ?? frame))}
                   />
                 </>
               ) : (
@@ -578,6 +584,10 @@ export function Workspace({ caseId, filters, analyses }: Props) {
                 if (first) setView({ kind: "map", digest: first[1], label: first[0] });
               }}
               onShowMap={(digest, label) => setView({ kind: "map", digest, label })}
+              points={mpoints}
+              pickField={extPick?.field ?? null}
+              onStartPick={startExtPick}
+              onPoints={(p) => setMpoints(p)}
             />
           )}
           {tab === "measure" && ev && ev.media_type !== "container" && catalogue && (
@@ -606,7 +616,7 @@ export function Workspace({ caseId, filters, analyses }: Props) {
               }}
             />
           )}
-          {tab === "audit" && <AuditPanel caseId={caseId} refreshKey={auditKey} />}
+          {tab === "audit" && <AuditPanel caseId={caseId} refreshKey={auditKey} onChanged={() => setAuditKey((k) => k + 1)} />}
           {!ev && tab !== "audit" && <p className="muted">Add evidence to begin.</p>}
           {tab !== "enhance" && status && <p className={`status ${status.kind}`}>{status.text}</p>}
         </div>

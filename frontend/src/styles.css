@@ -199,3 +199,33 @@ code.block { display: block; white-space: pre-wrap; max-height: 260px; overflow:
 .measure-panel table.world input { width: 80px; }
 .frame-pick { margin: 6px 0; display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 .measure-result div { margin-top: 2px; }
+
+/* Phase 3: AI-assisted and generative steps, review */
+.badge.ai { border-color: #9b87f5; color: #b9a8ff; }
+.badge.bad { border-color: var(--bad); color: var(--bad); }
+.badge.ok { border-color: var(--ok); color: var(--ok); }
+.button.disabled { opacity: 0.45; pointer-events: none; }
+.generative-banner { border: 1px solid var(--bad); color: #ffb3b3; background: #2a1416; border-radius: 6px; padding: 8px; margin-bottom: 8px; }
+.param.justification textarea {
+  width: 100%; background: #0c0f13; border: 1px solid var(--bad); border-radius: 6px; padding: 4px 8px; color: var(--text); font: inherit; resize: vertical;
+}
+.illustrative-overlay {
+  position: absolute; left: 0; right: 0; top: 0; padding: 4px 8px; text-align: center; font-weight: 700; letter-spacing: 0.3px;
+  background: rgba(153, 0, 0, 0.82); color: #fff; pointer-events: none; z-index: 3;
+}
+.review-box { border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin: 8px 0; }
+.review-box.pass { border-color: var(--ok); }
+.review-box.warn { border-color: var(--warn); }
+.review-box.fail { border-color: var(--bad); }
+.review-items { list-style: none; padding: 0; margin: 6px 0 0; }
+.review-items li { padding: 3px 0; border-top: 1px solid var(--line); display: flex; gap: 8px; }
+.review-items .lvl { width: 38px; flex: none; font-weight: 600; }
+.review-items .lvl.pass { color: var(--ok); }
+.review-items .lvl.warn { color: var(--warn); }
+.review-items .lvl.fail { color: var(--bad); }
+.analysis-unavailable { opacity: 0.6; }
+.control-table { width: 100%; border-collapse: collapse; }
+.control-table td, .control-table th { padding: 2px 4px; border-bottom: 1px solid var(--line); }
+.control-table input { width: 64px; }
+.review-box .row { display: flex; gap: 6px; align-items: center; }
+.lvl.pass { color: var(--ok); } .lvl.warn { color: var(--warn); } .lvl.fail { color: var(--bad); }

@@ -31,8 +31,8 @@
     "Synthetic corpus: real-camera figures must be measured with --pristine or public datasets."
   ],
   "software": {
-    "forensic_workbench": "0.2.0",
-    "numpy": "2.5.4",
+    "forensic_workbench": "0.3.0",
+    "numpy": "2.5.3",
     "opencv": "5.0.0",
     "pillow": "12.3.0",
     "pywavelets": "1.8.0",

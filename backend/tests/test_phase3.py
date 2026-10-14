@@ -389,3 +389,28 @@ def test_phase3_api(tmp_path, jpeg_path):
     assert c.get(f"/api/cases/{case['id']}").json()["review"]["id"] == r["id"]
     api._wb.db.close()
     api._wb = None
+
+
+def test_lab_detector_installs_and_runs(wb, case, jpeg_path, tmp_path, monkeypatch):
+    onnx = pytest.importorskip("onnx")
+    from onnx import TensorProto, helper
+
+    monkeypatch.setenv("FORENSIC_MODELS_DIR", str(tmp_path / "lab"))
+    # A stand-in "detector": mean brightness minus 0.2, through a sigmoid in the card.
+    g = helper.make_graph(
+        [helper.make_node("ReduceMean", ["x"], ["m"], keepdims=0), helper.make_node("Sub", ["m", "c"], ["y"])],
+        "toy", [helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 3, 64, 64])],
+        [helper.make_tensor_value_info("y", TensorProto.FLOAT, [])],
+        [helper.make_tensor("c", TensorProto.FLOAT, [], [0.2])])
+    path = tmp_path / "toy.onnx"
+    onnx.save(helper.make_model(g, opset_imports=[helper.make_opsetid("", 13)], ir_version=8), path)
+    card = {"id": "lab.toy", "kind": "detector", "task": "test", "architecture": "mean", "reference": "none",
+            "source": "test", "licence": "test", "training_data": "none", "trained_on": "2026-01-01", "version": "0.1",
+            "input": {"size": 64, "mode": "tiles", "scale": 1.0}, "output": {"activation": "sigmoid"}, "threshold": 0.5}
+    (tmp_path / "card.json").write_text(json.dumps(card))
+    models.install(path, tmp_path / "card.json")
+    a = next(a for a in wb.analyses() if a["id"] == "synthetic.learned")
+    assert a["unavailable"] is None
+    r = wb.run_analysis(ingest(wb, case, jpeg_path)["id"], "synthetic.learned", {}, EXAMINER)["result"]
+    assert r["findings"]["model"]["id"] == "lab.toy" and r["findings"]["crops"] > 1 and "tile_scores" in r["maps"]
+    assert r["findings"]["trained_on"] == "2026-01-01"

@@ -14,6 +14,9 @@ import type {
   FrameInfo,
   Graph,
   StepInfo,
+  ChainPolicy,
+  ModelInfo,
+  Review,
 } from "./types";
 
 let examiner = "";
@@ -73,7 +76,11 @@ export const api = {
       camera_references: CameraReference[];
       measurements: Measurement[];
       triage: Triage[];
+      review: Review | null;
     }>("GET", `/api/cases/${id}`),
+  models: () => req<ModelInfo[]>("GET", "/api/models"),
+  review: (caseId: string, rerunAnalyses = true) =>
+    req<Review>("POST", `/api/cases/${caseId}/review`, { rerun_analyses: rerunAnalyses }),
   convert: (evidenceId: string, method: string, frameRate: number) =>
     req<Evidence>("POST", `/api/evidence/${evidenceId}/convert`, { method, frame_rate: frameRate }),
   triage: (caseId: string, evidenceIds?: string[]) =>
@@ -104,7 +111,15 @@ export const api = {
   updateChain: (id: string, graph: Graph, name?: string) => req<Chain>("PUT", `/api/chains/${id}`, { graph, name }),
   acceptProposals: (id: string) => req<Chain>("POST", `/api/chains/${id}/accept`, {}),
   render: (id: string) =>
-    req<{ output_hash: string; graph_hash: string; outputs: { frame: number; png: string }[]; steps: StepInfo[]; pending_proposals: string[] }>(
+    req<{
+      output_hash: string;
+      graph_hash: string;
+      outputs: { frame: number; png: string; watermarked?: boolean }[];
+      steps: StepInfo[];
+      pending_proposals: string[];
+      policy: ChainPolicy;
+      models: { node: string; model: string; sha256: string }[];
+    }>(
       "POST",
       `/api/chains/${id}/render`,
     ),
@@ -149,6 +164,8 @@ export const urls = {
   frame: (evidenceId: string, n: number) => `/api/evidence/${evidenceId}/frame/${n}.png`,
   derived: (digest: string) => `/api/derived/${digest}.png`,
   original: (evidenceId: string) => `/api/evidence/${evidenceId}/original`,
+  exportPng: (chainId: string, frame: number) =>
+    `/api/chains/${chainId}/export.png?frame=${frame}&examiner=${encodeURIComponent(examiner)}`,
   report: (caseId: string, kind: "html" | "pdf" | "json") =>
     `/api/cases/${caseId}/report.${kind}?examiner=${encodeURIComponent(examiner)}`,
 };

@@ -18,6 +18,7 @@ interface Props {
   points?: number[][];
   pickHint?: string | null;
   onPick?: (x: number, y: number) => void;
+  illustrative?: boolean;
 }
 
 interface Loaded {
@@ -48,7 +49,7 @@ function load(src: string): Promise<Loaded> {
 }
 
 /** Pixel-exact viewer: nearest-neighbour above 100 %, wheel zoom around the cursor, drag to pan. */
-export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", label, busy, error, points, pickHint, onPick }: Props) {
+export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", label, busy, error, points, pickHint, onPick, illustrative }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [main, setMain] = useState<Loaded | null>(null);
@@ -181,10 +182,12 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
             cx.lineTo(bx, by);
             cx.stroke();
           }
-        } else if (o.mode === "rect" && o.points.length === 2) {
-          const [ax, ay] = at(o.points[0]);
-          const [bx, by] = at(o.points[1]);
-          cx.strokeRect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay));
+        } else if (o.mode === "rect") {
+          for (let i = 0; i + 1 < o.points.length; i += 2) {
+            const [ax, ay] = at(o.points[i]);
+            const [bx, by] = at(o.points[i + 1]);
+            cx.strokeRect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay));
+          }
         }
         o.points.forEach((p, i) => {
           const [sx, sy] = at(p);
@@ -313,6 +316,9 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
         }}
       >
         <canvas ref={canvas} />
+        {illustrative && !showCompare && src && (
+          <div className="illustrative-overlay">ILLUSTRATIVE ONLY · AI-generated detail · not for measurement</div>
+        )}
         {!src && !busy && !error && <div className="viewer-empty">Select evidence to view it</div>}
         {busy && (src ? <div className="viewer-updating">Updating preview…</div> : <div className="viewer-busy">Processing…</div>)}
         {error && <div className="viewer-error">{error}</div>}

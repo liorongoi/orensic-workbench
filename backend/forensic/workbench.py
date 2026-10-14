@@ -50,6 +50,7 @@ class Workbench:
             "pillow": PIL.__version__,
             "pywavelets": __import__("pywt").__version__,
             "onnxruntime": __import__("onnxruntime").__version__,
+            "c2pa": _c2pa_version(),
             "models": ", ".join(f"{m['id']} {m['sha256'][:12]}" for m in models.manifest()),
             "network": "none used at run time (all models bundled or installed locally)",
         }
@@ -732,3 +733,12 @@ def _diff_nodes(old: dict, new: dict) -> list[str]:
     if old.get("source") != new.get("source"):
         changes.append("changed source frames")
     return changes
+
+
+def _c2pa_version() -> str:
+    try:
+        from importlib.metadata import version
+
+        return version("c2pa-python")
+    except Exception:  # noqa: BLE001 - optional at run time
+        return "not installed"

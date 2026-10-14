@@ -23,7 +23,24 @@ export interface FilterSchema {
   input_kind: "image" | "stack";
   output_kind: "image" | "stack";
   generative: boolean;
+  ai?: boolean;
   params: ParamSchema[];
+}
+
+export interface ModelInfo {
+  id: string;
+  file: string;
+  sha256: string;
+  kind: string;
+  task: string;
+  architecture?: string;
+  reference?: string;
+  source: string;
+  licence: string;
+  training_data: string;
+  generative?: boolean;
+  limits?: string;
+  bundled: boolean;
 }
 
 export interface AnalysisSchema {
@@ -37,6 +54,8 @@ export interface AnalysisSchema {
   reading_guide: string;
   params: ParamSchema[];
   card?: DetectorCard | null;
+  ai?: boolean;
+  unavailable?: string | null;
 }
 
 export interface DetectorCard {
@@ -108,6 +127,7 @@ export interface ChainNode {
   note?: string;
   proposed_by?: string;
   accepted_by?: string;
+  justification?: string;
 }
 
 export interface Graph {
@@ -210,6 +230,8 @@ export interface Measurement {
     assumptions: string[];
     warning?: string;
     plane_fit_residual_m?: number;
+    camera?: { focal_length_px: number; position_m: number[]; reprojection_rms_px: number };
+    fit_warning?: string;
   };
   output_hash: string;
   actor: string;
@@ -248,4 +270,28 @@ export interface StepInfo {
   output_hash: string;
   shape: number[];
   skipped: boolean;
+}
+
+export interface ChainPolicy {
+  generative_steps: string[];
+  unjustified_steps: string[];
+  illustrative_only: boolean;
+  evidential_export: boolean;
+}
+
+export type ReviewLevel = "pass" | "warn" | "fail";
+
+export interface Review {
+  id: string;
+  case_id: string;
+  level: ReviewLevel;
+  result: {
+    level: ReviewLevel;
+    line: string;
+    counts: Record<ReviewLevel, number>;
+    items: { check: string; level: ReviewLevel; text: string; target: string | null }[];
+    reviewer_version: string;
+  };
+  actor: string;
+  created_at: string;
 }

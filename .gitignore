@@ -8,3 +8,5 @@ backend/import/
 data/
 node_modules/
 frontend/dist/
+dist/
+import/
