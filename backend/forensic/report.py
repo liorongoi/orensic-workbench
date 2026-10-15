@@ -13,7 +13,7 @@ import html
 import io
 import json
 
-from . import media, policy
+from . import APP_NAME, __version__, media, policy
 from .analysis import get_analysis
 from .audit import Actor
 from .db import canonical_json, now_iso
@@ -106,6 +106,7 @@ def build_bundle(wb: Workbench, case_id: str, actor: Actor, verify: bool = True)
         "standards": STANDARDS,
         "case": case,
         "evidence": evidence,
+        "removed_evidence": wb.list_evidence(case_id, removed=True),
         "chains": chains,
         "analyses": analyses,
         "camera_references": wb.list_camera_references(case_id),
@@ -217,7 +218,20 @@ table{border-collapse:collapse;width:100%;margin:8px 0}td,th{border:1px solid #d
 th{background:#f2f4f7}.ai{color:#5b3fb5;font-size:12px}.ok{color:#11733b;font-weight:600}.bad{color:#b42318;font-weight:600}.muted{color:#5b6573}
 .flag-warning{color:#9a5b00}.pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}.pair img,.map img{max-width:100%;border:1px solid #d5dbe3}
 figure{margin:0}figcaption{font-size:12px;color:#5b6573}
+.brand{display:flex;align-items:center;gap:8px;margin:0 0 16px;color:#5b6573;font-size:13px}.brand svg{width:28px;height:28px}
+.brand b{font:italic 400 20px/1 Georgia,"Times New Roman",serif;color:#0d201c}
 """
+
+# The Lucida mark (brand/lucida-icon.svg), inlined so the HTML report stays a single file.
+LOGO_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true">'
+    '<rect width="64" height="64" rx="14" fill="#0D201C"/><polygon points="12,12 52,12 12,52" fill="#8FE3C8"/>'
+    '<polygon points="52,12 52,52 12,52" fill="none" stroke="#8FE3C8" stroke-width="2.5" stroke-linejoin="round"/>'
+    '<path d="M22 42 A14 14 0 0 1 42 22" fill="none" stroke="#0D201C" stroke-width="3"/>'
+    '<path d="M42 22 A14 14 0 0 1 22 42" fill="none" stroke="#8FE3C8" stroke-width="3"/>'
+    '<circle cx="32" cy="32" r="3.5" fill="#0D201C" stroke="#8FE3C8" stroke-width="2"/></svg>'
+)
+
 
 
 def render_html(wb: Workbench, bundle: dict) -> str:
@@ -226,6 +240,7 @@ def render_html(wb: Workbench, bundle: dict) -> str:
     ev_by_id = {x["id"]: x for x in bundle["evidence"]}
     names = {x["id"]: x["filename"] for x in bundle["evidence"]}
     out = [f"<!doctype html><html><head><meta charset='utf-8'><title>Report: {e(case['name'])}</title><style>{CSS}</style></head><body>"]
+    out.append(f"<div class='brand'>{LOGO_SVG}<b>{APP_NAME}</b><span>{e(bundle['environment'].get('app_version', __version__))}</span></div>")
     out.append(f"<h1>Examination report: {e(case['name'])}</h1>")
     out.append(f"<p class='muted'>Examiner {e(case['examiner'])} · generated {e(bundle['generated_at'])} by {e(bundle['generated_by'])}</p>")
     out.append(f"<p>{e(bundle['standards'])}</p>")
@@ -243,6 +258,11 @@ def render_html(wb: Workbench, bundle: dict) -> str:
             f"<td>{e(ev['media_type'])} ({dims}{extra})</td><td class='hash'>{ev['sha256']}<br>{ev['md5']}</td><td>{status}</td></tr>"
         )
     out.append("</table>")
+    if bundle.get("removed_evidence"):
+        out.append("<p class='muted'>Removed from the case by an examiner (originals kept in the store; see audit trail): "
+                   + "; ".join(f"{e(r['filename'])} (SHA-256 {r['sha256'][:16]}…, {e(r['removed']['by'])}"
+                               + (f": {e(r['removed']['reason'])}" if r["removed"]["reason"] else "") + ")"
+                               for r in bundle["removed_evidence"]) + "</p>")
 
     out.append("<h2>2. Enhancement</h2>")
     if not bundle["chains"]:
@@ -423,6 +443,11 @@ def render_pdf(wb: Workbench, bundle: dict) -> bytes:
         conv_txt = f"<br/><font size='6.5' color='#5b6573'>{e(conv)}</font>" if conv else ""
         rows.append([f"{e(ev['filename'])}<br/>{ev['size']:,} bytes{conv_txt}", e(ev["media_type"]), f"<font name='Courier' size='6.5'>{ev['sha256']}<br/>{ev['md5']}</font>", status])
     s.append(table(rows, [0.25 * width, 0.12 * width, 0.45 * width, 0.18 * width]))
+    if bundle.get("removed_evidence"):
+        s.append(Paragraph("Removed from the case by an examiner (originals kept in the store; see audit trail): "
+                           + "; ".join(f"{e(r['filename'])} (SHA-256 {r['sha256'][:16]}…, {e(r['removed']['by'])}"
+                                       + (f": {e(r['removed']['reason'])}" if r["removed"]["reason"] else "") + ")"
+                                       for r in bundle["removed_evidence"]), small))
 
     s.append(Paragraph("2. Enhancement", h2))
     for i, ch in enumerate(bundle["chains"], 1):
@@ -533,7 +558,7 @@ def render_pdf(wb: Workbench, bundle: dict) -> bytes:
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm, topMargin=15 * mm, bottomMargin=15 * mm,
-                            title=f"Report: {case['name']}", author=case["examiner"])
+                            title=f"Report: {case['name']}", author=case["examiner"], creator=f"{APP_NAME} {__version__}")
     doc.build(s, onFirstPage=_footer(case), onLaterPages=_footer(case))
     return buf.getvalue()
 
@@ -544,7 +569,7 @@ def _footer(case):
     def draw(canvas, doc):
         canvas.saveState()
         canvas.setFont("Helvetica", 7)
-        canvas.drawString(15 * mm, 8 * mm, f"Case {case['name']} · examiner {case['examiner']}")
+        canvas.drawString(15 * mm, 8 * mm, f"{APP_NAME} {__version__} · case {case['name']} · examiner {case['examiner']}")
         canvas.drawRightString(doc.pagesize[0] - 15 * mm, 8 * mm, f"Page {doc.page}")
         canvas.restoreState()
 

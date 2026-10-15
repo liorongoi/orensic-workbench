@@ -120,12 +120,47 @@ CREATE TABLE IF NOT EXISTS reviews (
     actor TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS users (
+    username TEXT PRIMARY KEY,
+    full_name TEXT NOT NULL,
+    role TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    disabled INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    username TEXT NOT NULL REFERENCES users(username),
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS jobs (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    label TEXT NOT NULL,
+    lane TEXT NOT NULL,
+    case_id TEXT,
+    target TEXT,
+    params_json TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    owner_name TEXT NOT NULL,
+    status TEXT NOT NULL,
+    error TEXT,
+    result_json TEXT,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status, created_at);
 """
 
 # Columns added after the first release; applied to existing databases on open.
 MIGRATIONS = [
     ("evidence", "derived_from", "TEXT"),
     ("evidence", "conversion_json", "TEXT"),
+    # Set when an examiner removes an item from the case; the row and the stored file are kept.
+    ("evidence", "removed_json", "TEXT"),
+    ("chains", "removed_json", "TEXT"),
 ]
 
 
@@ -154,7 +189,12 @@ class Database:
         for table, column, kind in MIGRATIONS:
             cols = {r[1] for r in self._conn.execute(f"PRAGMA table_info({table})")}
             if column not in cols:
-                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+                try:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+                except sqlite3.OperationalError as e:
+                    # Another connection opening the same database added it first.
+                    if "duplicate column" not in str(e):
+                        raise
 
     def execute(self, sql: str, params: tuple | dict = ()) -> sqlite3.Cursor:
         with self._lock:

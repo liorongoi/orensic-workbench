@@ -17,14 +17,13 @@ import type {
   ChainPolicy,
   ModelInfo,
   Review,
+  User,
+  Job,
+  JobOverview,
 } from "./types";
 
+// The signed-in examiner's full name; the server records actions under the signed-in account.
 let examiner = "";
-try {
-  examiner = localStorage.getItem("examiner") ?? "";
-} catch {
-  /* storage unavailable */
-}
 
 export function getExaminer() {
   return examiner;
@@ -32,22 +31,21 @@ export function getExaminer() {
 
 export function setExaminer(name: string) {
   examiner = name;
-  try {
-    localStorage.setItem("examiner", name);
-  } catch {
-    /* storage unavailable */
-  }
 }
 
+/** Fired when the server says the session has ended, so the app can show the sign-in screen. */
+export const SIGNED_OUT = "workbench-signed-out";
+
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = { "X-Examiner": examiner };
+  const headers: Record<string, string> = {};
   let payload: BodyInit | undefined;
   if (body instanceof FormData) payload = body;
   else if (body !== undefined) {
     headers["Content-Type"] = "application/json";
     payload = JSON.stringify(body);
   }
-  const res = await fetch(url, { method, headers, body: payload });
+  const res = await fetch(url, { method, headers, body: payload, credentials: "same-origin" });
+  if (res.status === 401 && !url.startsWith("/api/auth/")) window.dispatchEvent(new Event(SIGNED_OUT));
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -61,6 +59,19 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
 }
 
 export const api = {
+  authStatus: () => req<{ setup_required: boolean; user: User | null }>("GET", "/api/auth/status"),
+  setup: (username: string, fullName: string, password: string) =>
+    req<{ user: User }>("POST", "/api/auth/setup", { username, full_name: fullName, password }),
+  login: (username: string, password: string) => req<{ user: User }>("POST", "/api/auth/login", { username, password }),
+  logout: () => req("POST", "/api/auth/logout"),
+  changePassword: (current: string, next: string) => req("POST", "/api/auth/password", { current, new: next }),
+  users: () => req<User[]>("GET", "/api/users"),
+  createUser: (u: { username: string; full_name: string; password: string; role: string }) =>
+    req<User>("POST", "/api/users", u),
+  updateUser: (username: string, change: { role?: string; disabled?: boolean; password?: string }) =>
+    req<User>("PATCH", `/api/users/${encodeURIComponent(username)}`, change),
+  jobs: () => req<JobOverview>("GET", "/api/jobs"),
+  cancelJob: (id: string) => req<Job>("POST", `/api/jobs/${id}/cancel`),
   filters: () => req<FilterSchema[]>("GET", "/api/filters"),
   analyses: () => req<AnalysisSchema[]>("GET", "/api/analyses"),
   cases: () => req<Case[]>("GET", "/api/cases"),
@@ -71,7 +82,9 @@ export const api = {
     req<{
       case: Case;
       evidence: Evidence[];
+      removed_evidence: Evidence[];
       chains: Chain[];
+      removed_chains: Chain[];
       analyses: AnalysisRun[];
       camera_references: CameraReference[];
       measurements: Measurement[];
@@ -105,6 +118,10 @@ export const api = {
   },
   verifyEvidence: (id: string) =>
     req<{ ok: boolean; read_only: boolean; sha256: string }>("POST", `/api/evidence/${id}/verify`),
+  removeEvidence: (id: string, reason: string) => req<Evidence>("POST", `/api/evidence/${id}/remove`, { reason }),
+  restoreEvidence: (id: string) => req<Evidence>("POST", `/api/evidence/${id}/restore`),
+  removeChain: (id: string, reason = "") => req<Chain>("POST", `/api/chains/${id}/remove`, { reason }),
+  restoreChain: (id: string) => req<Chain>("POST", `/api/chains/${id}/restore`),
   frames: (id: string) => req<FrameInfo[]>("GET", `/api/evidence/${id}/frames`),
   createChain: (caseId: string, evidenceId: string, name: string, graph?: Partial<Graph>) =>
     req<Chain>("POST", `/api/cases/${caseId}/chains`, { evidence_id: evidenceId, name, graph }),
@@ -144,7 +161,7 @@ export async function fetchPreview(
 ): Promise<{ blob: Blob; info: { output_hash: string; shape: number[]; steps: StepInfo[] } }> {
   const res = await fetch(`/api/evidence/${evidenceId}/preview`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Examiner": examiner },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ graph, upto, frame }),
     signal,
   });
@@ -164,8 +181,6 @@ export const urls = {
   frame: (evidenceId: string, n: number) => `/api/evidence/${evidenceId}/frame/${n}.png`,
   derived: (digest: string) => `/api/derived/${digest}.png`,
   original: (evidenceId: string) => `/api/evidence/${evidenceId}/original`,
-  exportPng: (chainId: string, frame: number) =>
-    `/api/chains/${chainId}/export.png?frame=${frame}&examiner=${encodeURIComponent(examiner)}`,
-  report: (caseId: string, kind: "html" | "pdf" | "json") =>
-    `/api/cases/${caseId}/report.${kind}?examiner=${encodeURIComponent(examiner)}`,
+  exportPng: (chainId: string, frame: number) => `/api/chains/${chainId}/export.png?frame=${frame}`,
+  report: (caseId: string, kind: "html" | "pdf" | "json") => `/api/cases/${caseId}/report.${kind}`,
 };

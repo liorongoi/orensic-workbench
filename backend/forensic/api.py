@@ -2,27 +2,64 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import os
+import threading
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import anyio
 import cv2
-from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, Field
 
-from . import __version__, formats, media
+from . import APP_NAME, __version__, formats, media
 from . import measure as measure_mod
-from .agents import WORKFLOWS, plan_enhancement, triage_case
+from .accounts import Accounts, AuthError, actor_for
+from .agents import WORKFLOWS, plan_enhancement
 from .audit import Actor
 from .filters import FilterError
-from .report import build_bundle, render_html, render_pdf
+from .jobs import JobCancelled, JobQueue, QueueFull
+from .report import render_html, render_pdf
 from .workbench import NotFound, Workbench
 
-app = FastAPI(title="Forensic Workbench", version=__version__)
+SESSION_COOKIE = "fw_session"
+# Requests that work without signing in: the health check and the sign-in screen itself.
+OPEN_PATHS = {"/api/health", "/api/auth/status", "/api/auth/login", "/api/auth/setup"}
+_user: contextvars.ContextVar[dict | None] = contextvars.ContextVar("user", default=None)
+
+
+async def _authenticate(request: Request) -> None:
+    """Every API request needs a signed-in examiner, except the few in OPEN_PATHS.
+
+    Runs on the event loop, so the user it sets is visible to the endpoint (FastAPI copies the
+    context into the worker thread that runs a plain `def` endpoint).
+    """
+    token = request.cookies.get(SESSION_COOKIE)
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        token = auth[7:].strip()
+    user = accounts().session_user(token)
+    _user.set(user)
+    if user is None and request.url.path.startswith("/api/") and request.url.path not in OPEN_PATHS:
+        raise HTTPException(401, "sign in to use Lucida")
+
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI):
+    # Requests for queued work wait in a worker thread until their job finishes; leave room for
+    # many of them so waiting requests never starve quick ones (frames, previews, the queue view).
+    anyio.to_thread.current_default_thread_limiter().total_tokens = 200
+    yield
+
+
+app = FastAPI(title=APP_NAME, version=__version__, dependencies=[Depends(_authenticate)],
+              lifespan=_lifespan)
 
 # Answer only requests addressed to this computer by name. Without this check a web page could
 # rebind its own hostname to 127.0.0.1 and use the API as if it were the examiner's browser.
@@ -33,20 +70,56 @@ ALLOWED_HOSTS = ["127.0.0.1", "localhost"] + [
 ]
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 _wb: Workbench | None = None
+_accounts: Accounts | None = None
+_jobs: JobQueue | None = None
+
+
+_wb_lock = threading.Lock()
 
 
 def wb() -> Workbench:
+    # Requests run on a thread pool; the first few must not each open their own Workbench.
     global _wb
     if _wb is None:
-        _wb = Workbench()
+        with _wb_lock:
+            if _wb is None:
+                _wb = Workbench()
     return _wb
 
 
-def actor(name: str | None) -> Actor:
-    name = (name or "").strip()
-    if not name:
-        raise HTTPException(401, "set your examiner name (X-Examiner header) before working on evidence")
-    return Actor(name[:120], "human")
+def accounts() -> Accounts:
+    global _accounts
+    if _accounts is None or _accounts.db is not wb().db:
+        _accounts = Accounts(wb().db)
+    return _accounts
+
+
+def jobs() -> JobQueue:
+    global _jobs
+    w = wb()
+    if _jobs is None or _jobs.wb is not w:
+        if _jobs is not None:
+            _jobs.stop()
+        _jobs = JobQueue(w)
+    return _jobs
+
+
+def user() -> dict:
+    u = _user.get()
+    if u is None:
+        raise HTTPException(401, "sign in to use Lucida")
+    return u
+
+
+def actor(_legacy_name: str | None = None) -> Actor:
+    """The signed-in examiner, as recorded in the audit log. A name the browser sends is ignored."""
+    return actor_for(user())
+
+
+def queued(kind: str, **params):
+    """Run heavy work through the shared job queue and wait for its result."""
+    u = user()
+    return jobs().run(kind, params, actor_for(u), u["username"])
 
 
 @app.exception_handler(NotFound)
@@ -57,6 +130,17 @@ async def _nf(_: Request, exc: NotFound):
 @app.exception_handler(PermissionError)
 async def _forbidden(_: Request, exc: PermissionError):
     return JSONResponse({"detail": str(exc)}, status_code=403)
+
+
+@app.exception_handler(AuthError)
+async def _unauth(_: Request, exc: AuthError):
+    return JSONResponse({"detail": str(exc)}, status_code=401)
+
+
+@app.exception_handler(QueueFull)
+@app.exception_handler(JobCancelled)
+async def _conflict(_: Request, exc: Exception):
+    return JSONResponse({"detail": str(exc)}, status_code=409)
 
 
 @app.exception_handler(FilterError)
@@ -178,6 +262,149 @@ def catalogue():
     }
 
 
+# Accounts and sign-in --------------------------------------------------------------------
+
+
+class SetupIn(BaseModel):
+    username: str
+    full_name: str
+    password: str
+
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+class UserIn(BaseModel):
+    username: str
+    full_name: str
+    password: str
+    role: str = "examiner"
+
+
+class UserUpdate(BaseModel):
+    role: str | None = None
+    disabled: bool | None = None
+    password: str | None = None
+
+
+class PasswordIn(BaseModel):
+    current: str
+    new: str
+
+
+def _signed_in(user: dict, token: str) -> JSONResponse:
+    res = JSONResponse({"user": user})
+    res.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="strict", path="/",
+                   max_age=12 * 3600, secure=os.environ.get("FORENSIC_SECURE_COOKIE") == "1")
+    return res
+
+
+def admin() -> dict:
+    u = user()
+    if u["role"] != "admin":
+        raise HTTPException(403, "only an administrator can manage accounts")
+    return u
+
+
+@app.get("/api/auth/status")
+def auth_status():
+    return {"setup_required": accounts().setup_required(), "user": _user.get()}
+
+
+@app.post("/api/auth/setup")
+def auth_setup(body: SetupIn):
+    """Create the first administrator on a fresh installation, then sign them in."""
+    acc = accounts()
+    u = acc.create_user(body.username, body.full_name, body.password, first_admin=True)
+    wb().audit.append(actor_for(u), "account.create", target=u["username"], params={"role": u["role"], "first": True})
+    token, u = acc.login(body.username, body.password)
+    return _signed_in(u, token)
+
+
+@app.post("/api/auth/login")
+def auth_login(body: LoginIn):
+    token, u = accounts().login(body.username, body.password)
+    return _signed_in(u, token)
+
+
+@app.post("/api/auth/logout")
+def auth_logout(request: Request):
+    accounts().logout(request.cookies.get(SESSION_COOKIE))
+    res = JSONResponse({"ok": True})
+    res.delete_cookie(SESSION_COOKIE, path="/")
+    return res
+
+
+@app.post("/api/auth/password")
+def change_password(body: PasswordIn):
+    u = user()
+    accounts().change_password(u["username"], body.current, body.new)
+    wb().audit.append(actor_for(u), "account.password", target=u["username"])
+    return {"ok": True}
+
+
+@app.get("/api/users")
+def list_users():
+    admin()
+    return accounts().list_users()
+
+
+@app.post("/api/users")
+def create_user(body: UserIn):
+    a = admin()
+    u = accounts().create_user(body.username, body.full_name, body.password, body.role)
+    wb().audit.append(actor_for(a), "account.create", target=u["username"], params={"role": u["role"]})
+    return u
+
+
+@app.patch("/api/users/{username}")
+def update_user(username: str, body: UserUpdate):
+    a = admin()
+    try:
+        u = accounts().update_user(username, role=body.role, disabled=body.disabled, password=body.password)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    wb().audit.append(actor_for(a), "account.update", target=u["username"],
+                      params={"role": body.role, "disabled": body.disabled, "password_reset": body.password is not None})
+    return u
+
+
+# Job queue -------------------------------------------------------------------------------
+
+
+class JobIn(BaseModel):
+    kind: str
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+@app.get("/api/jobs")
+def list_jobs():
+    """Everything queued or running for every examiner, and the most recent finished jobs."""
+    user()
+    return jobs().overview()
+
+
+@app.post("/api/jobs")
+def submit_job(body: JobIn):
+    """Queue a job and return at once; follow it with GET /api/jobs/{id}."""
+    u = user()
+    return jobs().submit(body.kind, body.params, actor_for(u), u["username"])
+
+
+@app.get("/api/jobs/{job_id}")
+def get_job(job_id: str):
+    user()
+    return jobs().get(job_id)
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_job(job_id: str):
+    u = user()
+    return jobs().cancel(job_id, u["username"], u["role"] == "admin")
+
+
 # Cases ----------------------------------------------------------------------------------
 
 
@@ -197,7 +424,9 @@ def get_case(case_id: str):
     return {
         "case": w.get_case(case_id),
         "evidence": w.list_evidence(case_id),
+        "removed_evidence": w.list_evidence(case_id, removed=True),
         "chains": w.list_chains(case_id),
+        "removed_chains": w.list_chains(case_id, removed=True),
         "analyses": w.list_analysis_results(case_id),
         "camera_references": w.list_camera_references(case_id),
         "measurements": w.list_measurements(case_id),
@@ -208,7 +437,7 @@ def get_case(case_id: str):
 
 @app.post("/api/cases/{case_id}/triage")
 def triage(case_id: str, body: TriageIn, x_examiner: str | None = Header(None)):
-    return triage_case(wb(), case_id, body.evidence_ids, actor(x_examiner))
+    return queued("case.triage", case_id=case_id, evidence_ids=body.evidence_ids)
 
 
 class ReviewIn(BaseModel):
@@ -217,8 +446,8 @@ class ReviewIn(BaseModel):
 
 @app.post("/api/cases/{case_id}/review")
 def review(case_id: str, body: ReviewIn, x_examiner: str | None = Header(None)):
-    actor(x_examiner)  # the examiner asks; the reviewer agent re-checks the case
-    return wb().review_case(case_id, rerun_analyses=body.rerun_analyses)
+    # The examiner asks; the reviewer agent re-checks the case.
+    return queued("case.review", case_id=case_id, rerun_analyses=body.rerun_analyses)
 
 
 @app.get("/api/cases/{case_id}/review")
@@ -234,7 +463,8 @@ def plan(case_id: str, body: PlanIn, x_examiner: str | None = Header(None)):
 
 @app.post("/api/cases/{case_id}/camera-references")
 def create_reference(case_id: str, body: ReferenceIn, x_examiner: str | None = Header(None)):
-    return wb().create_camera_reference(case_id, body.name, body.evidence_ids, actor(x_examiner), camera=body.camera)
+    return queued("camera_reference.create", case_id=case_id, name=body.name, evidence_ids=body.evidence_ids,
+                  camera=body.camera)
 
 
 @app.post("/api/cases/{case_id}/notes")
@@ -266,6 +496,20 @@ def verify_evidence(evidence_id: str, x_examiner: str | None = Header(None)):
     return wb().verify_evidence(evidence_id, actor(x_examiner))
 
 
+class RemoveIn(BaseModel):
+    reason: str = ""
+
+
+@app.post("/api/evidence/{evidence_id}/remove")
+def remove_evidence(evidence_id: str, body: RemoveIn, x_examiner: str | None = Header(None)):
+    return wb().remove_evidence(evidence_id, actor(x_examiner), body.reason)
+
+
+@app.post("/api/evidence/{evidence_id}/restore")
+def restore_evidence(evidence_id: str, x_examiner: str | None = Header(None)):
+    return wb().restore_evidence(evidence_id, actor(x_examiner))
+
+
 @app.get("/api/evidence/{evidence_id}/frames")
 def frames(evidence_id: str):
     return wb().frame_table(evidence_id)
@@ -292,7 +536,8 @@ def preview(evidence_id: str, body: PreviewIn):
 
 @app.post("/api/evidence/{evidence_id}/convert")
 def convert(evidence_id: str, body: ConvertIn, x_examiner: str | None = Header(None)):
-    return wb().convert_evidence(evidence_id, body.method, actor(x_examiner), frame_rate=body.frame_rate, codec=body.codec)
+    return queued("evidence.convert", evidence_id=evidence_id, method=body.method, frame_rate=body.frame_rate,
+                  codec=body.codec)
 
 
 @app.post("/api/evidence/{evidence_id}/measurements")
@@ -303,7 +548,7 @@ def measure(evidence_id: str, body: MeasureIn, x_examiner: str | None = Header(N
 
 @app.post("/api/evidence/{evidence_id}/smart-report")
 def smart_report(evidence_id: str, x_examiner: str | None = Header(None)):
-    return wb().smart_report(evidence_id, actor(x_examiner))
+    return queued("evidence.smart_report", evidence_id=evidence_id)
 
 
 @app.post("/api/evidence/{evidence_id}/estimate-blur")
@@ -325,7 +570,7 @@ def estimate_blur(evidence_id: str, body: BlurIn):
 
 @app.post("/api/evidence/{evidence_id}/analyses")
 def run_analysis(evidence_id: str, body: AnalysisIn, x_examiner: str | None = Header(None)):
-    return wb().run_analysis(evidence_id, body.analysis, body.params, actor(x_examiner))
+    return queued("analysis.run", evidence_id=evidence_id, analysis=body.analysis, params=body.params)
 
 
 # Chains ------------------------------------------------------------------------------------
@@ -346,6 +591,16 @@ def update_chain(chain_id: str, body: ChainUpdate, x_examiner: str | None = Head
     return wb().update_chain(chain_id, body.graph, actor(x_examiner), body.name)
 
 
+@app.post("/api/chains/{chain_id}/remove")
+def remove_chain(chain_id: str, body: RemoveIn, x_examiner: str | None = Header(None)):
+    return wb().remove_chain(chain_id, actor(x_examiner), body.reason)
+
+
+@app.post("/api/chains/{chain_id}/restore")
+def restore_chain(chain_id: str, x_examiner: str | None = Header(None)):
+    return wb().restore_chain(chain_id, actor(x_examiner))
+
+
 class AcceptIn(BaseModel):
     node_ids: list[str] | None = None
 
@@ -357,12 +612,12 @@ def accept(chain_id: str, body: AcceptIn, x_examiner: str | None = Header(None))
 
 @app.post("/api/chains/{chain_id}/render")
 def render_chain(chain_id: str, x_examiner: str | None = Header(None)):
-    return wb().render_chain(chain_id, actor(x_examiner))
+    return queued("chain.render", chain_id=chain_id)
 
 
 @app.post("/api/chains/{chain_id}/verify")
 def verify_chain(chain_id: str, x_examiner: str | None = Header(None)):
-    return wb().verify_chain(chain_id, actor(x_examiner))
+    return queued("chain.verify", chain_id=chain_id)
 
 
 @app.get("/api/chains/{chain_id}/export.png")
@@ -388,20 +643,20 @@ def derived(digest: str):
 
 @app.get("/api/cases/{case_id}/report.json")
 def report_json(case_id: str, verify: bool = True, x_examiner: str | None = Header(None), examiner: str | None = None):
-    bundle = build_bundle(wb(), case_id, actor(x_examiner or examiner), verify=verify)
+    bundle = queued("report.build", case_id=case_id, verify=verify)
     return JSONResponse(bundle, headers={"Content-Disposition": f'attachment; filename="report-{case_id}.json"'})
 
 
 @app.get("/api/cases/{case_id}/report.html")
 def report_html(case_id: str, x_examiner: str | None = Header(None), examiner: str | None = None):
     w = wb()
-    return HTMLResponse(render_html(w, build_bundle(w, case_id, actor(x_examiner or examiner))))
+    return HTMLResponse(render_html(w, queued("report.build", case_id=case_id, verify=True)))
 
 
 @app.get("/api/cases/{case_id}/report.pdf")
 def report_pdf(case_id: str, x_examiner: str | None = Header(None), examiner: str | None = None):
     w = wb()
-    pdf = render_pdf(w, build_bundle(w, case_id, actor(x_examiner or examiner)))
+    pdf = render_pdf(w, queued("report.build", case_id=case_id, verify=True))
     return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="report-{case_id}.pdf"'})
 
 

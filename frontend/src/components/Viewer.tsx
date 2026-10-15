@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 export interface Overlay {
   points: number[][];
@@ -18,7 +18,11 @@ interface Props {
   points?: number[][];
   pickHint?: string | null;
   onPick?: (x: number, y: number) => void;
+  /** When set, dragging on the image draws a rectangle (Shift = square) instead of panning. */
+  onRect?: (rect: [number, number, number, number]) => void;
   illustrative?: boolean;
+  /** Extra toolbar buttons, shown left of Fit / 1:1. */
+  tools?: ReactNode;
 }
 
 interface Loaded {
@@ -49,7 +53,7 @@ function load(src: string): Promise<Loaded> {
 }
 
 /** Pixel-exact viewer: nearest-neighbour above 100 %, wheel zoom around the cursor, drag to pan. */
-export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", label, busy, error, points, pickHint, onPick, illustrative }: Props) {
+export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", label, busy, error, points, pickHint, onPick, onRect, illustrative, tools }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [main, setMain] = useState<Loaded | null>(null);
@@ -58,6 +62,7 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
   const [view, setView] = useState({ zoom: 1, x: 0, y: 0 });
   const [cursor, setCursor] = useState<{ x: number; y: number; rgb: number[] | null } | null>(null);
   const drag = useRef<{ sx: number; sy: number; vx: number; vy: number; moved: boolean } | null>(null);
+  const [box, setBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const lastSize = useRef("");
 
   useEffect(() => {
@@ -198,7 +203,32 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
         });
       }
     }
-  }, [shown, view, points, showCompare, overlays]);
+    if (box) {
+      const r = boxRect(box, shown.img.naturalWidth, shown.img.naturalHeight);
+      if (r) {
+        const [bx, by, bw, bh] = r;
+        cx.fillStyle = "rgba(0,0,0,0.45)";
+        const X = view.x + bx * view.zoom;
+        const Y = view.y + by * view.zoom;
+        const W = bw * view.zoom;
+        const H = bh * view.zoom;
+        const iw = shown.img.naturalWidth * view.zoom;
+        const ih = shown.img.naturalHeight * view.zoom;
+        cx.fillRect(view.x, view.y, iw, Y - view.y);
+        cx.fillRect(view.x, Y + H, iw, view.y + ih - Y - H);
+        cx.fillRect(view.x, Y, X - view.x, H);
+        cx.fillRect(X + W, Y, view.x + iw - X - W, H);
+        cx.setLineDash([5, 4]);
+        cx.strokeStyle = "#ffcf3f";
+        cx.lineWidth = 1.5;
+        cx.strokeRect(X + 0.5, Y + 0.5, W, H);
+        cx.setLineDash([]);
+        cx.fillStyle = "#ffcf3f";
+        cx.font = "12px system-ui, sans-serif";
+        cx.fillText(`${bw}×${bh}`, X + 4, Y - 6 > 10 ? Y - 6 : Y + 14);
+      }
+    }
+  }, [shown, view, points, showCompare, overlays, box]);
 
   useEffect(() => {
     const onResize = () => setView((v) => ({ ...v }));
@@ -242,7 +272,17 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
   };
 
   const onMove = (e: React.MouseEvent) => {
-    if (drag.current) {
+    if (box && shown) {
+      const { x, y } = toImage(e);
+      let x1 = x;
+      let y1 = y;
+      if (e.shiftKey) {
+        const side = Math.max(Math.abs(x - box.x0), Math.abs(y - box.y0));
+        x1 = box.x0 + Math.sign(x - box.x0 || 1) * side;
+        y1 = box.y0 + Math.sign(y - box.y0 || 1) * side;
+      }
+      setBox({ ...box, x1, y1 });
+    } else if (drag.current) {
       const dx = e.clientX - drag.current.sx;
       const dy = e.clientY - drag.current.sy;
       if (Math.abs(dx) + Math.abs(dy) > 3) drag.current.moved = true;
@@ -265,10 +305,21 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
   };
 
   const onDown = (e: React.MouseEvent) => {
+    if (onRect && shown && !showCompare && e.button === 0) {
+      const { x, y } = toImage(e);
+      setBox({ x0: x, y0: y, x1: x, y1: y });
+      return;
+    }
     drag.current = { sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y, moved: false };
   };
 
   const onUp = (e: React.MouseEvent) => {
+    if (box) {
+      const r = shown ? boxRect(box, shown.img.naturalWidth, shown.img.naturalHeight) : null;
+      setBox(null);
+      if (r && r[2] >= 2 && r[3] >= 2) onRect?.(r);
+      return;
+    }
     const d = drag.current;
     drag.current = null;
     if (d && !d.moved && onPick && shown && !showCompare) {
@@ -289,6 +340,7 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
           </span>
         )}
         <span className="spacer" />
+        {tools}
         <button onClick={fit} title="Fit (F)">Fit</button>
         <button onClick={oneToOne} title="Actual pixels (1)">1:1</button>
         {compareSrc && (
@@ -299,19 +351,20 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
             onMouseLeave={() => setShowCompare(false)}
             title="Hold to show the original (or hold B)"
           >
-            Hold: original
+            Original
           </button>
         )}
       </div>
       <div
         ref={wrap}
-        className={`viewer-canvas${onPick ? " picking" : ""}`}
+        className={`viewer-canvas${onPick || onRect ? " picking" : ""}`}
         onWheel={onWheel}
         onMouseMove={onMove}
         onMouseDown={onDown}
         onMouseUp={onUp}
         onMouseLeave={() => {
           drag.current = null;
+          setBox(null);
           setCursor(null);
         }}
       >
@@ -319,8 +372,8 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
         {illustrative && !showCompare && src && (
           <div className="illustrative-overlay">ILLUSTRATIVE ONLY · AI-generated detail · not for measurement</div>
         )}
-        {!src && !busy && !error && <div className="viewer-empty">Select evidence to view it</div>}
-        {busy && (src ? <div className="viewer-updating">Updating preview…</div> : <div className="viewer-busy">Processing…</div>)}
+        {!src && !busy && !error && <div className="viewer-empty">No image</div>}
+        {busy && (src ? <div className="viewer-updating">Updating…</div> : <div className="viewer-busy">Processing…</div>)}
         {error && <div className="viewer-error">{error}</div>}
         {pickHint && <div className="viewer-hint">{pickHint}</div>}
       </div>
@@ -336,9 +389,21 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
             )}
           </>
         ) : (
-          <span className="muted">Scroll to zoom · drag to pan · hold B to compare with the original</span>
+          <span className="muted" title="Scroll: zoom · Drag: pan · F: fit · 1: actual pixels · Hold B: original · Ctrl+Z / Ctrl+Y: undo / redo">
+            ? shortcuts
+          </span>
         )}
       </div>
     </div>
   );
+}
+
+/** Integer pixel rectangle [x, y, w, h] from a drag, clamped to the image. */
+function boxRect(b: { x0: number; y0: number; x1: number; y1: number }, w: number, h: number): [number, number, number, number] | null {
+  const x0 = Math.max(0, Math.min(w, Math.round(Math.min(b.x0, b.x1))));
+  const y0 = Math.max(0, Math.min(h, Math.round(Math.min(b.y0, b.y1))));
+  const x1 = Math.max(0, Math.min(w, Math.round(Math.max(b.x0, b.x1))));
+  const y1 = Math.max(0, Math.min(h, Math.round(Math.max(b.y0, b.y1))));
+  if (x1 <= x0 || y1 <= y0) return null;
+  return [x0, y0, x1 - x0, y1 - y0];
 }

@@ -1,6 +1,8 @@
-# Forensic Workbench
+<img src="brand/lucida-icon.svg" width="64" height="64" alt="Lucida logo">
 
-A browser-based workbench for forensic image and video work: **Enhance** (clarify
+# Lucida
+
+Lucida is a browser-based workbench for forensic image and video work: **Enhance** (clarify
 footage and photos) and **Authenticate** (check whether an image is what it claims
 to be), on one audited processing core. This is Phase 0 (foundations), Phase 1
 (MVP), Phase 2 (depth) and Phase 3 (AI, deepfake checks, full parity) of the build plan *Forensic Image & Video Platform: Build Plan*.
@@ -27,7 +29,7 @@ npm run build
 # start
 cd ../backend
 FORENSIC_DATA_DIR=./data uvicorn forensic.api:app --port 8000
-# open http://127.0.0.1:8000
+# open http://127.0.0.1:8000; the first visit creates the administrator account
 ```
 
 For front-end development run `npm run dev` in `frontend/` (port 5173, proxies `/api`
@@ -90,6 +92,8 @@ validation run that fails if detector accuracy drops below the published floor).
 
 ## Rules the code enforces
 
+- Every API request needs a signed-in local account; actions are audited under that account's full name, and a name sent by the browser is ignored. Administrators add examiners under **Users** in the account menu.
+- Renders, analyses, conversions, reviews and reports run through one shared job queue, visible to everyone under **Jobs** (see [docs/deployment.md](docs/deployment.md#several-examiners)).
 - Originals are never written after ingest; all work is on derived, content-addressed outputs.
 - Live previews are not stored or audited and are never evidential. "Render result" runs the saved chain from the original and records the output hash.
 - Steps an agent adds through MCP are marked *proposed*. They stay out of the report's findings until an examiner accepts them in the UI; an agent cannot accept its own proposals, and cannot remove, disable or reorder a step the examiner wrote or accepted.
@@ -122,7 +126,7 @@ Set `FORENSIC_AGENT_NAME` and `FORENSIC_AGENT_MODEL` so the audit log records wh
 
 - No learned AI-image or deepfake detector is bundled: the published ones reviewed carry non-commercial licences or lack validation on current generators. The slot (`synthetic.learned`) takes one the lab licenses and validates.
 - Every detector is so far validated on synthetic data only, including the phase 3 checks; no real photographs, real face swaps or recorder footage have been run. Run the validation with real material before relying on a detector in casework.
-- Clone detection, OCR, multi-view triangulation, native parsers for vendor formats FFmpeg cannot demux (they are carved instead), Postgres + S3 Object Lock + job queue, user accounts and SSO, and sandboxed parsers. Chains are linear; branching graphs use the same document format later.
+- Clone detection, OCR, multi-view triangulation, native parsers for vendor formats FFmpeg cannot demux (they are carved instead), Postgres + S3 Object Lock, SSO, MCP agents sharing the API's job queue, and sandboxed parsers. Chains are linear; branching graphs use the same document format later.
 
 ## Layout
 

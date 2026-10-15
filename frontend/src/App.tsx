@@ -1,8 +1,12 @@
 import { useEffect, useState } from "react";
-import { api, getExaminer, setExaminer, urls } from "./api";
+import { api, setExaminer, SIGNED_OUT, urls } from "./api";
+import { AccountMenu } from "./components/AccountMenu";
 import { CaseList } from "./components/CaseList";
+import { JobQueue } from "./components/JobQueue";
+import { SignIn } from "./components/SignIn";
 import { Workspace } from "./components/Workspace";
-import type { AnalysisSchema, FilterSchema } from "./types";
+import type { AnalysisSchema, FilterSchema, User } from "./types";
+import logo from "./assets/lucida.svg";
 
 function readHash() {
   const m = location.hash.match(/^#\/case\/([\w-]+)/);
@@ -10,72 +14,86 @@ function readHash() {
 }
 
 export default function App() {
-  const [examiner, setName] = useState(getExaminer());
-  const [draftName, setDraftName] = useState("");
+  const [me, setMe] = useState<User | null>(null);
+  const [setupRequired, setSetupRequired] = useState<boolean | null>(null);
   const [caseId, setCaseId] = useState<string | null>(readHash());
   const [filters, setFilters] = useState<FilterSchema[]>([]);
   const [analyses, setAnalyses] = useState<AnalysisSchema[]>([]);
   const [caseName, setCaseName] = useState("");
 
+  const signedIn = (u: User | null) => {
+    setExaminer(u?.full_name ?? "");
+    setMe(u);
+  };
+
+  const checkSession = () =>
+    api
+      .authStatus()
+      .then((s) => {
+        setSetupRequired(s.setup_required);
+        signedIn(s.user);
+      })
+      .catch(() => setSetupRequired(false));
+
   useEffect(() => {
-    api.filters().then(setFilters);
-    api.analyses().then(setAnalyses);
+    checkSession();
     const onHash = () => setCaseId(readHash());
+    const onSignedOut = () => signedIn(null);
     window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
+    window.addEventListener(SIGNED_OUT, onSignedOut);
+    return () => {
+      window.removeEventListener("hashchange", onHash);
+      window.removeEventListener(SIGNED_OUT, onSignedOut);
+    };
   }, []);
 
   useEffect(() => {
-    if (caseId) api.caseDetail(caseId).then((d) => setCaseName(d.case.name)).catch(() => setCaseName(""));
-  }, [caseId]);
+    if (!me) return;
+    api.filters().then(setFilters);
+    api.analyses().then(setAnalyses);
+  }, [me?.username]);
 
-  if (!examiner) {
+  useEffect(() => {
+    if (me && caseId) api.caseDetail(caseId).then((d) => setCaseName(d.case.name)).catch(() => setCaseName(""));
+  }, [caseId, me?.username]);
+
+  if (setupRequired === null) return <p className="loading muted">Loading…</p>;
+  if (!me) {
     return (
-      <div className="signin">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!draftName.trim()) return;
-            setExaminer(draftName.trim());
-            setName(draftName.trim());
-          }}
-        >
-          <h1>Forensic Workbench</h1>
-          <p className="muted">Every action you take is recorded in the case audit log under this name.</p>
-          <input autoFocus placeholder="Examiner name" value={draftName} onChange={(e) => setDraftName(e.target.value)} />
-          <button className="primary">Continue</button>
-        </form>
-      </div>
+      <SignIn
+        setup={setupRequired}
+        onSignedIn={(u) => {
+          setSetupRequired(false);
+          signedIn(u);
+        }}
+      />
     );
   }
 
   return (
     <div className="app">
       <header className="topbar">
-        <a href="#/" className="brand">Forensic Workbench</a>
+        <a href="#/" className="brand">
+          <img src={logo} alt="" width={22} height={22} />
+          <span className="wordmark">Lucida</span>
+        </a>
         {caseId && (
           <>
             <span className="crumb">/ {caseName}</span>
             <span className="spacer" />
-            <span className="muted small">Report:</span>
-            <a className="button" href={urls.report(caseId, "html")} target="_blank" rel="noreferrer">HTML</a>
-            <a className="button" href={urls.report(caseId, "pdf")} target="_blank" rel="noreferrer">PDF</a>
-            <a className="button" href={urls.report(caseId, "json")} target="_blank" rel="noreferrer">Bundle</a>
+            <details className="menu">
+              <summary className="button">Report ▾</summary>
+              <div className="menu-items">
+                <a href={urls.report(caseId, "html")} target="_blank" rel="noreferrer">HTML report</a>
+                <a href={urls.report(caseId, "pdf")} target="_blank" rel="noreferrer">PDF report</a>
+                <a href={urls.report(caseId, "json")} target="_blank" rel="noreferrer" title="Machine-readable bundle with every hash">JSON bundle</a>
+              </div>
+            </details>
           </>
         )}
         {!caseId && <span className="spacer" />}
-        <span className="examiner" title="Recorded as the actor in the audit log">
-          {examiner}
-          <button
-            className="link"
-            onClick={() => {
-              setExaminer("");
-              setName("");
-            }}
-          >
-            change
-          </button>
-        </span>
+        <JobQueue me={me} />
+        <AccountMenu me={me} onSignedOut={() => signedIn(null)} />
       </header>
       {caseId ? (
         <Workspace key={caseId} caseId={caseId} filters={filters} analyses={analyses} />

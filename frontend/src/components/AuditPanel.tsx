@@ -38,22 +38,20 @@ export function AuditPanel({ caseId, refreshKey, onChanged }: { caseId: string; 
     <div className="audit">
       <p className={data.verification.ok ? "status ok" : "status bad"}>
         {data.verification.ok
-          ? `Hash chain intact (${data.verification.entries} entries in the log).`
+          ? `✓ Log intact · ${data.verification.entries} entries`
           : `Hash chain BROKEN at entry ${data.verification.broken_at}. The log has been altered.`}
       </p>
       <div className={`review-box ${review?.level ?? ""}`}>
         <div className="row">
-          <b>Independent review</b>
+          <b title="The reviewer agent re-hashes the originals, checks this log, re-runs every rendered chain twice from the originals, re-runs analyses and measurements and compares hashes, checks model weights, and flags generative, unjustified or unaccepted steps. It changes nothing but its own logged review.">
+            Independent review ⓘ
+          </b>
           <span className="spacer" />
           <button className="primary" onClick={runReview} disabled={reviewing}>
             {reviewing ? "Reviewing…" : review ? "Review again" : "Run reviewer"}
           </button>
         </div>
-        <p className="muted small">
-          The reviewer agent re-hashes the originals, checks this log, re-runs every rendered chain twice from the originals,
-          re-runs analyses and measurements and compares hashes, checks model weights, and flags generative, unjustified or
-          unaccepted steps. It changes nothing but its own logged review.
-        </p>
+
         {reviewError && <p className="status bad">{reviewError}</p>}
         {review && (
           <>
@@ -107,7 +105,14 @@ export function AuditPanel({ caseId, refreshKey, onChanged }: { caseId: string; 
                 {e.actor_kind === "agent" && <span className="badge warn">agent</span>}
                 {describe(e)}
               </div>
-              {e.output_hash && <div className="hash small">{e.output_hash}</div>}
+              {e.output_hash && (
+                <div className="hash small" title={e.output_hash}>
+                  {e.output_hash.slice(0, 12)}…
+                  <button className="link small" onClick={() => navigator.clipboard?.writeText(e.output_hash!)} title="Copy hash">
+                    copy
+                  </button>
+                </div>
+              )}
             </li>
           ))}
       </ol>
@@ -128,6 +133,14 @@ function describe(e: AuditEntry): string {
       return ` · ${p.analysis}`;
     case "case.note":
       return ` · ${p.text}`;
+    case "evidence.remove":
+      return ` · ${p.filename}${p.reason ? `: ${p.reason}` : ""}`;
+    case "evidence.restore":
+      return ` · ${p.filename}`;
+    case "chain.restore":
+      return ` · ${p.name}`;
+    case "chain.remove":
+      return ` · ${p.name}${p.reason ? `: ${p.reason}` : ""}`;
     case "evidence.verify":
       return p.ok ? " · hash matches" : " · HASH MISMATCH";
     case "approval.requested":

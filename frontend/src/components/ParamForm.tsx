@@ -10,16 +10,18 @@ interface Props {
 }
 
 export function ParamForm({ params, values, onChange, onPick, picking, disabled }: Props) {
-  if (!params.length) return <p className="muted small">No parameters.</p>;
+  if (!params.length) return null;
   return (
     <div className="params">
       {params.map((p) => {
         const v = values[p.name] ?? p.default;
         return (
           <label key={p.name} className="param" title={p.help}>
-            <span className="param-label">{p.label}</span>
+            <span className="param-label">
+              {p.label}
+              {p.help && <span className="help-dot"> ⓘ</span>}
+            </span>
             {renderInput(p, v, onChange, onPick, picking === p.name, disabled)}
-            {p.help && <span className="param-help">{p.help}</span>}
           </label>
         );
       })}

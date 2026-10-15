@@ -9,6 +9,7 @@ from forensic.mcp_server import build
 from forensic.validation import run as validation
 from forensic.workbench import Workbench
 
+from .conftest import sign_in
 from .test_phase2 import _camera
 
 H = {"X-Examiner": "Test Examiner"}
@@ -18,7 +19,7 @@ H = {"X-Examiner": "Test Examiner"}
 def client(tmp_path):
     api._wb = Workbench(load_settings(tmp_path / "data"))
     with TestClient(api.app) as c:
-        yield c
+        yield sign_in(c)
     api._wb.db.close()
     api._wb = None
 
