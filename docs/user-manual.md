@@ -449,7 +449,7 @@ and check every frame before release.
 ## 8. Enhancement recipes
 
 These are starting points. Adjust parameters while watching the preview, and compare with the
-original (hold **B**).
+original (hold **B**, or use **Swipe**, **Side by side** or **Flip**; see section 6).
 
 ### 8.1 Read a number plate from video
 
