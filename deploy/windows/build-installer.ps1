@@ -103,8 +103,12 @@ $wheels = "$Work\wheels"
 if (Test-Path $wheels) { Remove-Item -Recurse -Force $wheels }
 & $BuildPython -m pip wheel --no-deps --wheel-dir $wheels "$Repo\backend"; Check "building the backend wheel"
 $backendWheel = (Get-ChildItem "$wheels\forensic_workbench-*.whl" | Select-Object -First 1).FullName
+# proxy_tools (needed by pywebview for the desktop window) is published only as source: build its
+# wheel here so the install below can stay binary-only.
+& $BuildPython -m pip wheel --no-deps --no-binary=proxy_tools --wheel-dir $wheels "proxy_tools==0.1.0"
+Check "building the proxy_tools wheel"
 & $BuildPython -m pip install --no-cache-dir --disable-pip-version-check --no-warn-script-location `
-    --only-binary=:all: --target $Site $backendWheel
+    --only-binary=:all: --find-links $wheels --target $Site "$backendWheel[desktop]"
 Check "installing the dependencies"
 
 Step "FFmpeg $FfmpegVersion"
@@ -130,6 +134,7 @@ Copy-Item -Recurse "$Repo\frontend\dist" "$Payload\frontend\dist"
 Step "Launcher, docs and licences"
 New-Item -ItemType Directory -Force "$Payload\launcher", "$Payload\docs", "$Payload\licences" | Out-Null
 Copy-Item "$PSScriptRoot\launcher\workbench_launcher.py" "$Payload\launcher"
+Copy-Item "$PSScriptRoot\workbench.ico" "$Payload"
 Copy-Item "$Repo\README.md" "$Payload\docs"
 Copy-Item -Recurse "$Repo\docs\*" "$Payload\docs"
 Copy-Item "$PSScriptRoot\install-notes.txt" "$Payload\docs\INSTALL-NOTES.txt"

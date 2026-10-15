@@ -33,7 +33,7 @@ FORENSIC_DATA_DIR=./data uvicorn forensic.api:app --port 8000
 For front-end development run `npm run dev` in `frontend/` (port 5173, proxies `/api`
 to port 8000).
 
-Windows (offline installer), Docker and air-gapped installation: see
+Windows (offline installer, with a desktop app), Docker and air-gapped installation: see
 [docs/deployment.md](docs/deployment.md). After any
 installation, `python -m forensic.selftest` checks the tools, models and a full case end to end.
 

@@ -27,9 +27,10 @@ installed file, checks the models give bit-identical results on this CPU, and
 runs a small case end to end. Its log is saved in the case data folder under
 "logs"; keep it with your lab's validation records.
 
-To start, open "Forensic Workbench" from the Start menu or desktop. A window
-shows the workbench's address and log; your browser opens the workbench.
-Close that window to stop the workbench.
+To start, open "Forensic Workbench" from the Start menu or desktop. The
+workbench opens in its own window; close the window to stop it. To serve it
+to other computers, use "Forensic Workbench (browser and server console)"
+instead: it shows the address and log, and closing it stops the workbench.
 
 Third-party software included: Python (PSF licence), FFmpeg (GPL; see the
 ffmpeg folder), the Microsoft Visual C++ runtime, and the Python libraries

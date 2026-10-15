@@ -20,6 +20,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8", "httpx>=0.27", "cryptography>=42", "onnx>=1.15"]
 tools = ["onnx>=1.15"]
+desktop = ["pywebview>=6.2"]   # the Windows desktop app window (Microsoft Edge WebView2)
 
 [project.scripts]
 forensic-mcp = "forensic.mcp_server:main"

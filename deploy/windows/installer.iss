@@ -16,6 +16,8 @@
 
 #define AppName "Forensic Workbench"
 #define Python "{app}\python\python.exe"
+#define PythonW "{app}\python\pythonw.exe"
+#define AppUserModelID "ForensicWorkbench.Desktop"
 #define Launcher "{app}\launcher\workbench_launcher.py"
 
 [Setup]
@@ -37,7 +39,8 @@ InfoBeforeFile=install-notes.txt
 OutputDir={#OutputDir}
 OutputBaseFilename=ForensicWorkbench-{#AppVersion}-Setup
 UninstallDisplayName={#AppName} {#AppVersion}
-UninstallDisplayIcon={app}\python\python.exe
+UninstallDisplayIcon={app}\workbench.ico
+SetupIconFile=workbench.ico
 Compression=lzma2/max
 SolidCompression=yes
 LZMANumBlockThreads=4
@@ -76,17 +79,18 @@ Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "host"; String: "127
 Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "port"; String: "{code:Port}"
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; Comment: "Start the workbench and open it in the browser"
+Name: "{group}\{#AppName}"; Filename: "{#PythonW}"; Parameters: "-X utf8 ""{#Launcher}"" app"; WorkingDir: "{app}"; IconFilename: "{app}\workbench.ico"; AppUserModelID: "{#AppUserModelID}"; Comment: "Open the workbench in its own window"
+Name: "{group}\{#AppName} (browser and server console)"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; IconFilename: "{app}\workbench.ico"; Comment: "Start the workbench in a console window and open it in the browser"
 Name: "{group}\Self-test"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" selftest --pause"; WorkingDir: "{app}"; Comment: "Check the installation and run the acceptance self-test"
 Name: "{group}\Case data folder"; Filename: "{code:DataDir}"
 Name: "{group}\User guide"; Filename: "{app}\docs\README.md"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}"; Filename: "{#PythonW}"; Parameters: "-X utf8 ""{#Launcher}"" app"; WorkingDir: "{app}"; IconFilename: "{app}\workbench.ico"; AppUserModelID: "{#AppUserModelID}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\vcredist\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing the Microsoft Visual C++ runtime..."; Check: NeedsVCRedist; Flags: waituntilterminated
 Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" selftest --pause"; WorkingDir: "{app}"; Description: "Run the acceptance self-test now (recommended)"; Flags: postinstall skipifsilent
-Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; Description: "Start the {#AppName}"; Flags: postinstall nowait unchecked skipifsilent
+Filename: "{#PythonW}"; Parameters: "-X utf8 ""{#Launcher}"" app"; WorkingDir: "{app}"; Description: "Open the {#AppName}"; Flags: postinstall nowait unchecked skipifsilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\launcher\__pycache__"
@@ -179,7 +183,7 @@ begin
     Space + 'Python runtime and all libraries' + NewLine +
     Space + 'FFmpeg and FFprobe' + NewLine +
     Space + 'AI models (super-resolution, face detection), hash-pinned' + NewLine +
-    Space + 'Workbench user interface' + NewLine;
+    Space + 'Workbench desktop app and user interface' + NewLine;
   if MemoTasksInfo <> '' then
     Result := Result + NewLine + MemoTasksInfo;
 end;

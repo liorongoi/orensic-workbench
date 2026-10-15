@@ -24,9 +24,21 @@ for:
 
 At the end it offers the acceptance self-test: it re-hashes every installed file against the
 installer's `SHA256SUMS`, then runs `forensic.selftest`, and saves its output under
-`<case data>\logs`. Start the workbench from **Start > Forensic Workbench**: a console window
-shows the address and log, and the browser opens the workbench; closing the window stops it.
-The Start menu also has **Self-test** and **Case data folder**.
+`<case data>\logs`.
+
+**Start > Forensic Workbench** (and the desktop shortcut) opens the workbench as a desktop app,
+in its own window, through the Microsoft Edge WebView2 runtime that Windows 10 and 11 include.
+Closing the window stops the workbench; its log goes to `<case data>\logs\workbench-<date>.txt`.
+If the workbench is already running on this computer (for example from the console shortcut
+below, serving other computers on the lab network), the window opens on it and closing the
+window leaves it running. When `host` in `workbench.ini` is a network address, closing a window
+that started the workbench asks first, because other computers may be using it. On a computer
+without WebView2 the app opens the workbench in the default browser instead, with a small
+dialog that stops it.
+
+**Forensic Workbench (browser and server console)** runs the workbench in a console window that
+shows the address and log, and opens the browser; closing the console stops it. Use it to serve
+the workbench to other computers. The Start menu also has **Self-test** and **Case data folder**.
 
 Settings live in `<install folder>\workbench.ini` (`data_dir`, `import_dir`, `host`, `port`, and
 optionally `c2pa_trust_anchors` and `allowed_hosts`, the extra names browsers may use to reach it). Running a newer installer upgrades in place and keeps

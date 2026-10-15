@@ -31,7 +31,7 @@ $p = Start-Process -Wait -PassThru -FilePath (Resolve-Path $Installer) -Argument
     "/DIR=`"$App`"", "/DATADIR=`"$Data`"", "/PORT=$Port", "/LOG=`"$Root\install.log`"")
 if ($p.ExitCode -ne 0) { Get-Content "$Root\install.log" -Tail 40; throw "installer exited with $($p.ExitCode)" }
 Get-Content "$App\workbench.ini"
-foreach ($f in "python\python.exe", "ffmpeg\ffmpeg.exe", "ffmpeg\ffprobe.exe", "frontend\dist\index.html",
+foreach ($f in "python\python.exe", "python\pythonw.exe", "workbench.ico", "ffmpeg\ffmpeg.exe", "ffmpeg\ffprobe.exe", "frontend\dist\index.html",
                "launcher\workbench_launcher.py", "SHA256SUMS", "BUILDINFO.txt", "unins000.exe") {
     if (-not (Test-Path "$App\$f")) { throw "missing after install: $f" }
 }
@@ -47,7 +47,7 @@ if ($AllUsers -and -not ($acl | Where-Object { $_.IdentityReference -match "\\Fo
 }
 if ($AllUsers) { net localgroup "Forensic Examiners" | Out-Host }
 $programs = if ($AllUsers) { "$env:ProgramData\Microsoft\Windows\Start Menu\Programs" } else { "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" }
-foreach ($l in "Forensic Workbench.lnk", "Self-test.lnk", "Case data folder.lnk") {
+foreach ($l in "Forensic Workbench.lnk", "Forensic Workbench (browser and server console).lnk", "Self-test.lnk", "Case data folder.lnk") {
     if (-not (Test-Path "$programs\Forensic Workbench\$l")) { throw "Start menu shortcut missing: $l" }
 }
 Get-Content "$App\BUILDINFO.txt"
@@ -88,6 +88,10 @@ try {
     Write-Host "Created case $($case.id) through the API"
     if (-not (Test-Path "$Data\forensic.sqlite3")) { throw "case database not written to the case data folder" }
 
+    Step "Desktop app window on the running workbench"
+    & $py -B -X utf8 $launcher app --smoke-test
+    if ($LASTEXITCODE -ne 0) { throw "the desktop window did not render the workbench" }
+
     Step "Launcher reuses a running workbench"
     & $py -B -X utf8 $launcher run --no-browser
     if ($LASTEXITCODE -ne 0) { throw "second launch did not detect the running workbench" }
@@ -96,6 +100,14 @@ try {
 } finally {
     Remove-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue
 }
+
+Step "Desktop app starting its own workbench"
+& $py -B -X utf8 $launcher app --smoke-test
+if ($LASTEXITCODE -ne 0) { throw "the desktop app did not start the workbench and render it" }
+Start-Sleep -Seconds 2
+$stillUp = $true
+try { Invoke-RestMethod "http://127.0.0.1:$Port/api/health" -TimeoutSec 2 | Out-Null } catch { $stillUp = $false }
+if ($stillUp) { throw "closing the desktop window did not stop the workbench it started" }
 
 Step "Uninstalling"
 $u = Start-Process -Wait -PassThru -FilePath "$App\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
