@@ -230,8 +230,15 @@ Removing evidence is a human action: an AI agent cannot remove or restore eviden
   At 1600 % and above a pixel grid is drawn.
 - **Pixel inspector**: the bar under the image shows the x, y position and the R, G, B values
   of the pixel under the cursor, with a colour swatch.
-- **Compare with the original**: hold **B**, or hold the **Original** button. The viewer
-  shows the original frame until you let go.
+- **Compare with the original**: once a chain has steps, three buttons at the top right of the
+  viewer put the original next to the result. Click the lit button again to turn it off.
+  - **Swipe**: the original on the left, the result on the right; drag the yellow divider.
+  - **Side by side**: two panes that zoom and pan together.
+  - **Flip**: one image at a time; press **T** or click the label at the bottom to switch.
+
+  Hold **B** at any time to peek at the original. If the chain changed the image size, the
+  original is scaled onto the result so both line up (after a crop it is scaled to the same
+  height). The pixel bar reads the original's own pixel when the cursor is over it.
 - **⛶ Crop** (or key **C**): draw a crop box on the image (see 7.5).
 - **? shortcuts** at the bottom right lists the keyboard shortcuts when you hover it.
 
