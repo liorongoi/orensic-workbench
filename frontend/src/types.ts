@@ -63,6 +63,7 @@ export interface DetectorCard {
   version: string;
   validated_on: string;
   corpus: string;
+  seeded?: boolean;
   results: Record<string, Record<string, unknown>>;
   known_failure_modes: string[];
 }

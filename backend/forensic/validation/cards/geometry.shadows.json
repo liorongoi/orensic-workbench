@@ -40,6 +40,7 @@
     "numpy": "2.5.3",
     "opencv": "5.0.0",
     "pillow": "12.3.0",
+    "onnxruntime": "1.29.0",
     "python": "3.13.16"
   },
   "how_to_reproduce": "python -m forensic.validation.geomgen geometry"

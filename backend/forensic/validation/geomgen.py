@@ -42,7 +42,16 @@ def _software() -> dict:
     from .. import __version__
 
     return {"forensic_workbench": __version__, "numpy": np.__version__, "opencv": cv2.__version__,
-            "pillow": Image.__version__, "python": platform.python_version()}
+            "pillow": Image.__version__, "onnxruntime": _ort_version(), "python": platform.python_version()}
+
+
+def _ort_version() -> str:
+    try:
+        import onnxruntime
+
+        return onnxruntime.__version__
+    except ImportError:
+        return "not installed"
 
 
 def _target(rng) -> np.ndarray:
