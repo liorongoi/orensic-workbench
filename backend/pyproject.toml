@@ -15,10 +15,11 @@ dependencies = [
     "PyWavelets>=1.6",
     "onnxruntime>=1.17",
     "c2pa-python>=0.38",
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "httpx>=0.27", "cryptography>=42", "onnx>=1.15"]
+dev = ["pytest>=8", "httpx>=0.27", "onnx>=1.15"]
 tools = ["onnx>=1.15"]
 
 [project.scripts]

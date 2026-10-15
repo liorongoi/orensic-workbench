@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scope: [current-user, all-users]
+        scope: [current-user, all-users, all-users-lab]
     steps:
       - uses: actions/checkout@v4
         with: { sparse-checkout: deploy/windows }
@@ -44,10 +44,10 @@ jobs:
         shell: pwsh
         run: |
           $setup = (Get-ChildItem dist\*-Setup.exe).FullName
-          if ("${{ matrix.scope }}" -eq "all-users") {
-            deploy\windows\test-installer.ps1 -Installer $setup -AllUsers
-          } else {
-            deploy\windows\test-installer.ps1 -Installer $setup
+          switch ("${{ matrix.scope }}") {
+            "all-users"     { deploy\windows\test-installer.ps1 -Installer $setup -AllUsers }
+            "all-users-lab" { deploy\windows\test-installer.ps1 -Installer $setup -AllUsers -LabNetwork }
+            default         { deploy\windows\test-installer.ps1 -Installer $setup }
           }
 
   release:

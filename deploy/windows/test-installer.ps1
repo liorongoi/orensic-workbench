@@ -2,16 +2,18 @@
 .SYNOPSIS
   Install the built installer silently on a clean Windows machine and check it works offline.
 
-      deploy\windows\test-installer.ps1 -Installer dist\ForensicWorkbench-0.3.0-Setup.exe [-AllUsers]
+      deploy\windows\test-installer.ps1 -Installer dist\ForensicWorkbench-0.3.0-Setup.exe [-AllUsers] [-LabNetwork]
 
   Installs, blocks the installed Python from the network with a firewall rule (needs an
   administrator shell), runs the acceptance self-test with nothing but Windows itself on PATH,
   starts the workbench and checks the API and UI answer, then uninstalls and checks the case
-  data folder was kept.
+  data folder was kept. With -LabNetwork it chooses the lab-network option and checks the
+  workbench answers over HTTPS with a certificate that verifies against its local authority.
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Installer,
     [switch]$AllUsers,
+    [switch]$LabNetwork,
     [string]$Root = "C:\fw-test",
     [int]$Port = 8765
 )
@@ -27,7 +29,7 @@ New-Item -ItemType Directory $Root | Out-Null
 
 Step "Installing silently ($mode)"
 $p = Start-Process -Wait -PassThru -FilePath (Resolve-Path $Installer) -ArgumentList @(
-    "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", $mode, "/TASKS=desktopicon",
+    "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", $mode, $(if ($LabNetwork) { "/TASKS=desktopicon,labnetwork" } else { "/TASKS=desktopicon" }),
     "/DIR=`"$App`"", "/DATADIR=`"$Data`"", "/PORT=$Port", "/LOG=`"$Root\install.log`"")
 if ($p.ExitCode -ne 0) { Get-Content "$Root\install.log" -Tail 40; throw "installer exited with $($p.ExitCode)" }
 Get-Content "$App\workbench.ini"
@@ -51,6 +53,12 @@ foreach ($l in "Forensic Workbench.lnk", "Self-test.lnk", "Case data folder.lnk"
     if (-not (Test-Path "$programs\Forensic Workbench\$l")) { throw "Start menu shortcut missing: $l" }
 }
 Get-Content "$App\BUILDINFO.txt"
+if ($LabNetwork) {
+    if (-not (Select-String -Quiet -Path "$App\workbench.ini" -Pattern '^network\s*=\s*lab')) { throw "lab-network option not written to workbench.ini" }
+    if ($AllUsers -and -not (Get-NetFirewallRule -DisplayName "Forensic Workbench" -ErrorAction SilentlyContinue)) {
+        throw "an all-users lab-network install should open the workbench port in the firewall"
+    }
+}
 
 Step "Blocking the installed Python from the network"
 $rule = "fw-test block bundled python"
@@ -71,6 +79,12 @@ try {
     $server = Start-Process -PassThru -FilePath $py -ArgumentList "-B", "-X", "utf8", "`"$launcher`"", "run", "--no-browser" `
         -RedirectStandardOutput $out -RedirectStandardError $err -WorkingDirectory $App
     $base = "http://127.0.0.1:$Port"
+    if ($LabNetwork) {
+        $base = "https://localhost:$Port"
+        # The checks below talk to the API; the certificate itself is verified with curl further down.
+        $PSDefaultParameterValues["Invoke-RestMethod:SkipCertificateCheck"] = $true
+        $PSDefaultParameterValues["Invoke-WebRequest:SkipCertificateCheck"] = $true
+    }
     $health = $null
     for ($i = 0; $i -lt 120 -and -not $health; $i++) {
         Start-Sleep -Milliseconds 500
@@ -79,6 +93,15 @@ try {
     }
     if (-not $health) { Get-Content $out, $err -ErrorAction SilentlyContinue; throw "the workbench did not answer on $base" }
     $health | ConvertTo-Json -Depth 5
+    if ($LabNetwork) {
+        $ca = "$Data\tls\workbench-ca.crt"
+        if (-not (Test-Path $ca)) { throw "no local certificate authority in the case data folder" }
+        foreach ($name in "localhost", $env:COMPUTERNAME.ToLower()) {
+            & "$env:SystemRoot\System32\curl.exe" --fail --silent --show-error --cacert $ca "https://${name}:$Port/api/health" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "HTTPS to $name did not verify against the workbench authority" }
+        }
+        Write-Host "HTTPS verified for localhost and $($env:COMPUTERNAME.ToLower())"
+    }
     $page = Invoke-WebRequest "$base/" -UseBasicParsing
     if ($page.Content -notmatch 'id="root"') { throw "the UI page was not served" }
     $refused = $false
@@ -113,4 +136,7 @@ Start-Sleep -Seconds 3
 if (Test-Path "$App\python\python.exe") { throw "programs were not removed" }
 if (-not (Test-Path "$Data\forensic.sqlite3")) { throw "uninstall removed case data" }
 if (Test-Path "$programs\Forensic Workbench") { throw "Start menu folder was not removed" }
-Write-Host "`nInstaller test passed ($mode)." -ForegroundColor Green
+if ($LabNetwork -and $AllUsers -and (Get-NetFirewallRule -DisplayName "Forensic Workbench" -ErrorAction SilentlyContinue)) {
+    throw "uninstall left the firewall rule behind"
+}
+Write-Host "`nInstaller test passed ($mode$(if ($LabNetwork) { ', lab network' }))." -ForegroundColor Green

@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import socket
+import ssl
 import sys
 import threading
 import time
@@ -58,20 +59,36 @@ def configure() -> dict:
     os.environ["PATH"] = str(APP / "ffmpeg") + os.pathsep + os.environ.get("PATH", "")
     for d in (os.environ["FORENSIC_DATA_DIR"], os.environ["FORENSIC_IMPORT_DIR"]):
         Path(d).mkdir(parents=True, exist_ok=True)
-    host = os.environ.get("FORENSIC_HOST") or cfg.get("host") or "127.0.0.1"
+    # network = local (default): only this computer. network = lab: examiners' PCs on the lab
+    # network connect over HTTPS, signed in with their workbench accounts.
+    lab = (os.environ.get("FORENSIC_NETWORK") or cfg.get("network") or "local").strip().lower() == "lab"
+    host = os.environ.get("FORENSIC_HOST") or ("0.0.0.0" if lab else cfg.get("host") or "127.0.0.1")
     # The API answers only host names it is told about; add a configured lab address and any
     # allowed_hosts from the ini (comma-separated) to 127.0.0.1 and localhost.
     extra = [h.strip() for h in (cfg.get("allowed_hosts") or "").split(",") if h.strip()]
     if host not in ("127.0.0.1", "localhost", "0.0.0.0", "::"):
         extra.append(host)
+    tls = None
+    if lab:
+        from forensic.tls import ensure_certificate, fingerprint, machine_names
+
+        names, addrs = machine_names()
+        extra += [n for n in names + addrs if n not in ("localhost", "127.0.0.1")]
+        if cfg.get("tls_cert") and cfg.get("tls_key"):
+            tls = {"cert": Path(cfg["tls_cert"]), "key": Path(cfg["tls_key"]), "authority": None,
+                   "authority_sha256": fingerprint(Path(cfg["tls_cert"])), "names": names}
+        else:
+            tls = ensure_certificate(Path(os.environ["FORENSIC_DATA_DIR"]) / "tls", names, addrs)
+        os.environ["FORENSIC_SECURE_COOKIE"] = "1"
     if extra:
-        os.environ.setdefault("FORENSIC_ALLOWED_HOSTS", ",".join(extra))
-    return {"host": host, "port": int(os.environ.get("FORENSIC_PORT") or cfg.get("port") or 8000)}
+        os.environ.setdefault("FORENSIC_ALLOWED_HOSTS", ",".join(dict.fromkeys(extra)))
+    return {"host": host, "port": int(os.environ.get("FORENSIC_PORT") or cfg.get("port") or 8000), "tls": tls}
 
 
-def _health(url: str, timeout: float = 1.0) -> dict | None:
+def _health(url: str, timeout: float = 1.0, cafile: Path | None = None) -> dict | None:
+    ctx = ssl.create_default_context(cafile=str(cafile) if cafile else None) if url.startswith("https") else None
     try:
-        with urllib.request.urlopen(url + "/api/health", timeout=timeout) as r:
+        with urllib.request.urlopen(url + "/api/health", timeout=timeout, context=ctx) as r:
             return json.loads(r.read())
     except Exception:  # noqa: BLE001
         return None
@@ -88,9 +105,13 @@ def _port_free(host: str, port: int) -> bool:
 
 def run(open_browser: bool) -> int:
     net = configure()
+    tls = net["tls"]
     browse_host = "127.0.0.1" if net["host"] in ("0.0.0.0", "") else net["host"]
-    url = f"http://{browse_host}:{net['port']}"
-    if _health(url):
+    if tls:
+        browse_host = "localhost"  # a name the certificate carries
+    url = f"{'https' if tls else 'http'}://{browse_host}:{net['port']}"
+    cafile = tls and (tls["authority"] or tls["cert"])
+    if _health(url, cafile=cafile):
         print(f"The Forensic Workbench is already running at {url}")
         if open_browser:
             webbrowser.open(url)
@@ -101,7 +122,7 @@ def run(open_browser: bool) -> int:
 
     def _open_when_ready():
         for _ in range(240):
-            if _health(url):
+            if _health(url, cafile=cafile):
                 webbrowser.open(url)
                 return
             time.sleep(0.5)
@@ -110,13 +131,20 @@ def run(open_browser: bool) -> int:
     print(f"  Address:     {url}")
     print(f"  Case data:   {os.environ['FORENSIC_DATA_DIR']}")
     print(f"  Import from: {os.environ['FORENSIC_IMPORT_DIR']}")
+    if tls:
+        lan = next((n for n in tls["names"] if n != "localhost" and "." in n), None) or socket.gethostname().lower()
+        print(f"  Lab network: https://{lan}:{net['port']} (examiners sign in with their workbench accounts)")
+        if tls["authority"]:
+            print(f"  Certificate: install {tls['authority']} on each examiner PC once")
+            print(f"               (Trusted Root Certification Authorities); SHA-256 {tls['authority_sha256']}")
     print("Close this window to stop the workbench.\n")
     if open_browser:
         threading.Thread(target=_open_when_ready, daemon=True).start()
 
     import uvicorn
 
-    uvicorn.run("forensic.api:app", host=net["host"], port=net["port"], log_level="info")
+    extra = {"ssl_certfile": str(tls["cert"]), "ssl_keyfile": str(tls["key"])} if tls else {}
+    uvicorn.run("forensic.api:app", host=net["host"], port=net["port"], log_level="info", **extra)
     return 0
 
 

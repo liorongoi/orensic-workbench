@@ -20,7 +20,8 @@ for:
   account. For all users, only members of the local **Forensic Examiners** group (the account
   that ran the installer is added), administrators and SYSTEM can open it; add each examiner with
   `net localgroup "Forensic Examiners" <account> /add`, and they sign out and in again;
-- the local port (default 8000; the workbench listens on 127.0.0.1 only).
+- the local port (default 8000; the workbench listens on 127.0.0.1 only, unless you tick the
+  lab-network option, see [Examiners on other PCs](#examiners-on-other-pcs)).
 
 At the end it offers the acceptance self-test: it re-hashes every installed file against the
 installer's `SHA256SUMS`, then runs `forensic.selftest`, and saves its output under
@@ -30,7 +31,8 @@ The Start menu also has **Self-test** and **Case data folder**.
 
 Settings live in `<install folder>\workbench.ini` (`data_dir`, `import_dir`, `host`, `port`, and
 optionally `c2pa_trust_anchors`, `allowed_hosts`, the extra names browsers may use to reach it,
-and `job_workers` and `gpu_jobs`, see [Several examiners](#several-examiners)). Running a newer installer upgrades in place and keeps
+`job_workers` and `gpu_jobs`, and `network`, `tls_cert` and `tls_key`; see
+[Several examiners](#several-examiners)). Running a newer installer upgrades in place and keeps
 these settings and the case data. Silent installation for managed rollouts:
 
 ```
@@ -72,10 +74,30 @@ examiner with the fewest jobs running, then to whoever has waited longest for a 
 examiner's batch does not hold up the others. A job that was running when the workbench
 stopped is marked failed and must be started again; jobs still waiting resume.
 
-To let examiners use the workbench from their own PCs, set `host` in `workbench.ini` to the
-machine's address and add the name they type in the browser to `allowed_hosts`. Passwords then
-cross the lab network, so put the workbench behind a TLS reverse proxy (and set
-`FORENSIC_SECURE_COOKIE=1`) unless the network is trusted.
+### Examiners on other PCs
+
+By default the workbench answers only on the computer it runs on. To let examiners use it from
+their own PCs, tick **Let examiners connect from other PCs on the lab network** in the installer
+(silent install: `/TASKS="labnetwork"`), or set `network = lab` in `workbench.ini` and restart.
+The workbench then:
+
+- listens on the lab network over **HTTPS** only, at `https://<computer name>:<port>`;
+- creates, with no internet, a certificate authority for this machine and a server
+  certificate naming its host names and addresses (in `<case data>\tls`, re-issued
+  automatically when they change). Install `workbench-ca.crt` once on each examiner PC
+  (double-click > Install Certificate > Local Machine > Trusted Root Certification Authorities,
+  or `certutil -addstore Root workbench-ca.crt` as administrator), after comparing its SHA-256
+  fingerprint with the one the workbench window prints. A lab with its own certificate sets
+  `tls_cert` and `tls_key` in `workbench.ini` instead;
+- answers only the computer's own names and addresses (the Host check), and needs a signed-in
+  workbench account on every request; the sign-in cookie is sent over HTTPS only;
+- on an all-users install, opens its port in Windows Firewall for domain and private networks
+  only (never public); uninstalling removes the rule. On a per-user install Windows asks the
+  first time the workbench starts.
+
+MCP servers started with `--http` and a `--host` other than loopback refuse to start unless
+`FORENSIC_MCP_TOKEN` holds a random secret of at least 24 characters; every agent request must
+then send `Authorization: Bearer <token>`.
 
 ## Container
 
