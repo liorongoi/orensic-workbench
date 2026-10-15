@@ -62,6 +62,11 @@ def test_remove_chain(client, jpeg_path):
     assert [c["id"] for c in client.get(f"/api/cases/{case['id']}").json()["chains"]] == [b["id"]]
     entries = client.get(f"/api/cases/{case['id']}/audit").json()["entries"]
     assert any(x["action"] == "chain.remove" and x["target"] == a["id"] for x in entries)
+    assert [c["id"] for c in client.get(f"/api/cases/{case['id']}").json()["removed_chains"]] == [a["id"]]
+    client.post(f"/api/chains/{a['id']}/restore", headers=H)
+    d = client.get(f"/api/cases/{case['id']}").json()
+    assert [c["id"] for c in d["chains"]] == [a["id"], b["id"]] and d["removed_chains"] == []
+    assert client.get(f"/api/cases/{case['id']}/audit").json()["entries"][-1]["action"] == "chain.restore"
 
 
 def test_agents_cannot_remove(wb, case, jpeg_path):

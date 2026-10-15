@@ -290,3 +290,4 @@ details.guide summary { cursor: pointer; font-style: normal; color: var(--muted)
 .verdict-line { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .result .verdict-line { white-space: normal; }
 .detector.red .detector-name b, .stage-head .light.red + b { color: var(--bad); }
+.removed-chains { margin: -2px 0 8px; }
