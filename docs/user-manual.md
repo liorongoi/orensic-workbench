@@ -274,6 +274,7 @@ Removing evidence is a human action: an AI agent cannot remove or restore eviden
   Hold **B** at any time to peek at the original. If the chain changed the image size, the
   original is scaled onto the result so both line up (after a crop it is scaled to the same
   height). The pixel bar reads the original's own pixel when the cursor is over it.
+- **▦ MB** (or key **M**, video only): how the encoder coded each block of the frame (see 6.3).
 - **⛶ Crop** (or key **C**): draw a crop box on the image (see 7.5).
 - **? shortcuts** at the bottom right lists the keyboard shortcuts when you hover it.
 
@@ -312,7 +313,8 @@ viewer picks what to draw:
 Hover a block to read its position, class and QP in the status bar. **Flip**, **Swipe** and
 **Side by side** compare the overlay with the plain frame. Use it to pick the frames worth
 enhancing or averaging (intra blocks and a low QP carry the most real detail) and to see which
-regions were only copied from another frame. Read-only: nothing is recorded in the audit trail.
+regions were only copied from another frame. It only reads the video and changes no chain.
+How the data is obtained is in the algorithm guide, section 3.3.
 
 ---
 
