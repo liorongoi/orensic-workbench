@@ -81,11 +81,20 @@ try {
     $health | ConvertTo-Json -Depth 5
     $page = Invoke-WebRequest "$base/" -UseBasicParsing
     if ($page.Content -notmatch 'id="root"') { throw "the UI page was not served" }
-    $models = Invoke-RestMethod "$base/api/models"
+    $refused = $false
+    try { Invoke-RestMethod "$base/api/cases" | Out-Null } catch { $refused = $_.Exception.Response.StatusCode.value__ -eq 401 }
+    if (-not $refused) { throw "the API answered without a signed-in account" }
+    # First run creates the administrator; a later run (the data folder survives uninstall) signs in.
+    $acct = '{"username": "installer", "full_name": "Installer test", "password": "installer-test-pw"}'
+    try { Invoke-RestMethod -Method Post "$base/api/auth/setup" -ContentType "application/json" -Body $acct -SessionVariable web | Out-Null }
+    catch { Invoke-RestMethod -Method Post "$base/api/auth/login" -ContentType "application/json" -Body $acct -SessionVariable web | Out-Null }
+    $models = Invoke-RestMethod "$base/api/models" -WebSession $web
     Write-Host "UI served; $(@($models).Count) model entries listed"
-    $case = Invoke-RestMethod -Method Post "$base/api/cases" -Headers @{ "X-Examiner" = "Installer test" } `
+    $case = Invoke-RestMethod -Method Post "$base/api/cases" -WebSession $web `
         -ContentType "application/json" -Body '{"name": "Installer test", "examiner": "Installer test"}'
     Write-Host "Created case $($case.id) through the API"
+    $queue = Invoke-RestMethod "$base/api/jobs" -WebSession $web
+    Write-Host "Job queue: $($queue.slots.cpu) CPU and $($queue.slots.gpu) GPU slots"
     if (-not (Test-Path "$Data\forensic.sqlite3")) { throw "case database not written to the case data folder" }
 
     Step "Launcher reuses a running workbench"

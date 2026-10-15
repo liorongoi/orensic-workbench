@@ -47,6 +47,11 @@ def configure() -> dict:
     }
     if cfg.get("c2pa_trust_anchors"):
         env["FORENSIC_C2PA_TRUST_ANCHORS"] = cfg["c2pa_trust_anchors"]
+    # How many queued jobs run at once: model-free work, and work on the graphics card.
+    if cfg.get("job_workers"):
+        env["FORENSIC_JOB_WORKERS"] = cfg["job_workers"]
+    if cfg.get("gpu_jobs"):
+        env["FORENSIC_GPU_JOBS"] = cfg["gpu_jobs"]
     for k, v in env.items():
         os.environ.setdefault(k, v)
     # Validation tools call ffmpeg by name; make sure they find the bundled one first.
