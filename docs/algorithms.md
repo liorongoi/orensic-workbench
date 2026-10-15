@@ -22,7 +22,7 @@ Contents
 9. [Enhancement: multi-frame methods](#9-enhancement-multi-frame-methods)
 10. [AI-assisted steps](#10-ai-assisted-steps)
 11. [Authentication: file structure and metadata](#11-authentication-file-structure-and-metadata)
-12. [Authentication: JPEG compression analyses](#12-authentication-jpeg-compression-analyses)
+12. [Authentication: compression, copy-move and noise analyses](#12-authentication-compression-copy-move-and-noise-analyses)
 13. [Camera identification (PRNU)](#13-camera-identification-prnu)
 14. [Synthetic media: provenance, camera traces, learned detectors](#14-synthetic-media-provenance-camera-traces-learned-detectors)
 15. [Face-swap and face-edit checks](#15-face-swap-and-face-edit-checks)
@@ -43,9 +43,10 @@ throughout the document, so they are stated once here.
 
 **1. Reproducible to the bit.** A second examiner, or the same examiner a year later,
 must get exactly the same pixels from the same original and the same chain. Every filter
-is a pure function of its input and parameters; arithmetic that could vary with thread
-scheduling (multi-threaded OpenCV, GPU kernels, parallel ONNX inference) is switched off;
-random sampling uses fixed seeds. This rules out methods whose output depends on random
+is a pure function of its input and parameters; work is spread over CPU cores only by
+splitting it into independent pieces whose results cannot depend on which thread computed
+them, the graphics card is used for a model only after it reproduces that model's output
+exactly, and random sampling uses fixed seeds (section 21). This rules out methods whose output depends on random
 initialisation or on hardware, and it is why the report can say "reproduced bit for bit".
 
 **2. Published, citable and explainable.** Each step must be explainable to a court in a
@@ -69,10 +70,11 @@ validated accuracy and a reading guide, and no single score is presented as a ve
 meant to be used commercially. Methods that need a network service, or published code and
 weights that carry research-only or non-commercial licences, are not bundled.
 
-**6. Fast enough on a workstation CPU.** At the time of this version every algorithm
-runs on the CPU. Where a faster approximate method and an exact one exist, the exact one
-was chosen if it stayed interactive on a typical image. Section 21 describes the cost of
-this choice and what is being changed.
+**6. Fast enough on a lab workstation.** Filters use every CPU core and the learned models
+use the graphics card when it reproduces results exactly; intermediate results and decoded
+frames are kept in RAM. Where a faster approximate method and an exact one exist, the exact
+one was chosen if it stayed interactive on a typical image. Section 21 describes how speed is
+gained without giving up rule 1.
 
 ---
 
@@ -172,6 +174,15 @@ is approximate on long-GOP and variable-frame-rate recordings, which are common 
 seeking by index always returns the same frame. Frame types (I, P, B), key flags,
 timestamps and packet sizes come from `ffprobe -show_frames`.
 
+**Frame cache.** Decoding frame n means decoding everything since the previous key frame, so
+decoding one frame at a time while stepping through a video is slow. Decoded 8-bit frames are
+kept in RAM (an eighth of memory, at most 16 GB, by default) keyed by the file's SHA-256 and the
+frame index, and a miss decodes a window of 48 frames ahead at once. Cached frames are
+byte-identical to a fresh decode; "Verify", the reviewer and the report bypass the cache and
+decode again from the original. FFmpeg writes straight into the result array, and 8-bit values
+are converted to float by a 256-entry lookup table that gives exactly the same numbers as the
+division, in one pass.
+
 **Self-contained evidence.** Playlist and concat formats (HLS, DASH, concat lists) are
 refused at ingest, because they make FFmpeg read other files: the decoded pixels would not
 come from the hashed original.
@@ -196,9 +207,10 @@ Single-image filters applied to a frame range run on every frame. Multi-frame fi
 consume the whole range and return either a range (stabilise) or one image (integrate,
 super resolution, pick frame).
 
-**Caching.** Intermediate results are kept in a small memory cache (24 entries, entries
-larger than 512 MB are not cached) keyed by the hash of the chain up to that step. Changing
-step 5 re-uses steps 1 to 4. The cache is never used for "Verify reproducibility" or by the
+**Caching.** Intermediate results are kept in a memory cache keyed by the hash of the chain up
+to that step, bounded by size (a quarter of RAM, at most 32 GB, by default; up to 256 entries;
+a single result larger than half the budget is not kept). Changing step 5 re-uses steps 1 to 4.
+On a frame range, a single-image filter runs on the frames in parallel. The cache is never used for "Verify reproducibility" or by the
 reviewer, which always re-run from the original.
 
 **Live preview versus render.** The live preview runs the same engine but is not stored or
@@ -276,6 +288,42 @@ Greyscale uses **Rec. 601 luma** (0.299 R + 0.587 G + 0.114 B), the weighting of
 and most CCTV pipelines, so the result matches the brightness the codec itself worked with.
 Isolating one channel helps when one channel carries the detail (for example red for a
 number plate under sodium light). Invert is `1 − v`.
+
+### 5.8 Video range to full range
+
+Digital video is usually stored in **studio range** (ITU-R BT.601 and BT.709): black is 16 and
+white 235 for brightness, 16 to 240 for colour. If a recorder export carries the wrong range flag,
+or a player ignores it, the picture is shown without being stretched and looks washed out. The
+filter maps 16→0 and 235→255 linearly on the luma (Y of YCbCr), and optionally scales the colour
+channels about their centre by 255/224, then converts back to RGB.
+
+*Why a fixed mapping rather than auto-levels:* the correction is a known property of the format,
+not of the scene, so it is stated exactly and does not change with content. Auto-levels would
+also stretch footage that is merely dark. On footage that is already full range the filter clips,
+which the description warns about.
+
+### 5.9 Low-light enhancement (illumination map)
+
+Follows the **LIME** model (Guo, Li and Ling 2017): an image is reflectance times illumination,
+so dividing by an estimate of the illumination brightens dark areas and leaves lit ones.
+
+1. Illumination: the brightest of the three channels at each pixel (a lower bound on how lit that
+   point was), smoothed with an edge-preserving bilateral filter (Tomasi and Manduchi 1998), then a
+   Gaussian of the chosen smoothness (default 3 pixels).
+2. Gain: illumination to the power −strength (default 0.8), capped at **max gain** (default 6×),
+   applied equally to R, G and B so colour ratios are kept.
+3. Shadow denoise: lifting the shadows lifts their noise, so non-local means (strength default 10)
+   is blended in with weight 1 − 1/gain: lit areas stay as they were, the most brightened areas
+   take the denoised result.
+
+*Why LIME's structure, simplified:* LIME refines the illumination map by solving an optimisation;
+the bilateral filter gives a very similar edge-aware map in closed form, which is deterministic,
+fast and easy to explain. *Alternatives:* global gamma or levels lifts everything, so headlights
+and lamps burn out before the shadows show detail; CLAHE (5.4) works on local histograms and
+shifts colour less predictably; Retinex variants (MSRCR) add halos around bright lights; learned
+low-light networks (Zero-DCE, EnlightenGAN, RetinexFormer) can hallucinate texture in the dark
+areas and would need the generative-step controls. The filter changes local brightness, so its
+description warns against judging lighting or colour from the result.
 
 ---
 
@@ -418,9 +466,9 @@ correct tool instead.
 
 ## 8. Enhancement: deblurring
 
-All in `forensic/filters/deblur.py`. Both methods invert a **known** blur described by a
-point-spread function (PSF). All arithmetic is NumPy FFT in 64-bit float, which is
-deterministic.
+All in `forensic/filters/deblur.py`. The three methods invert a **known** blur described by
+a point-spread function (PSF). All arithmetic is NumPy FFT in 64-bit float, which is
+deterministic; the three colour channels are independent and run in parallel.
 
 ### 8.1 The blur models
 
@@ -454,7 +502,27 @@ Wiener. More iterations sharpen more and amplify noise; the optional total-varia
 dark, noisy footage better. Offering both, with the planner trying both, lets the examiner
 compare.
 
-### 8.4 Estimating motion blur (cepstrum)
+### 8.4 Total-variation deconvolution
+
+Finds the image x that minimises `‖k ∗ x − f‖² · μ/2 + TV(x)`: blurred by the PSF k it should
+match the evidence f, and its total variation (the sum of gradient magnitudes, Rudin, Osher and
+Fatemi 1992) should be small, which favours sharp edges and flat areas over noise and ripples.
+μ is the inverse of the **regularisation** (default 0.002). It is solved with **FTVd** (Wang,
+Yang, Yin and Zhang 2008): half-quadratic splitting introduces an auxiliary gradient field w;
+each iteration shrinks the image gradient towards w in closed form, then solves for x exactly in
+the frequency domain. A continuation raises the coupling β through 1, 2, 4 … 256 (9 stages), with
+3 iterations per stage by default.
+
+*Why:* on plates and text it gives much less ringing than Wiener and less noise than RL at the
+same sharpness, because TV is the prior that best describes printed characters (flat strokes on
+a flat background). FTVd solves every sub-problem exactly by FFT, so it is fast, has no step size
+to tune and no random start, and gives the same result every run. *Alternatives:* gradient
+descent on the TV objective is slow and needs a step size; primal-dual methods (Chambolle-Pock)
+converge to the same minimum but need more parameters; RL with a TV term (8.3) is a heuristic
+for Poisson noise rather than the TV minimiser. Like the others, it only recovers detail the
+blur attenuated, not detail it destroyed.
+
+### 8.5 Estimating motion blur (cepstrum)
 
 "Estimate motion blur" suggests a length and angle for the motion PSF. A uniform linear blur
 of length L puts periodic zeros in the spectrum, which appear in the **cepstrum** (inverse
@@ -531,14 +599,43 @@ that shapes the result; learned video super resolution (BasicVSR, EDVR, VRT) is 
 impressive on benchmarks and generative, so it would be walled off like single-image AI super
 resolution and is not used.
 
+### 9.5 Video denoise (motion-compensated)
+
+Denoises every frame of a range using its neighbours, after following the motion between them
+(after Liu and Freeman 2010):
+
+1. For each frame i and each neighbour j within the window (default 5 frames, so two each side),
+   dense optical flow from i to j is computed with **DIS** (Kroeger et al. 2016, OpenCV's medium
+   preset) on lightly blurred 8-bit grey frames.
+2. Frame j is warped onto frame i along the flow (bicubic).
+3. Each warped neighbour gets a per-pixel weight `exp(−(d / tolerance)²)`, where d is the colour
+   difference between lightly blurred versions of frame i and the warped frame j (default
+   tolerance 0.06). Where the flow failed (things appearing, disappearing or moving too fast), d
+   is large and the neighbour is left out, so moving objects do not leave trails.
+4. Frame i and its weighted neighbours are averaged, then light non-local means (strength 4) cleans
+   what is left.
+
+Frames are processed in parallel; each output frame depends only on the input frames, so the
+result does not depend on the order. Frames at the ends of the range have fewer neighbours.
+
+*Why:* averaging the same scene point over k frames cuts random noise by up to √k without the
+loss of detail of single-image denoising, and unlike integration (9.2) it works on moving scenes
+and keeps a frame per input frame. *Why DIS:* it is fast enough to run for every pair of frames,
+deterministic, and in OpenCV. *Alternatives:* VBM4D and VBM3D give slightly better results but
+are slow and have no licence-clean implementation in the bundle; Farnebäck flow is slower and
+less accurate on large motion; learned video denoisers (FastDVDnet, VRT) are trained on synthetic
+Gaussian noise rather than CCTV compression noise and can invent texture.
+
 ---
 
 ## 10. AI-assisted steps
 
 All learned models are listed in `forensic/models/manifest.json` with the SHA-256 of their
 weights, source, licence, training data and limits. Weights are verified before every load;
-a mismatched file is refused. Inference runs on ONNX Runtime on the CPU, single-threaded, so
-results are bit-identical on the same CPU family. See also [ai-models.md](ai-models.md).
+a mismatched file is refused. Inference runs on ONNX Runtime: on the graphics card (DirectML on
+Windows, CUDA where installed) when a probe shows it reproduces the model's output exactly,
+otherwise on every CPU core; one inference runs at a time, and the device used is printed in the
+report (section 21). See also [ai-models.md](ai-models.md).
 
 ### 10.1 AI super resolution (single image) — generative
 
@@ -549,10 +646,9 @@ wider than either network's receptive field, so tiling does not change the resul
 is limited to 8192 pixels per side.
 
 *Why these models:* they are small (35 to 100 KB), run quickly and deterministically on a CPU,
-are well documented, and carry the Apache-2.0 licence. *Why not Real-ESRGAN, SwinIR, HAT or
-diffusion upscalers:* they produce far more convincing detail precisely because they invent
-more of it; the forensic risk grows with the realism. Even the small models predict detail, so
-the step is **generative**:
+are well documented, and carry the Apache-2.0 licence. They invent less than the larger networks
+(10.2), so they remain the milder choice. Even the small models predict detail, so the step is
+**generative**:
 
 - the result is watermarked "ILLUSTRATIVE ONLY" wherever it is stored, exported or printed,
   and the viewer shows the same banner;
@@ -563,7 +659,35 @@ the step is **generative**:
 
 For evidential enlargement use multi-frame super resolution (9.4).
 
-### 10.2 Face redaction (YuNet)
+### 10.2 AI enhance and enlarge (Real-ESRGAN) — generative
+
+Enlarges a colour image 4× with **Real-ESRGAN** (Wang, Xie, Dong and Shan 2021), and reduces the
+result by area averaging when a scale of 1, 2 or 3 is chosen (scale 1 only cleans the image). Two
+networks are bundled: "full" is RRDBNet, the ESRGAN generator (23 residual-in-residual dense blocks,
+16.7 million parameters); "compact" is SRVGGNetCompact (1.2 million parameters, about ten times
+faster). The image is processed in 192-pixel tiles with a 24-pixel overlapping margin that is cut
+away again; the tile grid depends only on the image size, never on the device or thread count.
+The 4× result is limited to 8192 pixels per side, so the image must be cropped first.
+
+*Why it was added despite the risk:* FSRCNN and ESPCN were trained on clean images reduced by
+bicubic down-sampling, which is not how CCTV degrades, so on real stills they mostly enlarge the
+compression blocks and noise. Real-ESRGAN was trained on photographs degraded on the fly by a
+second-order model of real cameras (blur, resizing, sensor noise, JPEG), so it removes those
+artefacts and gives a far clearer illustration, which examiners asked for. It is also trained
+adversarially to produce natural texture, so it invents more: characters, faces and edges in its
+output may be plausible and wrong. It is therefore a **generative** step with every control of
+10.1 (watermark, no measurement, logged justification, reviewer flag), its description says not
+to read characters or faces from it, and multi-frame super resolution stays the evidential
+method. *Why Real-ESRGAN rather than SwinIR, HAT or diffusion upscalers:* its weights carry the
+BSD-3-Clause licence and convert to ONNX unchanged; SwinIR and HAT were trained on bicubic
+degradation like FSRCNN (their real-world variants use the same kind of degradation model as
+Real-ESRGAN, with heavier networks), and
+diffusion upscalers are much slower and sample random noise, so two runs differ. The weights were
+converted from the authors' PyTorch checkpoints by `tools/convert_realesrgan.py`, which pins the
+source file hashes, reads the file without PyTorch, refuses anything in it other than tensors,
+and copies the weights unchanged.
+
+### 10.3 Face redaction (YuNet)
 
 Finds faces with **YuNet** (Wu, Peng and Yu 2023) through OpenCV's wrapper (score threshold
 0.6, non-maximum suppression 0.3) and pixelates, blurs or blanks each box plus a margin, for
@@ -617,7 +741,7 @@ interlacing.
 
 ---
 
-## 12. Authentication: JPEG compression analyses
+## 12. Authentication: compression, copy-move and noise analyses
 
 ### 12.1 Error Level Analysis (ELA) — `forensic/analysis/compression.py`
 
@@ -695,6 +819,71 @@ methods on benchmarks. They were not bundled because the published code and weig
 carry research-only or non-commercial licences, and their training data and failure modes are
 harder to put in front of a court. A lab that licenses one can install it in the learned
 detector slot (section 14.3).
+
+### 12.5 Clone (copy-move) detection — `forensic/analysis/clone.py`
+
+Looks for an area copied to another place in the same image. Images larger than 2048 pixels on a
+side are analysed at that size, and results are reported in original pixels. Two detectors run
+by default, because each fails where the other works:
+
+- **Keypoints** (Amerini et al. 2011). Up to 20 000 SIFT keypoints are matched against the image
+  itself with the generalised 2-nearest-neighbour test (a match is kept while its distance is
+  under 0.5 times the next one), ignoring pairs closer than the minimum distance (default 40
+  pixels). Affine transforms are then found one at a time by RANSAC (3-pixel threshold), removing
+  each one's inliers; a transform needs 8 matches by default and a plausible scale (area ratio
+  between 0.25 and 4). Each transform is checked densely: a pixel belongs to the copy where the
+  image and its transformed self correlate above 0.85 (local zero-mean normalised correlation in
+  7×7 windows) and there is some texture. This finds copies that were rotated or rescaled.
+- **Blocks** (Fridrich, Soukal and Lukáš 2003). Every 16×16 block (on a 2-pixel grid) is described
+  by its 16 lowest-frequency DCT coefficients; near-flat blocks are skipped because they all look
+  alike. The blocks are sorted by coarsely quantised features so similar blocks sit next to each
+  other, each is compared with its next eight neighbours, and matching pairs vote for their
+  offset. An offset with at least 60 votes is a copy, outlined by the same dense check. This finds
+  plain (moved, not rotated) copies in smoother areas where SIFT finds no keypoints.
+
+Each copy is drawn on the map (one side in strong colour, the other in light colour, with lines
+joining matching points) and listed with its rotation, scale and shift. A copy raises the warning
+`clone.match`, which the Smart Report counts as red.
+
+*Why these two:* the comparative evaluation of Christlein et al. (2012) found that keypoint
+methods cope well with rotation, scaling and large images but miss copies in flat areas, where
+block methods still find them; using one of each covers both cases. Both are deterministic:
+OpenCV's RANSAC seeds its random generator the same way on every call, and the block search is
+exhaustive. *Alternatives:* rotation-invariant block features (Zernike moments) did well in that
+evaluation but are much slower, and SIFT already covers rotated copies here; PatchMatch-based dense matching (Cozzolino et al. 2015) is more accurate but
+considerably more complex to explain and verify; learned detectors (BusterNet) carry
+research-only terms. Validated on six real photographs with seeded copies: true positive rate
+0.7 for moved copies and 0.5 for rotated and rescaled ones, with no false positives on the
+untouched or re-saved images ([validation/README.md](validation/README.md)). Repeated patterns
+(tiles, windows, fences, text) match naturally, which the reading guide says.
+
+### 12.6 Noise level map — `forensic/analysis/noise.py`
+
+Measures the strength of the sensor noise in overlapping windows (32 pixels by default, a quarter
+window apart) and maps how it differs from the noise expected at that brightness.
+
+1. **Noise in a window**: the principal-component estimate (as in Pyatykh, Hesser and Zheng
+   2013). The covariance of all 5×5 patches in the window is built from box sums of pixel
+   products, so the cost does not grow with the window size. Image structure concentrates in the
+   largest eigenvalues; the noise variance is the mean of the smallest fifth.
+2. **Reliability**: the most textured fifth of windows (by largest eigenvalue) and windows that
+   are nearly black or nearly saturated are marked unreliable and hatched on the map.
+3. **Expected noise**: sensor noise grows with signal and is reshaped by the tone curve, so the
+   image's own noise level function is estimated: the median noise of reliable windows in six
+   brightness bands, interpolated. Each window is compared with that, not with the whole image.
+4. **Regions**: connected groups of reliable windows (at least 12 by default) whose noise is below
+   0.2× or above 8× the expected level are outlined.
+
+The thresholds are wide because natural noise varies a lot with focus, texture and JPEG. On six
+real photographs, smoothing was found in 70% of cases, but untouched images gave an outline 17% of
+the time and re-saved ones 67%. The map is therefore a visual aid: its outlines are information,
+not warnings, and it is not in the Smart Report.
+
+*Why the PCA estimate:* it separates noise from texture better than the median absolute deviation
+of a wavelet band (Donoho and Johnstone 1994), which counts fine texture as noise, and it is
+deterministic and closed-form. *Alternatives:* Mahdian and Saic (2009) segment by wavelet-band noise
+and are the classic reference for the idea; learned noise residuals (Noiseprint) are far more
+sensitive but carry non-commercial terms.
 
 ---
 
@@ -1000,11 +1189,12 @@ findings until an examiner accepts it.
 
 ### 19.1 Triage (Smart Report)
 
-`forensic/triage.py`. A fixed battery per media type: images get file metadata, provenance,
-A-DJPG and NA-DJPG (the last two only for JPEGs); videos get metadata, provenance, frame
+`forensic/triage.py` (rules version 1.2.0). A fixed battery per media type: images get file
+metadata, provenance, clone detection, and A-DJPG and NA-DJPG (the last two only for JPEGs); videos get metadata, provenance, frame
 integrity and double encoding (when the codec is supported). A fixed, versioned table maps each
 warning code to **red** (a local or structural inconsistency: a region inconsistent with the
-compression history, a thumbnail mismatch, an irregular JPEG structure, backwards timestamps, an
+compression history, two near-identical areas (possible copy-move), a thumbnail mismatch, an
+irregular JPEG structure, backwards timestamps, an
 AI declaration, invalid credentials, a repeated moving segment) or **yellow** (a processing
 history that limits what can be said: re-saving, editing software, missing EXIF, timestamp gaps,
 re-encoding). The item takes the highest colour.
@@ -1017,7 +1207,8 @@ inconsistency; it is not a finding of authenticity.
 
 `forensic/agents/planner.py` and `quality.py`. Given a goal in words, it picks a workflow by
 keywords (plate or text; low light; stabilise and integrate; general), builds 3 to 8 candidate
-chains of classical filters (with multi-frame super resolution or integration first when a frame
+chains of classical filters (the low-light workflow includes the illumination-map enhancement of
+5.9) (with multi-frame super resolution or integration first when a frame
 range is given), previews each on the region of interest and ranks them by a no-reference score:
 
 `score = ln(sharpness ratio) + 0.5 × ln(contrast ratio) − 1.5 × max(0, ln(noise ratio)) − 10 × increase in clipped share`
@@ -1063,26 +1254,52 @@ the code is caught by the test suite (which fails if accuracy drops below the pu
 It is **not** real-world accuracy. Run with `--pristine <folder of camera JPEGs>` to derive the
 same manipulations from real camera images, and validate on public sets (Columbia, CASIA, DSO-1,
 Dresden, VISION) and on the lab's own material before relying on a detector in casework.
+Clone detection and the noise map have been run this way on six real photographs (the
+scikit-image samples), with 60 seeded manipulations per condition; six photographs is a small
+corpus, so the lab should repeat it with its own images.
 
 ---
 
 ## 21. Performance, determinism and the job queue
 
-On this version every algorithm runs on the CPU and, by design, on **one thread**:
+Speed comes from four places, each chosen so that a result is identical whatever the machine
+load, thread count or device (`forensic/compute.py`):
 
-- OpenCV is set to one thread with OpenCL off (`FORENSIC_DETERMINISTIC=1`, the default);
-- ONNX Runtime runs single-threaded and sequential, one inference at a time;
-- deconvolution, PRNU and the FFT notch use NumPy's FFT in 64-bit float.
+- **All CPU cores, split into independent pieces.** Work is divided only where each piece's
+  result cannot depend on which thread computed it or in what order: row blocks of an image (about
+  four per thread), colour channels (deconvolution, the FFT notch), frames of a range (single-image
+  filters, stabilisation, video denoise, registration in multi-frame super resolution) and box
+  sums (the noise map). Per-pixel statistics over frames (median, mean, sigma clipping) are
+  computed per row block with the same arithmetic as the whole-image version. OpenCV is allowed
+  every core, because its own parallel loops also split by rows; OpenCL stays off, because its
+  kernels can differ from the CPU path in the last bit and between drivers. A test runs every
+  filter with one thread and with many and requires identical pixel hashes.
+- **The graphics card for learned models.** ONNX Runtime uses DirectML on Windows (any DirectX 12
+  card, such as the RTX A4000, with the normal driver) or CUDA where installed. Before a model's
+  first use, it is run twice on the card on a fixed input; the card is used for that model only if
+  both outputs are identical to the bit, otherwise the model runs on all CPU cores. Inference is
+  serialised (one at a time per process), which keeps results independent of load and is required
+  by DirectML. The self-test and the report's software environment name the device. Note that the
+  same model on a GPU and on a CPU need not give the same last bits; a result is reproduced on the
+  same device it was made on, and the report records which that was.
+- **RAM.** Intermediate chain results (a quarter of memory, at most 32 GB) and decoded video frames
+  (an eighth, at most 16 GB) are cached, so changing a late step or stepping through a video does
+  not recompute or re-decode the rest (sections 3.2 and 4). Verification and the reviewer always
+  bypass both caches.
+- **Leaner arithmetic.** Decoding writes straight into the result array and converts 8-bit values
+  with a lookup table, avoiding a full temporary copy of every frame.
 
-This guarantees that the same chain gives the same pixels regardless of machine load, which the
-"reproduced bit for bit" check and the reviewer depend on. The cost is speed: on a many-core
-workstation most cores sit idle, and the slowest operations (non-local means on large frames,
-Richardson-Lucy with many iterations, multi-frame super resolution over long ranges, PRNU with
-scale search, face checks on long videos) can take seconds to minutes. The GPU is not used.
+`threads`, `cache_mb`, `frame_cache_mb` and `ai_device` in `workbench.ini` (or `FORENSIC_THREADS`,
+`FORENSIC_CACHE_MB`, `FORENSIC_FRAME_CACHE_MB`, `FORENSIC_AI_DEVICE`) override the defaults.
 
-Work under way in parallel will make the individual algorithms faster, using the workstation's
-GPU and cores where results can still be reproduced; this section and the affected algorithm
-sections will be updated when it lands.
+*Why not simply use multi-threaded libraries as they come:* parallel reductions that add numbers
+in an order that depends on scheduling (a parallel sum, some GPU kernels) can change the last bit
+from run to run, which would make "reproduced bit for bit" fail for no forensic reason. Splitting
+into independent pieces gets almost all of the speed of a many-core workstation without that risk.
+*Why the GPU only for models:* the classical filters are memory-bound and gain little from a GPU
+once they use every core, while porting them would add a second implementation of each to
+validate; the networks, by contrast, are dominated by convolutions where the card is many times
+faster.
 
 ### 21.1 Several examiners: the job queue (`forensic/jobs.py`)
 
@@ -1106,15 +1323,15 @@ is marked failed on restart, and waiting jobs resume.
 **Why two lanes.** The models share one graphics card (an RTX A4000 has 16 GB). Two models
 loading at once can exhaust its memory and fail, or thrash, so model jobs are serialised by
 default; an administrator can allow two if the models fit twice. Model-free work does not touch
-the card, so it should not wait behind a slow model job, and a separate lane lets it continue. (In
-this version the models themselves still run on the CPU, as described above; the lane is in
-place for when they move to the card, and limiting them to one at a time already bounds their
-memory use.)
+the card, so it should not wait behind a slow model job, and a separate lane lets it continue.Inside a process, inference is also serialised (above), so
+the lane mainly keeps several model jobs from queuing up inside a running job while CPU work
+waits.
 
-**Why four CPU jobs.** Each algorithm runs single-threaded for reproducibility (above), so
-throughput comes from running several jobs side by side. Four leaves cores and memory for the
-interactive previews of everyone using the machine; on a 128 GB workstation six is a reasonable
-setting. More jobs than that mostly compete for memory bandwidth on large frames.
+**Why four CPU jobs.** Each job already spreads its work over every core (above), so running
+more jobs side by side adds little speed and multiplies the memory in use. Four keeps several
+examiners' work moving at once while leaving cores and memory for everyone's interactive
+previews; on a 128 GB workstation six is a reasonable setting. More jobs than that mostly compete
+for memory bandwidth on large frames.
 
 **Why examiners take turns.** A plain first-come, first-served queue lets one examiner's batch
 (for example triage of a 200-item case) hold up every other examiner's single render. Fair
@@ -1123,8 +1340,8 @@ machine regardless of how much they queued. It is the round-robin idea used by o
 and cluster schedulers, reduced to what a single lab machine needs.
 
 **Why it does not change results.** Scheduling decides only when a job runs. Each job reads the
-original, runs single-threaded and records its output hash exactly as before, so a result is
-identical however busy the machine was. What a job does is logged under the account that
+original, splits its work only into independent pieces and records its output hash exactly as
+before, so a result is identical however busy the machine was. What a job does is logged under the account that
 started it.
 
 **Alternatives considered.**
@@ -1171,6 +1388,7 @@ Papers (in the order they appear)
 
 - F. N. Fritsch and R. E. Carlson, Monotone piecewise cubic interpolation, SIAM J. Numer. Anal. 17(2), 1980.
 - K. Zuiderveld, Contrast limited adaptive histogram equalization, Graphics Gems IV, 1994.
+- X. Guo, Y. Li and H. Ling, LIME: low-light image enhancement via illumination map estimation, IEEE TIP 26(2), 2017.
 - G. Buchsbaum, A spatial processor model for object colour perception, J. Franklin Inst. 310(1), 1980.
 - R. Keys, Cubic convolution interpolation for digital image processing, IEEE TASSP 29(6), 1981.
 - D. C. Brown, Decentering distortion of lenses, Photogrammetric Engineering 32(3), 1966.
@@ -1184,12 +1402,17 @@ Papers (in the order they appear)
 - W. H. Richardson, Bayesian-based iterative method of image restoration, JOSA 62(1), 1972.
 - L. B. Lucy, An iterative technique for the rectification of observed distributions, Astron. J. 79, 1974.
 - N. Dey et al., Richardson-Lucy algorithm with total variation regularization for 3D confocal microscope deconvolution, Microsc. Res. Tech. 69(4), 2006.
+- L. I. Rudin, S. Osher and E. Fatemi, Nonlinear total variation based noise removal algorithms, Physica D 60, 1992.
+- Y. Wang, J. Yang, W. Yin and Y. Zhang, A new alternating minimization algorithm for total variation image reconstruction, SIAM J. Imaging Sciences 1(3), 2008.
 - R. Fergus et al., Removing camera shake from a single photograph, SIGGRAPH 2006; A. Levin et al., Understanding and evaluating blind deconvolution algorithms, CVPR 2009; D. Krishnan, T. Tay and R. Fergus, Blind deconvolution using a normalized sparsity measure, CVPR 2011.
 - G. D. Evangelidis and E. Z. Psarakis, Parametric image alignment using enhanced correlation coefficient maximization, IEEE TPAMI 30(10), 2008.
 - M. Irani and S. Peleg, Improving resolution by image registration, CVGIP: Graphical Models and Image Processing 53(3), 1991.
 - S. Farsiu, M. D. Robinson, M. Elad and P. Milanfar, Fast and robust multiframe super resolution, IEEE TIP 13(10), 2004.
+- C. Liu and W. T. Freeman, A high-quality video denoising algorithm based on reliable motion estimation, ECCV 2010.
+- T. Kroeger, R. Timofte, D. Dai and L. Van Gool, Fast optical flow using dense inverse search, ECCV 2016.
 - C. Dong, C. C. Loy and X. Tang, Accelerating the super-resolution convolutional neural network, ECCV 2016.
 - W. Shi et al., Real-time single image and video super-resolution using an efficient sub-pixel convolutional neural network, CVPR 2016.
+- X. Wang, L. Xie, C. Dong and Y. Shan, Real-ESRGAN: training real-world blind super-resolution with pure synthetic data, ICCV Workshops 2021; X. Wang et al., ESRGAN: enhanced super-resolution generative adversarial networks, ECCV Workshops 2018.
 - W. Wu, H. Peng and S. Yu, YuNet: a tiny millisecond-level face detector, Machine Intelligence Research 20, 2023.
 - N. Krawetz, A picture's worth: digital image analysis and forensics, Black Hat USA, 2007.
 - H. Farid, Exposing digital forgeries from JPEG ghosts, IEEE TIFS 4(1), 2009.
@@ -1207,6 +1430,11 @@ Papers (in the order they appear)
 - U. Ojha, Y. Li and Y. J. Lee, Towards universal fake image detectors that generalize across generative models, CVPR 2023.
 - D. Cozzolino et al., Raising the bar of AI-generated image detection with CLIP, CVPR Workshops 2024.
 - B. Mahdian and S. Saic, Using noise inconsistencies for blind image forensics, Image and Vision Computing 27(10), 2009.
+- S. Pyatykh, J. Hesser and L. Zheng, Image noise level estimation by principal component analysis, IEEE TIP 22(2), 2013.
+- D. L. Donoho and I. M. Johnstone, Ideal spatial adaptation by wavelet shrinkage, Biometrika 81(3), 1994.
+- I. Amerini, L. Ballan, R. Caldelli, A. Del Bimbo and G. Serra, A SIFT-based forensic method for copy-move attack detection and transformation recovery, IEEE TIFS 6(3), 2011.
+- J. Fridrich, D. Soukal and J. Lukáš, Detection of copy-move forgery in digital images, DFRWS 2003.
+- V. Christlein, C. Riess, J. Jordan, C. Riess and E. Angelopoulou, An evaluation of popular copy-move forgery detection approaches, IEEE TIFS 7(6), 2012.
 - J. Immerkær, Fast noise variance estimation, CVIU 64(2), 1996.
 - L. Li et al., Face X-ray for more general face forgery detection, CVPR 2020.
 - D. Vázquez-Padín et al., Detection of video double encoding with GOP size estimation, IEEE WIFS 2012.

@@ -403,8 +403,9 @@ those values.
 ### 7.8 AI-assisted and generative steps
 
 Steps marked **AI** run a learned model; their model and its weights hash are printed in the
-report. Steps also marked **generative** can add detail the camera never recorded. Today that is
-**AI super resolution (single image)**. For such a chain:
+report. Steps also marked **generative** can add detail the camera never recorded. Today these
+are **AI super resolution (single image)** and **AI enhance and enlarge (Real-ESRGAN)**. For such
+a chain:
 
 - a red banner reads "Illustrative only" (with how many steps still need a justification), and the viewer shows a banner across the image;
 - rendered and exported results are watermarked "ILLUSTRATIVE ONLY";
@@ -414,6 +415,16 @@ report. Steps also marked **generative** can add detail the camera never recorde
   exported. It is logged and printed in the report. Agents cannot write it.
 
 For evidential enlargement from video, use **Multi-frame super resolution** instead (see 8.1).
+
+**Choosing between the two AI enlargers.** **AI enhance and enlarge (Real-ESRGAN)** gives much
+sharper, cleaner results on CCTV stills, because it was trained on images degraded the way real
+cameras degrade them (blur, sensor noise, resizing, JPEG blocks); with **Scale** 1 it only cleans
+the image without enlarging it. It is also the more inventive of the two: letters, digits, faces
+and edges in its output may be wrong, so treat them as suggestions and never read a plate from it.
+**Network** "full" gives the best quality; "compact" is about ten times faster. The older **AI
+super resolution (single image)** (FSRCNN or ESPCN) is milder and invents less. Both need the image
+cropped to the region of interest first (the network's 4× result may not exceed 8192 pixels on a
+side), and both run on the graphics card when it reproduces results exactly (see 13.3).
 
 **Redact detected faces** finds faces and pixelates, blurs or blanks them for disclosure copies.
 It misses small, turned and covered faces: add manual regions for those with **Extra regions**,
@@ -442,18 +453,33 @@ region on the plate.
 
 ### 8.2 Brighten a dark scene
 
-1. If the camera and scene are still, set a frame range and add **Stabilise** then **Frame
-   integration** (mean); this removes much of the noise before brightening.
-2. Add **Non-local means** (strength 6 to 10).
-3. Add **Levels** with gamma 1.6 to 2.2, or **Local contrast (CLAHE)** with clip limit 2 to 3.
+1. If the footage looks grey and washed out (blacks are dark grey, whites are light grey), add
+   **Video range to full range** first. Many recorders store black as 16 and white as 235, and
+   players often show that without stretching it. Skip this if the image already has true blacks;
+   it clips footage that is already full range.
+2. If the camera and scene are still, set a frame range and add **Stabilise** then **Frame
+   integration** (mean); this removes much of the noise before brightening. If things move in the
+   scene, use **Video denoise (motion-compensated)** instead (see 8.7).
+3. For a scene lit unevenly (a street lamp, headlights, a lit doorway and dark surroundings), add
+   **Low-light enhancement (illumination map)**. It lifts the shadows a lot and the bright areas
+   hardly at all, and denoises where it brightened most. Lower **Strength** for a gentler result;
+   lower **Largest brightening** if the darkest areas turn to coloured noise.
+4. For a scene that is evenly dark, add **Non-local means** (strength 6 to 10), then **Levels** with
+   gamma 1.6 to 2.2, or **Local contrast (CLAHE)** with clip limit 2 to 3.
+
+The planner's "low light" workflow now tries the low-light enhancement among its candidates.
 
 ### 8.3 Remove motion blur
 
 1. Use the planner's **Estimate blur** on a region with the blurred object.
 2. Add **Deblur (Wiener deconvolution)**, blur type "motion", with the suggested length and angle.
    Raise the noise-to-signal ratio if the result is grainy or rippled.
-3. For dark, noisy footage try **Deblur (Richardson-Lucy)** instead, with 15 to 30 iterations and
-   a total-variation weight of 0.002 to 0.01.
+3. For a plate or text, try **Deblur (total-variation deconvolution)** with the same blur values.
+   It gives much less ringing around edges and less noise than Wiener. Start with
+   **Regularisation** 0.002; raise it (up to about 0.005) if noise or ripples remain, lower it if
+   the result looks flat or cartoon-like.
+4. For dark, noisy footage try **Deblur (Richardson-Lucy)**, with 15 to 30 iterations and a
+   total-variation weight of 0.002 to 0.01.
 
 ### 8.4 Interlaced CCTV
 
@@ -471,6 +497,22 @@ in the scene look straight. Do this before measuring.
 Add **Periodic noise removal (FFT)**. Lower the peak threshold to remove more of the pattern; raise
 the protected centre radius if real detail is being lost.
 
+### 8.7 Noisy video with movement
+
+1. Set a frame range on the chain, a few frames longer than the part you need.
+2. Add **Video denoise (motion-compensated)**. It follows the motion between each frame and its
+   neighbours and averages each pixel with the same point of the scene in the other frames, so it
+   removes far more noise than single-image denoising without smearing moving objects. Stabilising
+   first is not needed.
+3. **Frames used per output frame** (default 5) sets how many neighbours are averaged; more removes
+   more noise but is slower. Raise **Match tolerance** for very noisy footage; lower it if moving
+   edges look doubled. **Final denoise strength** adds light non-local means at the end (0 turns
+   it off).
+4. Frames at the start and end of the range have fewer neighbours, so they are noisier.
+
+The result is still a range of frames, so you can add other steps after it, or **Pick frame** to
+take one.
+
 ---
 
 ## 9. Authenticate
@@ -481,7 +523,8 @@ file, never a preview. Results are stored, hashed and logged.
 ### 9.1 Smart Report and Triage
 
 - **Smart Report** (top of the tab) runs a fixed set of checks on this item: file structure and
-  metadata, provenance, and for JPEGs the two double-compression analyses; for video, frame
+  metadata, provenance and clone (copy-move) detection, for JPEGs the two double-compression
+  analyses; for video, frame
   integrity and double encoding. It sorts the item **red** (a local or structural inconsistency
   to examine first), **yellow** (a processing history, such as re-saving or editing software,
   that limits what can be said) or **green** (no check found an inconsistency). Each reason is
@@ -528,6 +571,8 @@ viewer. Each result shows:
 | JPEG Ghost | Find a region saved earlier at a lower quality. | A compact dark region at a quality where the rest is bright. |
 | Aligned double JPEG (A-DJPG) | Test if the JPEG was saved twice, estimate the first quality, map regions without that history. | The map means something only if the global test is positive. Look for a compact bright region over textured content. |
 | Non-aligned JPEG grid (NA-DJPG) | Detect cropping between saves, or a region from another JPEG. | A secondary grid over the whole image suggests cropping; in one region, a pasted region. Brick, fences and text can mimic a grid. |
+| Clone (copy-move) detection | Find an area copied from one part of the image to another, to hide or duplicate something. | Each copy is outlined (strong colour one side, light colour the other) with lines joining matching points, and its rotation, scale and shift are listed. Repeated patterns (tiles, windows, fences, text, symmetric objects) match naturally: judge each match against the scene. No match does not show the image is unedited. Part of the Smart Report for still images. |
+| Noise level map | Find areas whose fine-grain sensor noise is clearly stronger or weaker than elsewhere at the same brightness (pasted, smoothed or retouched areas). | Dark means less noise, bright yellow more; hatched areas cannot be measured. A compact area with different noise whose outline follows an object is worth a closer look; gradual changes across the frame are natural. A visual aid: its outlines are information, not warnings, and it is not part of the Smart Report. |
 | Camera identification (PRNU) | Test if the image came from a specific camera. | PCE above 60 is consistent with the reference camera. Needs a camera reference (9.4). |
 | Camera-pipeline traces | Look for demosaicing traces (camera capture) and resampling (resized or rotated). | Traces present are consistent with a camera at this resolution. Their absence means little after JPEG or resizing. |
 | Learned AI-image detector | Run a detector your lab installed. | Available only when installed. A score to weigh with the others, never proof. |
@@ -741,6 +786,21 @@ reasonable start. Raise `gpu_jobs` to 2 only if the models in use fit twice in t
 memory. Restart Lucida after changing them. The same values can be set with the
 environment variables `FORENSIC_JOB_WORKERS` and `FORENSIC_GPU_JOBS`.
 
+Four more optional settings control how much of the machine each job may use. Leave them unset
+unless there is a reason; the defaults use the whole machine.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `threads` | every CPU core | Threads each filter may use. Results are identical whatever the number. |
+| `cache_mb` | a quarter of RAM, at most 32 GB | Memory for intermediate results, so changing step 5 does not re-run steps 1 to 4. |
+| `frame_cache_mb` | an eighth of RAM, at most 16 GB | Memory for decoded video frames, so stepping through a video does not decode it again. |
+| `ai_device` | `auto` | Where the learned models run: `auto` (the graphics card when it reproduces results exactly, otherwise the CPU), `gpu` or `cpu`. |
+
+On Windows the models run on the graphics card through DirectML, which works with the normal
+graphics driver; no CUDA install is needed. Before a model is first used, Lucida runs it twice on the card and uses the card
+only if both runs are identical to the bit; otherwise that model runs on the CPU. The report's
+software environment section and the **Self-test** output say which device the models ran on.
+
 Case data is shared by everyone who signs in. When installed **for all users**, the case data
 folder is shared by the members of the local **Forensic Examiners** Windows group (see
 [deployment.md](deployment.md)).
@@ -777,6 +837,7 @@ is in the [README](../README.md#connecting-an-agent). What an agent can and cann
 | Face check finds no face | The detector misses small, turned or covered faces; mark them in its settings (**⚙**). |
 | PRNU: "the image is larger than the camera reference" | Build the reference from images at the camera's full resolution. |
 | The browser shows "Invalid host header" | You are reaching Lucida by a name other than 127.0.0.1 or localhost; an administrator adds it to `allowed_hosts` in `workbench.ini`. |
+| Self-test says the models run on the CPU on a machine with a graphics card | The card failed the exact-reproduction check, or its driver is missing or too old. Update the graphics driver and run the self-test again. Results are still correct on the CPU, only slower. |
 | The preview says "Updating preview..." for a long time | Heavy steps on full frames are slow. Crop first, or switch heavy steps off while adjusting earlier ones. |
 | "too many wrong passwords; wait a minute and try again" | Wait one minute. If the password is forgotten, an administrator resets it (13.1). |
 | "this account is disabled" | Ask an administrator to enable it (13.1). |
@@ -821,6 +882,8 @@ with the lab's validation records.
 | Exposure | Curves | Smooth tone curve through control points that never reverses tonal order. |
 | Exposure | Local contrast (CLAHE) | Lifts detail in dark and bright areas without changing colour. |
 | Exposure | Histogram equalisation | Spreads lightness over the full range. |
+| Exposure | Video range to full range | Stretches washed-out 16-235 "video range" footage to full black and white. |
+| Exposure | Low-light enhancement (illumination map) | Lifts dark areas much more than bright ones, keeping colour; for unevenly lit night scenes. |
 | Colour | Colour balance | Channel gains, or automatic grey world. |
 | Colour | Greyscale / channel | Luma, or one colour channel. |
 | Colour | Invert | Negative. |
@@ -840,11 +903,14 @@ with the lab's validation records.
 | Sharpen | Unsharp mask | Raises edge contrast. |
 | Deblur | Deblur (Wiener) | Inverts a known motion, defocus or Gaussian blur. |
 | Deblur | Deblur (Richardson-Lucy) | Iterative deblurring, better on noisy low light. |
+| Deblur | Deblur (total-variation deconvolution) | Deblurring with little ringing or noise; good on plates and text. |
 | Multi-frame | Stabilise / register frames | Aligns frames to a reference. |
 | Multi-frame | Frame integration | Averages aligned frames to cut noise. |
 | Multi-frame | Pick frame | Takes one frame from a range. |
 | Multi-frame | Multi-frame super resolution | Higher resolution from several shifted frames; evidential. |
-| AI-assisted | AI super resolution (single image) | Enlarges with a neural network; generative, illustrative only. |
+| Multi-frame | Video denoise (motion-compensated) | Averages each frame with its motion-aligned neighbours; keeps moving objects sharp. |
+| AI-assisted | AI super resolution (single image) | Enlarges with a small neural network (FSRCNN/ESPCN); generative, illustrative only. |
+| AI-assisted | AI enhance and enlarge (Real-ESRGAN) | Cleans and enlarges 1-4x, much sharper on CCTV but invents more; generative, illustrative only. |
 | AI-assisted | Redact detected faces | Pixelates, blurs or blanks faces for disclosure. |
 
 ### Analyses
