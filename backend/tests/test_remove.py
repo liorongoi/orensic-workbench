@@ -6,6 +6,8 @@ from forensic.audit import Actor
 from forensic.config import load_settings
 from forensic.workbench import Workbench
 
+from .conftest import sign_in
+
 H = {"X-Examiner": "Test Examiner"}
 
 
@@ -13,7 +15,7 @@ H = {"X-Examiner": "Test Examiner"}
 def client(tmp_path):
     api._wb = Workbench(load_settings(tmp_path / "data"))
     with TestClient(api.app) as c:
-        yield c
+        yield sign_in(c)
     api._wb.db.close()
     api._wb = None
 
@@ -25,7 +27,7 @@ def test_remove_and_restore_evidence_keeps_original(client, jpeg_path):
     ch = client.post(f"/api/cases/{case['id']}/chains", json={"evidence_id": ev["id"], "name": "c1"}, headers=H).json()
     client.post(f"/api/evidence/{ev['id']}/analyses", json={"analysis": "file.metadata", "params": {}}, headers=H)
 
-    assert client.post(f"/api/evidence/{ev['id']}/remove", json={"reason": "duplicate"}).status_code == 401
+    assert TestClient(api.app).post(f"/api/evidence/{ev['id']}/remove", json={"reason": "duplicate"}).status_code == 401
     r = client.post(f"/api/evidence/{ev['id']}/remove", json={"reason": "duplicate"}, headers=H).json()
     assert r["removed"]["reason"] == "duplicate" and r["removed"]["by"] == "Test Examiner"
 
