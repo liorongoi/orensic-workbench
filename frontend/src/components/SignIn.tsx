@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
+import logo from "../assets/lucida.svg";
 import type { User } from "../types";
 
 /** Sign-in, or on a fresh installation the form that creates the first administrator. */
@@ -29,7 +30,10 @@ export function SignIn({ setup, onSignedIn }: { setup: boolean; onSignedIn: (u: 
   return (
     <div className="signin">
       <form onSubmit={submit}>
-        <h1>Forensic Workbench</h1>
+        <h1 className="signin-brand">
+          <img src={logo} alt="" width={40} height={40} />
+          <span className="wordmark">Lucida</span>
+        </h1>
         {setup && <p className="muted">Create the administrator account.</p>}
         <input autoFocus placeholder="User name" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} />
         {setup && <input placeholder="Full name (shown in the audit log)" value={fullName} onChange={(e) => setFullName(e.target.value)} />}

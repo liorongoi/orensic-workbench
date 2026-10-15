@@ -1,6 +1,6 @@
 # AI models
 
-The plan's rule is *classical first, AI second*. Every learned model the workbench runs is
+The plan's rule is *classical first, AI second*. Every learned model Lucida runs is
 listed in a pinned manifest, verified before each load, run offline on the CPU, and named
 with its weights hash in the report next to every step or analysis that used it.
 

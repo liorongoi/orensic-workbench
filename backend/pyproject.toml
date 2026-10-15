@@ -1,7 +1,7 @@
 [project]
-name = "forensic-workbench"
+name = "lucida-forensic"
 version = "0.3.0"
-description = "Forensic image and video enhancement and authentication workbench"
+description = "Lucida: forensic image and video enhancement and authentication"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.110",

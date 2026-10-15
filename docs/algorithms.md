@@ -1,6 +1,6 @@
-# Algorithms in Forensic Workbench, and why they were chosen
+# Algorithms in Lucida, and why they were chosen
 
-This document describes every algorithm the workbench runs: what it does, the parameters
+This document describes every algorithm Lucida runs: what it does, the parameters
 an examiner controls, the published method it follows, and why it was chosen over the
 alternatives. It is written for examiners who must explain a result in a report or in
 court, for reviewers checking that work, and for developers changing the code.
@@ -65,7 +65,7 @@ a manipulation usually leaves. Its absence does not prove authenticity and its p
 has innocent explanations. Every analysis reports what it measured, the threshold, its
 validated accuracy and a reading guide, and no single score is presented as a verdict.
 
-**5. Offline and licence-clean.** The workbench runs on air-gapped lab machines and is
+**5. Offline and licence-clean.** Lucida runs on air-gapped lab machines and is
 meant to be used commercially. Methods that need a network service, or published code and
 weights that carry research-only or non-commercial licences, are not bundled.
 
@@ -1100,7 +1100,7 @@ When a place in a lane frees up, the next job goes to the examiner with the **fe
 running** in that lane, then to the examiner whose last job **started longest ago**, then to the
 oldest request. Each examiner may have at most 50 jobs waiting. Waiting jobs can be cancelled by
 their owner or an administrator; running jobs are not interrupted, because a half-finished
-render or analysis would leave nothing useful. A job that was running when the workbench stopped
+render or analysis would leave nothing useful. A job that was running when Lucida stopped
 is marked failed on restart, and waiting jobs resume.
 
 **Why two lanes.** The models share one graphics card (an RTX A4000 has 16 GB). Two models
@@ -1138,7 +1138,7 @@ started it.
 
 ### 21.2 Accounts (`forensic/accounts.py`)
 
-The workbench keeps its own accounts because the lab machine is offline and cannot reach a
+Lucida keeps its own accounts because the lab machine is offline and cannot reach a
 directory service. Passwords are stored as **scrypt** hashes (N = 2^14, r = 8, p = 1, about 50 ms
 per sign-in) with a random salt; scrypt was chosen over plain salted SHA-256 because it is
 deliberately slow and memory-hard, which makes guessing a stolen password file expensive, and

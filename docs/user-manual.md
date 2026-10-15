@@ -1,6 +1,6 @@
-# Forensic Workbench user manual
+# Lucida user manual
 
-This manual explains how to operate Forensic Workbench, version 0.3: starting it, managing
+This manual explains how to operate Lucida, version 0.3: starting it, managing
 cases and evidence, enhancing images and video, authenticating them, measuring, reviewing
 and reporting. It is written for examiners. Installation is covered in
 [deployment.md](deployment.md); how each algorithm works and why it was chosen is in
@@ -9,7 +9,7 @@ and reporting. It is written for examiners. Installation is covered in
 Contents
 
 1. [Before you start](#1-before-you-start)
-2. [Starting the workbench](#2-starting-the-workbench)
+2. [Starting Lucida](#2-starting-lucida)
 3. [The screen](#3-the-screen)
 4. [Cases](#4-cases)
 5. [Evidence](#5-evidence)
@@ -31,7 +31,7 @@ Contents
 
 ## 1. Before you start
 
-Five rules shape how the workbench behaves. Knowing them explains most of what you will see.
+Five rules shape how Lucida behaves. Knowing them explains most of what you will see.
 
 1. **Originals are never changed.** When you add a file it is hashed (SHA-256 and MD5), stored
    read-only, and never opened for writing again. Everything you do produces new results
@@ -49,11 +49,11 @@ Five rules shape how the workbench behaves. Knowing them explains most of what y
 
 ---
 
-## 2. Starting the workbench
+## 2. Starting Lucida
 
-**On Windows** (installed with the offline installer): open **Start > Forensic Workbench**. A
-console window opens showing the address and the log, and your browser opens the workbench.
-Keep the console window open while you work; closing it stops the workbench. The Start menu
+**On Windows** (installed with the offline installer): open **Start > Lucida**. A
+console window opens showing the address and the log, and your browser opens Lucida.
+Keep the console window open while you work; closing it stops Lucida. The Start menu
 also has **Self-test** (checks the installation), **Case data folder** (opens the folder
 where cases are kept), and this **User manual** and the **Algorithm guide**.
 
@@ -61,21 +61,21 @@ where cases are kept), and this **User manual** and the **Algorithm guide**.
 `http://127.0.0.1:8000` in Chrome, Edge or Firefox.
 
 **First run: the administrator account.** The first time anyone opens a fresh installation,
-the workbench asks for the **administrator** account: a user name (2 to 32 lower-case letters,
+Lucida asks for the **administrator** account: a user name (2 to 32 lower-case letters,
 digits, dots, dashes or underscores), your full name (it appears in the audit log and reports),
 and a password of at least 8 characters, typed twice. Click the button and you are signed in.
 The administrator then adds the other examiners (see 13.1).
 
-**Signing in.** After that, the workbench opens on a sign-in page. Type your user name and
+**Signing in.** After that, Lucida opens on a sign-in page. Type your user name and
 password. A session lasts 12 hours; after that, or after **Sign out**, you sign in again. Five
 wrong passwords in a row lock that user name for one minute.
 
 **Your account.** Your full name is shown at the top right. Every action you take is recorded in
-the audit log under that name; the workbench takes it from the signed-in account, so nobody can
+the audit log under that name; Lucida takes it from the signed-in account, so nobody can
 act under another examiner's name. Click your name for **Change password** and **Sign out**
 (and **Users**, if you are an administrator).
 
-**Where you can sign in.** As installed, the workbench answers only on the workbench machine
+**Where you can sign in.** As installed, Lucida answers only on the Lucida machine
 itself (address `127.0.0.1`), so every examiner signs in at that computer. Opening it to other
 PCs on the lab network is an administrator setting described in
 [deployment.md](deployment.md#several-examiners).
@@ -88,7 +88,7 @@ The case list is the first page. When you open a case the screen has four parts:
 
 ```
 +----------------------------------------------------------------------------------+
-| Forensic Workbench / Case name                Report ▾   Jobs 1 2   Your name ▾  |
+| ◆ Lucida / Case name                          Report ▾   Jobs 1 2   Your name ▾  |
 +--------------+-----------------------------------------------+-------------------+
 | Evidence   ‹ |  label · size · zoom   Crop  Fit  1:1  Orig.  |  Enhance |       › |
 | [Triage]     |                                               |  Authenticate |   |
@@ -112,7 +112,7 @@ The case list is the first page. When you open a case the screen has four parts:
   the independent review.
 
 To make room for the image, hide a side panel with **‹** (left) or **›** (right) at its top
-corner. A thin bar stays at the edge; click it to bring the panel back. The workbench remembers
+corner. A thin bar stays at the edge; click it to bring the panel back. Lucida remembers
 which panels you hid.
 
 Many buttons are icons or short words. Hover any button to see what it does, and hover the **ⓘ**
@@ -129,7 +129,7 @@ investigation.
   The case opens.
 - **Open a case**: click its row in the list. The address in the browser (`#/case/...`) can be
   bookmarked.
-- **Return to the case list**: click **Forensic Workbench** at the top left.
+- **Return to the case list**: click the **Lucida** logo at the top left.
 
 Cases cannot be renamed or deleted from the interface in this version: the case and its audit
 log are kept as the record of the work. Case data lives in the case data folder chosen at
@@ -173,8 +173,8 @@ With an item selected, the buttons under the list are:
 
 ### 5.3 Recorder (DVR) exports
 
-Many recorders export video in vendor containers that ordinary players cannot open. When the
-workbench recognises one (Dahua DAV, Hikvision, MPEG program stream, raw H.264/H.265) or cannot
+Many recorders export video in vendor containers that ordinary players cannot open. When
+Lucida recognises one (Dahua DAV, Hikvision, MPEG program stream, raw H.264/H.265) or cannot
 open a file directly, a **Recorder export** panel appears under the evidence list.
 
 1. Read the identification line (for example "Identified as Dahua DAV · carries H264 video").
@@ -660,8 +660,8 @@ The report contains, in order: the evidence received with hashes and integrity c
 time, and any evidence removed from the case with who removed it, when and why; each enhancement chain with every step, its parameters, references and notes, before and
 after images, and whether it reproduced bit for bit; the authentication analyses with maps,
 reading guides and detector accuracy; measurements with intervals and assumptions; triage results
-and rules; the independent review; the audit trail; and the software environment (versions of the
-workbench, Python libraries, FFmpeg and models).
+and rules; the independent review; the audit trail; and the software environment (versions of
+Lucida, Python libraries, FFmpeg and models).
 
 Generating the report re-checks the originals and re-runs chains, so it can take a while on a large
 case.
@@ -670,7 +670,7 @@ case.
 
 ## 13. Working with several examiners
 
-Several examiners can use the workbench at the same time, each signed in to their own account.
+Several examiners can use Lucida at the same time, each signed in to their own account.
 Heavy work goes through one shared job queue, so the machine is never asked to do more at once
 than it can, and everyone can see what is running.
 
@@ -724,7 +724,7 @@ colleague's single render runs as soon as the next place frees up instead of wai
 all of yours. One examiner can have up to 50
 jobs waiting at a time.
 
-**If the workbench is restarted**, jobs that were running are marked failed (start them again)
+**If Lucida is restarted**, jobs that were running are marked failed (start them again)
 and jobs that were waiting run when it is back.
 
 ### 13.3 Settings for the administrator
@@ -738,7 +738,7 @@ How many jobs run at once is set in `workbench.ini` in the installation folder:
 
 On a 128 GB machine with an RTX A4000 (16 GB), `job_workers = 6` and `gpu_jobs = 1` are a
 reasonable start. Raise `gpu_jobs` to 2 only if the models in use fit twice in the card's
-memory. Restart the workbench after changing them. The same values can be set with the
+memory. Restart Lucida after changing them. The same values can be set with the
 environment variables `FORENSIC_JOB_WORKERS` and `FORENSIC_GPU_JOBS`.
 
 Case data is shared by everyone who signs in. When installed **for all users**, the case data
@@ -749,8 +749,8 @@ folder is shared by the members of the local **Forensic Examiners** Windows grou
 
 ## 14. Connecting an AI agent
 
-An AI assistant (for example Claude Desktop, or a self-hosted model with an MCP client) can drive the
-workbench through its MCP servers: evidence, enhance, authenticate, measure and case. Configuration
+An AI assistant (for example Claude Desktop, or a self-hosted model with an MCP client) can drive
+Lucida through its MCP servers: evidence, enhance, authenticate, measure and case. Configuration
 is in the [README](../README.md#connecting-an-agent). What an agent can and cannot do:
 
 - It can add evidence only from the import folder set by `FORENSIC_IMPORT_DIR`.
@@ -776,16 +776,16 @@ is in the [README](../README.md#connecting-an-agent). What an agent can and cann
 | Double encoding says the codec is not supported | It works on H.264 and MPEG-1/2/4 Part 2 streams, not on H.265. |
 | Face check finds no face | The detector misses small, turned or covered faces; mark them in its settings (**⚙**). |
 | PRNU: "the image is larger than the camera reference" | Build the reference from images at the camera's full resolution. |
-| The browser shows "Invalid host header" | You are reaching the workbench by a name other than 127.0.0.1 or localhost; an administrator adds it to `allowed_hosts` in `workbench.ini`. |
+| The browser shows "Invalid host header" | You are reaching Lucida by a name other than 127.0.0.1 or localhost; an administrator adds it to `allowed_hosts` in `workbench.ini`. |
 | The preview says "Updating preview..." for a long time | Heavy steps on full frames are slow. Crop first, or switch heavy steps off while adjusting earlier ones. |
 | "too many wrong passwords; wait a minute and try again" | Wait one minute. If the password is forgotten, an administrator resets it (13.1). |
 | "this account is disabled" | Ask an administrator to enable it (13.1). |
 | A button stays busy for a long time | Your job may be waiting its turn. Open **Jobs** to see its place in line. |
 | "you already have 50 jobs waiting" | Cancel some under **Jobs**, or wait for them to run. |
-| A job failed with "the workbench was restarted while this job ran" | Start it again. |
+| A job failed with "Lucida was restarted while this job ran" | Start it again. |
 | Verify says "Did not reproduce" | Report it: it means the software or a model file changed. Run **Self-test** and the reviewer. |
 
-After any installation or upgrade, run **Start > Forensic Workbench > Self-test** and keep its output
+After any installation or upgrade, run **Start > Lucida > Self-test** and keep its output
 with the lab's validation records.
 
 ---
