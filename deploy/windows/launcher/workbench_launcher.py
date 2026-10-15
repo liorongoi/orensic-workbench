@@ -53,10 +53,15 @@ def configure() -> dict:
     os.environ["PATH"] = str(APP / "ffmpeg") + os.pathsep + os.environ.get("PATH", "")
     for d in (os.environ["FORENSIC_DATA_DIR"], os.environ["FORENSIC_IMPORT_DIR"]):
         Path(d).mkdir(parents=True, exist_ok=True)
-    return {
-        "host": os.environ.get("FORENSIC_HOST") or cfg.get("host") or "127.0.0.1",
-        "port": int(os.environ.get("FORENSIC_PORT") or cfg.get("port") or 8000),
-    }
+    host = os.environ.get("FORENSIC_HOST") or cfg.get("host") or "127.0.0.1"
+    # The API answers only host names it is told about; add a configured lab address and any
+    # allowed_hosts from the ini (comma-separated) to 127.0.0.1 and localhost.
+    extra = [h.strip() for h in (cfg.get("allowed_hosts") or "").split(",") if h.strip()]
+    if host not in ("127.0.0.1", "localhost", "0.0.0.0", "::"):
+        extra.append(host)
+    if extra:
+        os.environ.setdefault("FORENSIC_ALLOWED_HOSTS", ",".join(extra))
+    return {"host": host, "port": int(os.environ.get("FORENSIC_PORT") or cfg.get("port") or 8000)}
 
 
 def _health(url: str, timeout: float = 1.0) -> dict | None:

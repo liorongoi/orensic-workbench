@@ -276,6 +276,22 @@ class Workbench:
                 n["accepted_by"] = prev["accepted_by"]
         return g
 
+    @staticmethod
+    def _check_agent_keeps_examiner_steps(old: dict, new: dict) -> None:
+        """Agents may propose new or changed steps, but only an examiner removes, disables or
+        reorders a step the examiner wrote or accepted: those changes cannot be held as proposals."""
+        owned = [n for n in old["nodes"] if not (n.get("proposed_by") and not n.get("accepted_by"))]
+        new_by_id = {n["id"]: n for n in new["nodes"]}
+        removed = [n["id"] for n in owned if n["id"] not in new_by_id]
+        if removed:
+            raise ValueError(f"only an examiner can remove step(s) {', '.join(removed)}")
+        disabled = [n["id"] for n in owned if n.get("enabled", True) and not new_by_id[n["id"]].get("enabled", True)]
+        if disabled:
+            raise ValueError(f"only an examiner can disable step(s) {', '.join(disabled)}")
+        owned_ids = {n["id"] for n in owned}
+        if [n["id"] for n in new["nodes"] if n["id"] in owned_ids] != [n["id"] for n in owned]:
+            raise ValueError("only an examiner can reorder the examiner's steps")
+
     def create_chain(self, case_id: str, evidence_id: str, name: str, actor: Actor, graph: dict | None = None) -> dict:
         ev = self._evidence_row(evidence_id)
         if ev["case_id"] != case_id:
@@ -308,6 +324,8 @@ class Workbench:
     def update_chain(self, chain_id: str, graph: dict, actor: Actor, name: str | None = None) -> dict:
         old = self.get_chain(chain_id)
         g = self._normalise_for(old["evidence_id"], graph)
+        if actor.kind == "agent":
+            self._check_agent_keeps_examiner_steps(old["graph"], g)
         g = self._tag_agent_nodes(g, actor, old["graph"])
         if actor.kind == "agent":
             # Agents cannot accept their own proposals by echoing an accepted_by field back.

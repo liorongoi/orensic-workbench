@@ -92,7 +92,9 @@ validation run that fails if detector accuracy drops below the published floor).
 
 - Originals are never written after ingest; all work is on derived, content-addressed outputs.
 - Live previews are not stored or audited and are never evidential. "Render result" runs the saved chain from the original and records the output hash.
-- Steps an agent adds through MCP are marked *proposed*. They stay out of the report's findings until an examiner accepts them in the UI; an agent cannot accept its own proposals.
+- Steps an agent adds through MCP are marked *proposed*. They stay out of the report's findings until an examiner accepts them in the UI; an agent cannot accept its own proposals, and cannot remove, disable or reorder a step the examiner wrote or accepted.
+- Evidence must be self-contained: playlists and other formats that make FFmpeg read outside files are rejected at ingest.
+- The API answers only requests addressed to `127.0.0.1` or `localhost`, which blocks DNS-rebinding pages. Add any other name the lab uses to reach it to `FORENSIC_ALLOWED_HOSTS` (comma-separated).
 - Agents can only ingest files from `FORENSIC_IMPORT_DIR`. Text read from evidence (EXIF comments, XMP, filenames) is returned to agents wrapped as untrusted file content.
 - OpenCV runs single-threaded with OpenCL off (`FORENSIC_DETERMINISTIC=1`, the default) so results do not depend on thread scheduling.
 - Authentication findings are worded "consistent / inconsistent with", with a reading guide per analysis; no single score is presented as proof.

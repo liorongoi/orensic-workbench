@@ -29,7 +29,7 @@ shows the address and log, and the browser opens the workbench; closing the wind
 The Start menu also has **Self-test** and **Case data folder**.
 
 Settings live in `<install folder>\workbench.ini` (`data_dir`, `import_dir`, `host`, `port`, and
-optionally `c2pa_trust_anchors`). Running a newer installer upgrades in place and keeps
+optionally `c2pa_trust_anchors` and `allowed_hosts`, the extra names browsers may use to reach it). Running a newer installer upgrades in place and keeps
 these settings and the case data. Silent installation for managed rollouts:
 
 ```
@@ -67,6 +67,10 @@ The workbench joins a plain network so its port can reach your browser (Docker d
 publish ports from internal-only networks) and an internal network shared with the MCP
 servers, which have no route out. Nothing in the workbench makes outbound calls; to enforce
 that, run it on an air-gapped host or firewall the host.
+
+The API answers only requests whose Host is `127.0.0.1` or `localhost`. If a TLS proxy or a
+lab hostname fronts it, set `FORENSIC_ALLOWED_HOSTS` to that name (comma-separated for several),
+or the browser gets `400 Invalid host header`.
 
 ## Air-gapped installation
 

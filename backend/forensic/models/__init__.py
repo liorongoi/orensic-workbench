@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import threading
 from functools import lru_cache
@@ -155,6 +156,9 @@ def face_detector(width: int, height: int, score_threshold: float = 0.6):
     return cv2.FaceDetectorYN.create(m["path"], "", (int(width), int(height)), score_threshold, 0.3, 5000)
 
 
+_PLAIN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+
+
 def install(onnx_file: Path, card_file: Path) -> dict:
     """Copy a lab model and its card into FORENSIC_MODELS_DIR, pinning the weights' hash."""
     card = json.loads(Path(card_file).read_text())
@@ -167,6 +171,8 @@ def install(onnx_file: Path, card_file: Path) -> dict:
         for k in ("input", "output", "trained_on", "version"):
             if k not in card:
                 raise ModelError(f"a detector card needs '{k}' (see docs/ai-models.md)")
+    if not isinstance(card["id"], str) or not _PLAIN_ID.fullmatch(card["id"]):
+        raise ModelError("model id must be a plain name of letters, digits, '.', '_' or '-'")
     if any(m["id"] == card["id"] and m["bundled"] for m in manifest()):
         raise ModelError(f"'{card['id']}' is a bundled model id")
     sha = file_sha256(Path(onnx_file))
@@ -175,6 +181,9 @@ def install(onnx_file: Path, card_file: Path) -> dict:
     d = lab_dir()
     d.mkdir(parents=True, exist_ok=True)
     name = f"{card['id']}.onnx"
+    for dest in (d / name, d / f"{card['id']}.json"):
+        if dest.resolve().parent != d.resolve():
+            raise ModelError("model id would place files outside the models folder")
     shutil.copyfile(onnx_file, d / name)
     card = card | {"file": name, "sha256": sha}
     (d / f"{card['id']}.json").write_text(json.dumps(card, indent=2) + "\n")

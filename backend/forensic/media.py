@@ -22,6 +22,10 @@ from .config import Settings
 IMAGE_FORMATS = {"JPEG", "PNG", "TIFF", "BMP", "GIF", "WEBP", "MPO"}
 
 
+# FFmpeg demuxers that read media from other files or URLs named inside the input.
+REFERENCE_FORMATS = frozenset({"hls", "applehttp", "concat", "dash"})
+
+
 class MediaError(ValueError):
     pass
 
@@ -65,6 +69,11 @@ def probe(path: Path, settings: Settings) -> dict:
     except (MediaError, FileNotFoundError) as e:
         raise MediaError(f"unsupported or unreadable file: {e}") from e
     info = json.loads(out)
+    fmt = set((info.get("format", {}).get("format_name") or "").split(","))
+    if fmt & REFERENCE_FORMATS:
+        # A playlist or concat list makes FFmpeg read other files, so the decoded pixels would not
+        # come from the hashed original. Evidence must be self-contained.
+        raise MediaError("playlists and other formats that reference outside files are not accepted as evidence")
     vstreams = [s for s in info.get("streams", []) if s.get("codec_type") == "video"]
     if not vstreams:
         raise MediaError("no video stream found; audio-only evidence is not supported yet")
