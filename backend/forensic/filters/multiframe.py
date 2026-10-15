@@ -8,6 +8,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
+from .. import compute
 from .base import FilterError, Param, luminance, register
 
 MOTION = {
@@ -62,22 +63,22 @@ def stabilise(stack, p):
     motion = MOTION[p["motion"]]
     ref = luminance(stack[ref_i])
     criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, p["iterations"], p["epsilon"])
-    out = np.empty_like(stack)
-    for i in range(n):
+
+    def align(i):
         if i == ref_i:
-            out[i] = stack[i]
-            continue
+            return stack[i]
         warp = np.eye(3, 3, dtype=np.float32) if motion == cv2.MOTION_HOMOGRAPHY else np.eye(2, 3, dtype=np.float32)
         try:
             _, warp = cv2.findTransformECC(ref, luminance(stack[i]), warp, motion, criteria, mask, 5)
         except cv2.error:
-            out[i] = stack[i]
-            continue
+            return stack[i]
         flags = cv2.INTER_CUBIC + cv2.WARP_INVERSE_MAP
         if motion == cv2.MOTION_HOMOGRAPHY:
-            out[i] = cv2.warpPerspective(stack[i], warp, (w, h), flags=flags, borderMode=cv2.BORDER_REPLICATE)
-        else:
-            out[i] = cv2.warpAffine(stack[i], warp, (w, h), flags=flags, borderMode=cv2.BORDER_REPLICATE)
+            return cv2.warpPerspective(stack[i], warp, (w, h), flags=flags, borderMode=cv2.BORDER_REPLICATE)
+        return cv2.warpAffine(stack[i], warp, (w, h), flags=flags, borderMode=cv2.BORDER_REPLICATE)
+
+    # Each frame is registered to the reference on its own, so frames can run in parallel.
+    out = np.stack(compute.pmap(align, range(n)))
     return np.clip(out, 0, 1)
 
 
@@ -101,16 +102,20 @@ def stabilise(stack, p):
 def integrate(stack, p):
     _require_stack(stack)
     if p["method"] == "mean":
-        return stack.mean(axis=0, dtype=np.float64).astype(np.float32)
+        return compute.mean0(stack, np.float64).astype(np.float32)
     if p["method"] == "median":
-        return np.median(stack, axis=0).astype(np.float32)
-    s = stack.astype(np.float64)
-    med = np.median(s, axis=0)
-    std = s.std(axis=0)
-    keep = np.abs(s - med) <= p["sigma"] * np.maximum(std, 1e-9)
-    total = np.where(keep, s, 0).sum(axis=0)
-    count = np.maximum(keep.sum(axis=0), 1)
-    return (total / count).astype(np.float32)
+        return compute.median0(stack).astype(np.float32)
+
+    def clipped(chunk):  # every output pixel depends only on its own column of frames
+        s = chunk.astype(np.float64)
+        med = np.median(s, axis=0)
+        std = s.std(axis=0)
+        keep = np.abs(s - med) <= p["sigma"] * np.maximum(std, 1e-9)
+        total = np.where(keep, s, 0).sum(axis=0)
+        count = np.maximum(keep.sum(axis=0), 1)
+        return (total / count).astype(np.float32)
+
+    return compute.by_rows(clipped, stack, np.float32)
 
 
 @register(
@@ -201,9 +206,9 @@ def super_resolution(stack, p):
     ref = luminance(stack[ref_i])
     S = _scale_matrix(s)
     Sinv = np.linalg.inv(S)
+    warps = compute.pmap(lambda i: np.eye(3) if i == ref_i else _register_to(ref, luminance(stack[i]), motion, criteria, mask), range(n))
     frames, to_lr, to_hr = [], [], []
-    for i in range(n):
-        Wk = np.eye(3) if i == ref_i else _register_to(ref, luminance(stack[i]), motion, criteria, mask)
+    for i, Wk in enumerate(warps):
         if Wk is None:
             continue  # frames that cannot be registered would only add blur
         frames.append(stack[i].astype(np.float32))
@@ -221,10 +226,71 @@ def super_resolution(stack, p):
 
     ksz = int(2 * np.ceil(3 * p["psf_sigma"] * s) + 1)
     blur = lambda x: cv2.GaussianBlur(x, (ksz, ksz), p["psf_sigma"] * s, borderType=cv2.BORDER_REFLECT)  # noqa: E731
-    combine = (lambda xs: np.median(np.stack(xs), axis=0)) if p["robust"] else (lambda xs: np.mean(np.stack(xs), axis=0))
-    hr = combine([to_grid(f, k) for k, f in enumerate(frames)]).astype(np.float32)
+    combine = compute.median0 if p["robust"] else compute.mean0
+    ks = range(len(frames))
+    hr = combine(compute.pmap(lambda k: to_grid(frames[k], k), ks)).astype(np.float32)
     for _ in range(p["iterations"]):
         blurred = blur(hr)
-        errs = [to_grid(frames[k] - sample_lr(blurred, k), k) for k in range(len(frames))]
+        errs = compute.pmap(lambda k: to_grid(frames[k] - sample_lr(blurred, k), k), ks)
         hr = np.clip(hr + p["step"] * blur(combine(errs).astype(np.float32)), 0, 1).astype(np.float32)
     return hr
+
+
+@register(
+    "stack.denoise_temporal",
+    name="Video denoise (motion-compensated)",
+    version="1.0.0",
+    category="Multi-frame",
+    description="Removes noise from each frame by averaging it with its neighbouring frames after following the "
+    "motion between them (dense optical flow), then cleans what is left with light single-frame denoising. Noise "
+    "falls far more than with single-image denoising and detail is kept, because each pixel is averaged with the "
+    "same point of the scene in other frames. Where the flow fails (things appearing, disappearing or moving very "
+    "fast) the neighbour does not match and is left out, so moving objects do not leave trails. Works without "
+    "stabilising first; frames at the start and end of the range use fewer neighbours.",
+    reference="C. Liu and W. T. Freeman, 'A high-quality video denoising algorithm based on reliable motion "
+    "estimation', ECCV 2010; T. Kroeger et al., 'Fast optical flow using dense inverse search', ECCV 2016; "
+    "A. Buades, B. Coll and J.-M. Morel, 'A non-local algorithm for image denoising', CVPR 2005.",
+    input_kind="stack",
+    output_kind="stack",
+    params=[
+        Param("frames", "int", 5, "Frames used per output frame (odd)", 3, 15, 2),
+        Param("tolerance", "float", 0.06, "Match tolerance", 0.01, 0.5, 0.01,
+              help="How different a motion-compensated neighbour may look and still be averaged; raise it for very noisy footage"),
+        Param("strength", "float", 4.0, "Final denoise strength", 0.0, 30.0, 0.5,
+              help="Single-frame non-local means applied after averaging; 0 turns it off"),
+    ],
+)
+def denoise_temporal(stack, p):
+    _require_stack(stack)
+    n = stack.shape[0]
+    k = min(p["frames"] | 1, n if n % 2 else n - 1)
+    if k < 3:
+        raise FilterError("video denoise needs a range of at least three frames")
+    half = k // 2
+    h, w = stack.shape[1:3]
+    grey = compute.pmap(lambda f: cv2.GaussianBlur(cv2.cvtColor(
+        np.clip(np.rint(f * 255.0), 0, 255).astype(np.uint8), cv2.COLOR_RGB2GRAY), (0, 0), 1.0), stack)
+    soft = compute.pmap(lambda f: cv2.GaussianBlur(f, (0, 0), 1.5), stack)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+
+    def one(i):
+        dis = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+        acc = stack[i].astype(np.float32).copy()
+        wsum = np.ones((h, w), np.float32)
+        for j in range(max(0, i - half), min(n, i + half + 1)):
+            if j == i:
+                continue
+            flow = dis.calc(grey[i], grey[j], None)
+            mx, my = xx + flow[..., 0], yy + flow[..., 1]
+            warped = cv2.remap(stack[j], mx, my, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT)
+            diff = np.abs(cv2.remap(soft[j], mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT) - soft[i]).mean(-1)
+            wt = np.exp(-((diff / p["tolerance"]) ** 2)).astype(np.float32)
+            acc += warped * wt[..., None]
+            wsum += wt
+        out = np.clip(acc / wsum[..., None], 0, 1)
+        if p["strength"] <= 0:
+            return out.astype(np.float32)
+        u = np.clip(np.rint(out * 255.0), 0, 255).astype(np.uint8)
+        return cv2.fastNlMeansDenoisingColored(u, None, p["strength"], p["strength"], 7, 21).astype(np.float32) / 255.0
+
+    return np.stack(compute.pmap(one, range(n)))

@@ -202,3 +202,66 @@ def grayscale(img, p):
 )
 def invert(img, p):
     return (1.0 - img).astype(np.float32)
+
+
+@register(
+    "exposure.range_expand",
+    name="Video range to full range",
+    version="1.0.0",
+    category="Exposure",
+    description="Stretches 'video range' footage, where black is stored as 16 and white as 235 (of 255), to the full "
+    "0-255 range. Many DVRs and exports are decoded with the wrong range flag, so the picture looks washed out and "
+    "low in contrast; this restores the intended blacks and whites. Use it only when the darkest and brightest "
+    "areas sit near 16 and 235; on footage that is already full range it clips.",
+    reference="ITU-R Recommendation BT.601-7 (2011) and BT.709-6 (2015): 8-bit studio range, black 16, white 235 "
+    "(Y) and 240 (Cb, Cr).",
+    params=[Param("chroma", "bool", True, "Also expand colour", help="Applies the colour range (16-240) as well, in YCbCr")],
+)
+def range_expand(img, p):
+    lo, hi = 16.0 / 255.0, 235.0 / 255.0
+    if not p["chroma"]:
+        return clip01((img - lo) / (hi - lo))
+    ycc = cv2.cvtColor(np.ascontiguousarray(img, np.float32), cv2.COLOR_RGB2YCrCb)
+    ycc[..., 0] = (ycc[..., 0] - lo) / (hi - lo)
+    ycc[..., 1:] = (ycc[..., 1:] - 0.5) * (255.0 / 224.0) + 0.5
+    return clip01(cv2.cvtColor(ycc, cv2.COLOR_YCrCb2RGB))
+
+
+@register(
+    "exposure.low_light",
+    name="Low-light enhancement (illumination map)",
+    version="1.0.0",
+    category="Exposure",
+    description="Brightens dark footage by estimating how strongly each area was lit (the brightest colour channel, "
+    "smoothed while keeping edges) and dividing the image by that illumination, raised to a power. Dark areas are "
+    "lifted a lot and bright areas (headlights, lamps) hardly at all, so detail appears in the shadows without "
+    "blowing out the lights, and colour ratios are kept. Lifting the shadows also lifts their noise, so the "
+    "lift is capped and the result is denoised in proportion to how much each area was brightened. Best on scenes lit "
+    "unevenly (a lamp or headlights and dark surroundings); on evenly dark footage, levels does as well. "
+    "It changes local brightness, so do not use the result to judge lighting or colour.",
+    reference="X. Guo, Y. Li and H. Ling, 'LIME: Low-Light Image Enhancement via Illumination Map Estimation', "
+    "IEEE Trans. Image Processing 26(2), 2017; C. Tomasi and R. Manduchi, 'Bilateral filtering for gray and color "
+    "images', ICCV 1998.",
+    params=[
+        Param("strength", "float", 0.8, "Strength (gamma)", 0.1, 1.0, 0.05,
+              help="How far the illumination is divided out: 1 lifts the most, 0.5 is gentler"),
+        Param("smoothness", "float", 3.0, "Illumination smoothness (px)", 0.5, 30.0, 0.5,
+              help="Larger keeps more local contrast; smaller flattens more"),
+        Param("max_gain", "float", 6.0, "Largest brightening (x)", 1.0, 40.0, 0.5,
+              help="Caps the lift of the darkest areas, where there is mostly noise to lift"),
+        Param("denoise", "float", 10.0, "Shadow denoise", 0.0, 30.0, 0.5,
+              help="Non-local means strength (colour twice this) blended in where the image was brightened most; 0 turns it off"),
+    ],
+)
+def low_light(img, p):
+    t0 = np.ascontiguousarray(img.max(axis=2), np.float32)
+    t = cv2.bilateralFilter(t0, 0, 0.08, 12)
+    t = np.maximum(cv2.GaussianBlur(t, (0, 0), p["smoothness"], borderType=cv2.BORDER_REFLECT), 1e-3)
+    gain = np.minimum(t ** -p["strength"], p["max_gain"])
+    out = clip01((img * gain[..., None]).astype(np.float32))
+    if p["denoise"] <= 0:
+        return out
+    u = np.clip(np.rint(out * 255.0), 0, 255).astype(np.uint8)
+    den = cv2.fastNlMeansDenoisingColored(u, None, p["denoise"], 2 * p["denoise"], 7, 21).astype(np.float32) / 255.0
+    w = (1.0 / gain)[..., None]  # as LIME: keep lit areas, take the denoised result where the gain was high
+    return clip01((out * w + den * (1.0 - w)).astype(np.float32))

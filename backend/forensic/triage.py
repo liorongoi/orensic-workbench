@@ -9,20 +9,25 @@ battery found an inconsistency, not that the item is authentic.
 
 from __future__ import annotations
 
-RULES_VERSION = "1.1.0"
+RULES_VERSION = "1.2.0"
 
 # Analyses run per media type, with their parameters (fixed, so triage is reproducible).
 BATTERY: dict[str, list[tuple[str, dict]]] = {
-    "image": [("file.metadata", {}), ("synthetic.provenance", {}), ("tamper.double_jpeg", {}), ("tamper.nonaligned_grid", {})],
+    "image": [("file.metadata", {}), ("synthetic.provenance", {}), ("tamper.double_jpeg", {}), ("tamper.nonaligned_grid", {}),
+              ("tamper.copy_move", {})],
     "video": [("file.metadata", {}), ("synthetic.provenance", {}), ("video.frame_integrity", {}), ("video.double_encoding", {})],
     "container": [],
 }
+
+# Analyses that only apply to JPEG files (skipped for other images).
+JPEG_ONLY = frozenset({"tamper.double_jpeg", "tamper.nonaligned_grid"})
 
 # Flag code -> (level, short reason). Red: a local or structural inconsistency worth examining first.
 # Yellow: a processing history (re-saving, editing software, missing metadata) that limits what can be said.
 RULES: dict[str, tuple[str, str]] = {
     "djpg.local": ("red", "a region is inconsistent with the image's double-compression history"),
     "nadjpg.local": ("red", "a region carries a JPEG grid offset from the rest"),
+    "clone.match": ("red", "two areas of the image are near-identical (possible copy-move)"),
     "meta.thumbnail": ("red", "the embedded thumbnail does not match the image"),
     "meta.dimensions": ("red", "EXIF dimensions differ from the image"),
     "meta.structure": ("red", "the JPEG structure is irregular"),

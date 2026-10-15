@@ -289,14 +289,21 @@ def write_cards(results: dict, out_dir: Path, meta: dict) -> list[Path]:
     from .phase3 import FAILURE_MODES as P3_MODES
     from .phase3 import phase3_cards
 
-    detectors = {
-        "tamper.double_jpeg": {"detection": results["adjpg"], "localisation": results["adjpg_local"]},
-        "tamper.nonaligned_grid": {"detection": results["nadjpg"]},
-        "camera.prnu": {"identification": results["prnu"]},
-    }
+    detectors = {}
+    if "adjpg" in results:
+        detectors = {
+            "tamper.double_jpeg": {"detection": results["adjpg"], "localisation": results["adjpg_local"]},
+            "tamper.nonaligned_grid": {"detection": results["nadjpg"]},
+            "camera.prnu": {"identification": results["prnu"]},
+        }
+    from .phase4 import FAILURE_MODES as P4_MODES
+    from .phase4 import phase4_cards
+
     if "phase3" in results:
         detectors |= phase3_cards(results["phase3"])
-    modes = FAILURE_MODES | P3_MODES
+    if "phase4" in results:
+        detectors |= phase4_cards(results["phase4"])
+    modes = FAILURE_MODES | P3_MODES | P4_MODES
     for det, res in detectors.items():
         a = ANALYSES[det]
         card = {
@@ -317,8 +324,14 @@ def write_cards(results: dict, out_dir: Path, meta: dict) -> list[Path]:
     return written
 
 
-def run(quick: bool = False, pristine: Path | None = None, out_dir: Path = CARD_DIR, log=print) -> dict:
+def run(quick: bool = False, pristine: Path | None = None, out_dir: Path = CARD_DIR, log=print,
+        only: str | None = None) -> dict:
+    """Run the experiments and write their cards; `only="phase4"` runs just the clone and noise-map ones."""
     src = pristine_source(pristine)
+    from .phase4 import run_phase4
+
+    if only == "phase4":
+        return _finish({"phase4": run_phase4(src, quick, log=log)}, quick, pristine, out_dir)
     n = 12 if quick else 120
     log(f"A-DJPG detection ({n} positives, {n} negatives)…")
     adjpg = eval_adjpg(src, n)
@@ -331,7 +344,11 @@ def run(quick: bool = False, pristine: Path | None = None, out_dir: Path = CARD_
     from .phase3 import run_phase3
 
     results = {"adjpg": adjpg, "adjpg_local": adjpg_local, "nadjpg": nadjpg, "prnu": pr,
-               "phase3": run_phase3(src, quick, log=log)}
+               "phase3": run_phase3(src, quick, log=log), "phase4": run_phase4(src, quick, log=log)}
+    return _finish(results, quick, pristine, out_dir)
+
+
+def _finish(results: dict, quick: bool, pristine: Path | None, out_dir: Path | None) -> dict:
     import PIL
     import pywt
 
@@ -352,6 +369,9 @@ def run(quick: bool = False, pristine: Path | None = None, out_dir: Path = CARD_
 def summary_markdown(out: dict) -> str:
     r = out["results"]
     m = out["meta"]
+    if "adjpg" not in r:
+        return "\n".join([f"# Detector validation (partial)", "", f"Generated {m['date']} by `{m['command']}` on {m['corpus']}.", ""]
+                          + _phase4_rows(r.get("phase4")) + [""])
     lines = [
         "# Detector validation",
         "",
@@ -367,7 +387,7 @@ def summary_markdown(out: dict) -> str:
         f"| NA-DJPG grid | crop between saves | {r['nadjpg']['threshold']} | {r['nadjpg']['true_positive_rate']} | {r['nadjpg']['false_positive_rate']} | {r['nadjpg']['auc']} |",
         f"| PRNU | same camera, full frame | PCE {r['prnu']['threshold']} | {r['prnu']['full_frame']['true_positive_rate']} | {r['prnu']['full_frame']['false_positive_rate']} | {r['prnu']['full_frame']['auc']} |",
         f"| PRNU | same camera, quarter crop, searched | PCE {r['prnu']['threshold']} | {r['prnu']['cropped_quarter_frame_with_search']['true_positive_rate']} | {r['prnu']['cropped_quarter_frame_with_search']['false_positive_rate']} | {r['prnu']['cropped_quarter_frame_with_search']['auc']} |",
-    ] + _phase3_rows(r.get("phase3")) + [
+    ] + _phase3_rows(r.get("phase3")) + _phase4_rows(r.get("phase4")) + [
         "",
         f"A-DJPG first-quality estimate within ±3: {r['adjpg']['first_quality_within_3']} (mean error {r['adjpg']['first_quality_mean_abs_error']}). "
         f"Detection when Q1 > Q2 (expected to fail): {r['adjpg']['tpr_when_q1_above_q2']}.",
@@ -410,3 +430,19 @@ def _phase3_rows(p3: dict | None) -> list[str]:
         f"{p3['frame_integrity']['repeated_segment_found']} (false positives {p3['frame_integrity']['repeated_segment_false_positive_rate']}).",
     ]
     return out
+
+
+def _phase4_rows(p4: dict | None) -> list[str]:
+    if not p4:
+        return []
+    cm, nm = p4["copy_move"], p4["noise_map"]
+    return [
+        "",
+        "Clone detection and noise map (TPR by manipulation; FPR on the untouched images):",
+        "",
+        f"Copy-move: {cm['true_positive_rate_by_condition']}; FPR {cm['false_positive_rate']} "
+        f"({cm['false_positive_rate_after_jpeg85']} after JPEG 85).",
+        "",
+        f"Noise map: {nm['true_positive_rate_by_condition']}; FPR {nm['false_positive_rate']} "
+        f"({nm['false_positive_rate_after_jpeg90']} after JPEG 90).",
+    ]

@@ -13,7 +13,7 @@ from typing import BinaryIO
 
 import numpy as np
 
-from . import APP_NAME, __version__, formats, media, models, policy, prnu
+from . import APP_NAME, __version__, compute, formats, media, models, policy, prnu
 from . import measure as measure_mod
 from .analysis import ANALYSES, AnalysisContext, get_analysis
 from .audit import Actor, AuditLog
@@ -35,6 +35,7 @@ class Workbench:
         self.audit = AuditLog(self.db)
         self.store = EvidenceStore(self.settings)
         self.engine = Engine(self._load_source)
+        self.frames = media.FrameCache(compute.frame_cache_budget())
 
     # Environment ----------------------------------------------------------
 
@@ -53,6 +54,7 @@ class Workbench:
             "onnxruntime": __import__("onnxruntime").__version__,
             "c2pa": _c2pa_version(),
             "models": ", ".join(f"{m['id']} {m['sha256'][:12]}" for m in models.manifest()),
+            "compute": compute.describe(),
             "network": "none used at run time (all models bundled or installed locally)",
         }
 
@@ -263,7 +265,7 @@ class Workbench:
         data = self._load_source({"evidence_id": evidence_id, "frames": {"start": n, "end": n}})
         return frame_of(data)
 
-    def _load_source(self, source: dict) -> np.ndarray:
+    def _load_source(self, source: dict, use_cache: bool = True) -> np.ndarray:
         row = self._evidence_row(source["evidence_id"])
         if source.get("sha256") and source["sha256"] != row["sha256"]:
             raise FilterError("chain was built on a different file (SHA-256 mismatch)")
@@ -280,7 +282,11 @@ class Workbench:
         end = min(fr["end"], last)
         if end - fr["start"] + 1 > 600:
             raise FilterError("frame ranges are limited to 600 frames in this version")
-        stack = media.decode_frames(path, self.settings, fr["start"], end, probe["width"], probe["height"])
+        if use_cache:
+            u8 = self.frames.frames(row["sha256"], path, self.settings, fr["start"], end, last, probe["width"], probe["height"])
+        else:
+            u8 = media.decode_frames_u8(path, self.settings, fr["start"], end, probe["width"], probe["height"])
+        stack = media.u8_to_float(u8)
         return stack[0] if fr["start"] == end else stack
 
     # Chains ---------------------------------------------------------------------------
@@ -735,12 +741,12 @@ class Workbench:
     def smart_report(self, evidence_id: str, actor: Actor) -> dict:
         """Run the triage battery on one item and record a traffic-light reading with its reasons."""
         from .analysis.video import VPF_CODECS
-        from .triage import BATTERY, assess
+        from .triage import BATTERY, JPEG_ONLY, assess
 
         row = self._evidence_row(evidence_id)
         runs = []
         for aid, params in BATTERY.get(row["media_type"], []):
-            if aid.startswith("tamper.") and row["media_type"] == "image" and not formats_is_jpeg(Path(row["stored_path"])):
+            if aid in JPEG_ONLY and row["media_type"] == "image" and not formats_is_jpeg(Path(row["stored_path"])):
                 continue
             if aid == "video.double_encoding" and json.loads(row["probe_json"]).get("codec") not in VPF_CODECS:
                 continue

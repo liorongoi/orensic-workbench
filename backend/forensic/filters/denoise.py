@@ -5,6 +5,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
+from .. import compute
 from .base import Param, clip01, from_u8, luminance, register, u8
 
 
@@ -109,11 +110,11 @@ def fft_notch(img, p):
         y0, y1, x0, x1 = max(0, y - rad), min(h, y + rad + 1), max(0, x - rad), min(w, x + rad + 1)
         g = 1 - np.exp(-((yy[y0:y1, x0:x1] - y) ** 2 + (xx[y0:y1, x0:x1] - x) ** 2) / s2)
         mask[y0:y1, x0:x1] *= g
-    out = np.empty_like(img)
-    for c in range(3):
+    def channel(c):
         f = np.fft.fftshift(np.fft.fft2(img[..., c].astype(np.float64)))
-        out[..., c] = np.real(np.fft.ifft2(np.fft.ifftshift(f * mask)))
-    return clip01(out.astype(np.float32))
+        return np.real(np.fft.ifft2(np.fft.ifftshift(f * mask))).astype(np.float32)
+
+    return clip01(np.dstack(compute.pmap(channel, range(3))))
 
 
 @register(
