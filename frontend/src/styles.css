@@ -281,3 +281,12 @@ button.danger:hover:not(:disabled) { background: #7a2525; }
 .menu-items a:hover { background: #232a33; }
 details.guide summary { cursor: pointer; font-style: normal; color: var(--muted); }
 .detector { padding: 6px 8px; }
+.stage { display: flex; flex-direction: column; gap: 4px; }
+.stage-head { background: none; border: none; padding: 4px 2px; gap: 6px; justify-content: flex-start; width: 100%; }
+.stage-head .caret { color: var(--muted); width: 10px; }
+.detector.clickable { cursor: pointer; }
+.detector.clickable:hover { border-color: #3a4452; }
+.detector-name { flex: 1; min-width: 0; }
+.verdict-line { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.result .verdict-line { white-space: normal; }
+.detector.red .detector-name b, .stage-head .light.red + b { color: var(--bad); }

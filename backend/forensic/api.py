@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -35,10 +36,16 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 _wb: Workbench | None = None
 
 
+_wb_lock = threading.Lock()
+
+
 def wb() -> Workbench:
+    # Requests run on a thread pool; the first few must not each open their own Workbench.
     global _wb
     if _wb is None:
-        _wb = Workbench()
+        with _wb_lock:
+            if _wb is None:
+                _wb = Workbench()
     return _wb
 
 
