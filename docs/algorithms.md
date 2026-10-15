@@ -102,6 +102,14 @@ analysis map, a converted recorder export) is a new, content-addressed file in `
 or a new evidence item linked to its source. This is the "work on a copy" rule of every
 forensic guideline, enforced by the code rather than by procedure.
 
+Removing an evidence item or a chain from a case is a logged hide, not a deletion. The row
+gets a `removed` record (who, when, an optional reason of up to 500 characters), the audit
+log gets an `evidence.remove` or `chain.remove` entry, working copies and chains of a removed
+item are hidden with it, and the stored original is untouched. **Restore** clears the record
+and logs `evidence.restore`. Only a human examiner can do either. A real delete was rejected
+because the case record must still show everything that was received, including what was
+later set aside and why; the report lists removed items in its evidence section.
+
 ### 2.3 The hash-chained audit log (`forensic/audit.py`)
 
 **What it does.** Every action (ingest, chain edit, render, analysis, measurement, export,

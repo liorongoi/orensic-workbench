@@ -73,27 +73,34 @@ The case list is the first page. When you open a case the screen has four parts:
 
 ```
 +----------------------------------------------------------------------------------+
-| Forensic Workbench / Case name            Report: HTML  PDF  Bundle   Your name  |
+| Forensic Workbench / Case name                        Report ▾      Your name    |
 +--------------+-----------------------------------------------+-------------------+
-| Evidence     |  Viewer toolbar: label · size · zoom  Fit 1:1 |  Enhance |        |
-| [Triage all] |                                               |  Authenticate |   |
+| Evidence   ‹ |  label · size · zoom   Crop  Fit  1:1  Orig.  |  Enhance |       › |
+| [Triage]     |                                               |  Authenticate |   |
 | [+ Add]      |                                               |  Measure | Audit  |
 |              |              image or video frame             |                   |
 | drop zone    |                                               |  tools for the    |
 | evidence     |                                               |  selected tab     |
 | list         |                                               |                   |
 |              |  x, y · R G B                                 |                   |
-| Verify       |  Frame strip (video only)                     |                   |
-| Download     |                                               |                   |
+| ✓ Verify     |  Frame strip (video only)                     |                   |
+| ⤓ Original   |                                               |                   |
 +--------------+-----------------------------------------------+-------------------+
 ```
 
-- **Top bar**: the case name, the report links (HTML, PDF, Bundle) and your examiner name.
+- **Top bar**: the case name, the **Report ▾** menu (see 12) and your examiner name.
 - **Left panel**: the evidence in the case, with buttons to add files and triage them all.
 - **Centre**: the viewer, with the frame strip underneath for video.
 - **Right panel**: four tabs. **Enhance** builds processing chains. **Authenticate** runs
   analyses. **Measure** takes heights, distances and speeds. **Audit** shows the log and runs
   the independent review.
+
+To make room for the image, hide a side panel with **‹** (left) or **›** (right) at its top
+corner. A thin bar stays at the edge; click it to bring the panel back. The workbench remembers
+which panels you hid.
+
+Many buttons are icons or short words. Hover any button to see what it does, and hover the **ⓘ**
+marks for explanations.
 
 ---
 
@@ -118,7 +125,7 @@ installation.
 
 ### 5.1 Adding files
 
-Click **+ Add** and choose one or more files, or drag files onto the drop zone. Each file is
+Click **+ Add** and choose one or more files, or drag files anywhere onto the evidence panel. Each file is
 hashed while it is copied in; the panel shows "Hashing and storing..." until it is done. The
 new item is selected when it finishes.
 
@@ -131,10 +138,12 @@ Each item in the list shows:
 
 - a type badge: **IMG** (still image), **VID** (video) or **REC** (recorder export that needs
   converting);
-- the filename, size, and for video the frame count and codec;
-- the first 16 characters of the SHA-256 (hover to see the full SHA-256 and MD5);
+- the filename and its pixel size, and for video the frame count;
 - a coloured light once it has been triaged (see 9.1);
-- "working copy" if it was made by converting another item.
+- "copy" if it is a working copy made by converting another item;
+- a **🗑** button to remove it from the case (see 5.4).
+
+Hover an item to see its size, when and by whom it was added, and its full SHA-256 and MD5.
 
 Click an item to select it. The viewer, the frame strip and the right-hand tabs then work on it.
 
@@ -142,9 +151,9 @@ Click an item to select it. The viewer, the frame strip and the right-hand tabs 
 
 With an item selected, the buttons under the list are:
 
-- **Verify original**: re-hashes the stored file and checks it is still read-only. The result
+- **✓ Verify**: re-hashes the stored original and checks it is still read-only. The result
   is shown and logged.
-- **Download original**: saves an exact copy of the original file.
+- **⤓ Original**: saves an exact copy of the original file.
 
 ### 5.3 Recorder (DVR) exports
 
@@ -167,9 +176,22 @@ was.
 
 ### 5.4 Removing evidence
 
-Evidence cannot be removed from a case in this version. This is deliberate: once a file has
-been received and hashed, removing it would break the record of what was examined. If you added
-a file by mistake, add a case note on the Audit tab saying so.
+If you added a file by mistake, or it turns out not to belong to the case, remove it:
+
+1. Click **🗑** on its row in the evidence list.
+2. Optionally type a reason (up to 500 characters). It is logged.
+3. Click **Remove** (or press **Enter**). **Cancel** or **Esc** keeps it.
+
+Removing hides the item; it does not delete anything. The original file stays in the write-once
+store with its hashes, the removal is written to the audit log with your name, the time and the
+reason, and the report lists removed items with that information in its evidence section.
+Working copies made from the item, and its enhancement chains, are hidden with it.
+
+To bring an item back, click **Show removed (n)** at the bottom of the evidence panel, then
+**Restore** next to it. Hover a removed item to see who removed it, when and why. Restoring is
+logged too.
+
+Removing evidence is a human action: an AI agent cannot remove or restore evidence.
 
 ---
 
@@ -184,24 +206,27 @@ a file by mistake, add a case note on the Audit tab saying so.
 - Above 100 % pixels are drawn as sharp squares (no smoothing), so you see the real pixels.
   At 1600 % and above a pixel grid is drawn.
 - **Pixel inspector**: the bar under the image shows the x, y position and the R, G, B values
-  of the pixel under the cursor, with a colour swatch. Use it to read coordinates for Crop
-  and other steps.
-- **Compare with the original**: hold **B**, or hold the **Hold: original** button. The viewer
+  of the pixel under the cursor, with a colour swatch.
+- **Compare with the original**: hold **B**, or hold the **Original** button. The viewer
   shows the original frame until you let go.
+- **⛶ Crop** (or key **C**): draw a crop box on the image (see 7.5).
+- **? shortcuts** at the bottom right lists the keyboard shortcuts when you hover it.
 
-The label at the top left says what you are looking at: "Original", "Result (live preview)",
-"Result up to step n", or the name of an analysis map.
+The label at the top left says what you are looking at: the result at the selected step, the
+source, or the name of an analysis map.
 
 ### 6.2 Video: the frame strip
 
 For video, the frame strip under the viewer shows:
 
-- **◀ ▶** buttons for one frame back and forward, and a slider to scrub;
+- **◀ ▶** buttons for one frame back and forward (or keys **J** and **L**; hold **Shift** to
+  move 10 frames), and a slider to scrub;
 - the frame number, its type (**I**, **P** or **B**), its timestamp and its size in bytes;
 - a coloured bar of every frame's type underneath: red I-frames (full pictures, usually the
-  best quality), blue P-frames and green B-frames. Click the bar to jump.
-- **Range start** and **Range end**, which set the frame range of the selected enhancement
-  chain (see 7.6). The range is shaded in yellow.
+  best quality), blue P-frames and green B-frames (hover the bar for this legend). Click the
+  bar to jump.
+- **[ In** and **Out ]**, which set the first and last frame of the selected enhancement
+  chain's range (see 7.6). The range is shaded in yellow.
 
 Frames are selected by their position in the decoded stream, so frame 1234 is always the same
 frame.
@@ -218,40 +243,63 @@ be rendered, verified and exported.
 
 On the **Enhance** tab:
 
-- **New chain** creates an empty chain on the selected evidence (for video, starting at the
-  current frame). Chains are named "Enhancement 1", "Enhancement 2", and so on.
+- **Start enhancing** (when the item has no chain yet) or **＋** creates an empty chain on the
+  selected evidence (for video, starting at the current frame). Chains are named
+  "Enhancement 1", "Enhancement 2", and so on.
 - The drop-down lists the chains on this evidence; pick one to open it.
+- **⧉** duplicates the open chain, with its unsaved edits, as "name (copy)". Use it to try a
+  variation without losing the version you have.
+- **🗑** removes the open chain. Optionally type a reason, then click **Remove**. The chain is
+  hidden, not deleted: it stays in the case record and the removal is logged. Results already
+  rendered from it remain in the audit log. There is no restore for a removed chain in this
+  version, so duplicate it first if you may want it back.
 
 You can keep several chains on the same evidence, for example to compare two approaches.
 
+The line at the top of the chain says whether it has **Unsaved changes**, is **Saved, not
+rendered**, or is **Rendered**, with a coloured dot. Hover it to see the chain's hash and the
+rendered output hash.
+
 ### 7.2 Adding, editing, reordering and removing steps
 
-1. Click **+ Add filter**. Filters are grouped by category (Exposure, Colour, Geometry, Denoise,
-   Sharpen, Deblur, Multi-frame, AI-assisted). Hover a filter to read what it does. Multi-frame
-   filters are greyed out on still images.
-2. Click a filter. It is added after the selected step (or at the end) and selected.
+1. Click **+ Add filter**. A search box opens with the cursor in it. Type part of a filter's
+   name, category or description ("plate", "noise", "blur") to narrow the list, then click a
+   filter, or press **Enter** to add the first match. **Esc** or **Close** closes the list.
+   With the box empty, the filters you used most recently are listed first under **Recent**,
+   then every filter by category (Exposure, Colour, Geometry, Denoise, Sharpen, Deblur,
+   Multi-frame, AI-assisted). Hover a filter to read what it does. Multi-frame filters are
+   greyed out on still images.
+2. The filter is added after the selected step (or at the end) and selected. If it needs points
+   or a box on the image (Crop, Perspective correction, Stabilise and others), the viewer goes
+   straight into drawing mode for it (see 7.3 and 7.5).
 3. Below the step list, set its parameters. Numbers have a slider and a box; choices have a
-   drop-down. The preview updates as you change them.
+   drop-down. The preview updates as you change them. Click the filter's name (**ⓘ**) above the
+   parameters to read its description and reference; hover a parameter's **ⓘ** for its help.
 4. Each step in the list has:
    - a **checkbox** to switch it off and on without removing it;
    - **↑** and **↓** to move it;
-   - **✕** to remove it.
-5. Optionally type an **Examiner note** (why you used this step). It is printed in the report.
-6. Click **Save**. Until you save, the chain shows "unsaved".
+   - **✕** to remove it (or select the step and press **Del**).
+5. Optionally type a **Note** (why you used this step). It is printed in the report.
+6. Click **Save**. Until you save, the chain shows "Unsaved changes".
 
-Click **Source** at the top of the list to see the chain's starting image.
+**Undo and redo**: **↶** and **↷** at the top of the chain, or **Ctrl+Z** and **Ctrl+Y**
+(**Ctrl+Shift+Z** also redoes), undo and redo edits to the chain: added, removed, moved or
+switched-off steps and parameter changes. A slider drag counts as one edit. The undo history covers the edits since you
+opened the chain, saved or not; it starts again when you open another chain.
 
-Tick **Show result up to the selected step** to see the image as it is after the selected step
-rather than at the end of the chain. Useful for checking what each step does.
+**Seeing each step**: click a step to see the image as it is after that step; click **Source** at
+the top of the list to see the chain's starting image. This works like a history panel and is the
+quickest way to check what each step does. Click the last step to see the final result.
 
 Each step shows the size of its output (for example 1920×1080), so you can see where a crop or a
-resize changed it.
+resize changed it. Badges mark steps that use several frames (**multi**), run a learned model
+(**AI**), may add detail (**gen**) or were proposed by an agent (**proposed**).
 
 ### 7.3 Picking points on the image
 
 Some parameters are points: the four corners for perspective correction, a region for
-stabilisation, extra regions for face redaction. Click **Pick on image**, then click on the
-viewer. The points are numbered as you place them. For a fixed number of points (four corners)
+stabilisation, extra regions for face redaction. When you add such a filter, picking starts
+straight away; otherwise click **Pick on image**, then click on the viewer. The points are numbered as you place them. For a fixed number of points (four corners)
 picking stops by itself; otherwise press **Esc** when done. **Clear** removes them.
 
 Points are always placed on the image as it enters that step, so the coordinates match what the
@@ -261,10 +309,10 @@ step receives.
 
 At the bottom of the chain:
 
-- **Render result** saves the chain, runs it from the original (not from the preview), stores the
+- **Render** saves the chain, runs it from the original (not from the preview), stores the
   result losslessly and records its pixel hash in the audit log. Do this for any result you will
   rely on.
-- **Verify reproducibility** re-runs the saved chain from the original with nothing cached and
+- **Verify** re-runs the saved chain from the original with nothing cached and
   checks the result is identical to the one recorded. It reports "Reproduced bit for bit" or "Did
   not reproduce".
 - **Export PNG** downloads the rendered result as a lossless PNG. It is re-computed and checked
@@ -274,13 +322,23 @@ At the bottom of the chain:
 Export is disabled while the chain has unsaved changes, has not been rendered, contains agent
 proposals nobody has accepted, or contains an AI generative step without a justification.
 
-The line under the chain name shows the chain's hash and, once rendered, the output hash.
+Hover the status line at the top of the chain to see the chain's hash and, once rendered, the
+output hash.
 
 ### 7.5 Cropping
 
-Use **Geometry > Crop**. Enter **X** and **Y** (the top-left corner, in pixels) and **Width** and
-**Height** (0 means to the edge of the image). Read the coordinates from the pixel inspector by
-hovering over the corners you want. Crop is an exact copy of those pixels; nothing is resampled.
+1. Click **⛶ Crop** in the viewer toolbar, or press **C**.
+2. Drag a box on the image. Hold **Shift** for a square. The box's size is shown as you drag.
+   **Esc** cancels.
+3. When you let go, a **Crop** step is added to the chain (a chain is created if there is none)
+   and selected. It goes after the selected step, and the box is drawn on the image as it is at
+   that point, so the crop matches what you saw.
+
+To change an existing crop, select its step and click **Draw crop on image**, then drag a new
+box; or edit **X**, **Y**, **Width** and **Height** (0 means to the edge of the image) directly.
+Adding **Crop** from the filter list also starts drawing straight away.
+
+Crop is an exact copy of those pixels; nothing is resampled.
 
 Cropping early in a chain makes every later step faster, and is required before AI super
 resolution on large images.
@@ -293,8 +351,8 @@ single frame and you have not set it yourself, moving the frame slider moves the
 For multi-frame steps (stabilise, integrate, multi-frame super resolution, pick frame) the chain
 needs a range of frames:
 
-1. Move to the first frame and click **Range start**.
-2. Move to the last frame and click **Range end**.
+1. Move to the first frame and click **[ In**.
+2. Move to the last frame and click **Out ]**.
 
 A range can hold up to 600 frames. Single-image steps in a chain with a range are applied to
 every frame of the range. When the range has not been combined into one image, the viewer shows
@@ -302,7 +360,7 @@ the frame of the range matching the slider position.
 
 ### 7.7 Asking the planner
 
-**Ask the planner** (at the top of the Enhance tab) proposes chains for a goal:
+The **Planner** (at the top of the Enhance tab) proposes chains for a goal:
 
 1. Type a goal, for example "make the plate readable" or "brighten the night scene", or choose a
    workflow (plate, low light, stabilise and integrate, general).
@@ -314,13 +372,13 @@ the frame of the range matching the slider position.
 The planner tries several chains of classical filters, scores each one for sharpness, contrast,
 noise and clipping, and creates the best two as new chains named "Planner A" and "Planner B".
 Every candidate is listed with its score; click **open proposal** to open one. The score is a
-ranking aid only. You judge whether a proposal is fit for purpose.
+ranking aid only (hover **ⓘ how scores work**). You judge whether a proposal is fit for purpose.
 
 Steps the planner (or any agent) adds are marked **proposed** and a banner says so. They are
-excluded from findings until you click **Accept proposed steps**. You can edit, disable or remove
+excluded from findings until you save the chain and click **Accept** in that banner. You can edit, disable or remove
 them first.
 
-**Estimate motion blur** looks for straight-line motion blur in the region (or whole frame) and
+**Estimate blur** looks for straight-line motion blur in the region (or whole frame) and
 suggests a length and angle. If it finds one, add **Deblur** with blur type "motion" and enter
 those values.
 
@@ -330,7 +388,7 @@ Steps marked **AI** run a learned model; their model and its weights hash are pr
 report. Steps also marked **generative** can add detail the camera never recorded. Today that is
 **AI super resolution (single image)**. For such a chain:
 
-- a red banner reads "Illustrative only", and the viewer shows a banner across the image;
+- a red banner reads "Illustrative only" (with how many steps still need a justification), and the viewer shows a banner across the image;
 - rendered and exported results are watermarked "ILLUSTRATIVE ONLY";
 - you cannot measure on it;
 - you must write a **justification** of at least 20 characters on the step (why the
@@ -373,7 +431,7 @@ region on the plate.
 
 ### 8.3 Remove motion blur
 
-1. Ask the planner's **Estimate motion blur** on a region with the blurred object.
+1. Use the planner's **Estimate blur** on a region with the blurred object.
 2. Add **Deblur (Wiener deconvolution)**, blur type "motion", with the suggested length and angle.
    Raise the noise-to-signal ratio if the result is grainy or rippled.
 3. For dark, noisy footage try **Deblur (Richardson-Lucy)** instead, with 15 to 30 iterations and
@@ -402,7 +460,7 @@ the protected centre radius if real detail is being lost.
 The **Authenticate** tab runs analyses on the selected item. Each analysis reads the original
 file, never a preview. Results are stored, hashed and logged.
 
-### 9.1 Smart Report and Triage all
+### 9.1 Smart Report and Triage
 
 - **Smart Report** (top of the tab) runs a fixed set of checks on this item: file structure and
   metadata, provenance, and for JPEGs the two double-compression analyses; for video, frame
@@ -410,27 +468,35 @@ file, never a preview. Results are stored, hashed and logged.
   to examine first), **yellow** (a processing history, such as re-saving or editing software,
   that limits what can be said) or **green** (no check found an inconsistency). Each reason is
   listed; hover it for the detail.
-- **Triage all** (left panel) runs the Smart Report on every item in the case, colours the light
+- **Triage** (top of the evidence panel) runs the Smart Report on every item in the case, colours the light
   next to each item and writes a summary as a case note, labelled agent opinion.
 
 A colour tells you where to look first. Green is not a finding that the item is authentic.
 
 ### 9.2 Running an analysis
 
-Each analysis that applies to the item has a card with:
+The analyses that apply to the item are grouped in stages, in the order an examination usually
+follows: **File**, **Global**, **Camera**, **Local**, **AI / deepfake**, **Geometric** (and
+**Other**). Each stage heading shows how many of its analyses have been run ("2/5 run") and a
+light: red if any of them raised a warning, green if those run found none. Click a heading to
+fold or unfold the stage.
 
-- its name and category, and an **AI-assisted** badge if it uses a learned model;
-- a line with its validated accuracy (from the detector card);
-- **Settings** to open its description and parameters;
-- **Run**.
+Each analysis has one row with:
 
-When an analysis finishes its result opens under **Results**, and its first map (if any) is
-shown in the viewer. Each result shows:
+- a light: red (its latest run raised a warning), green (ran without a warning) or grey (not run);
+- its name, an **AI** badge if it uses a learned model, and once run a one-line verdict. Hover
+  the name for its description and validated accuracy (from the detector card);
+- **⚙** to open its parameters;
+- **Run**, or **Re-run** once it has run.
+
+Click a row that has been run to show its map in the viewer. Every run is listed under
+**History**, newest first; click one to open it, and its first map (if any) is shown in the
+viewer. Each result shows:
 
 - a one-line summary;
 - flags: warnings (amber) are inconsistencies worth explaining; information (blue) is context;
 - maps: click a thumbnail to show it in the viewer; **Back to image** returns;
-- **How to read this**: the reading guide for this analysis;
+- **How to read this** (click to open): the reading guide for this analysis;
 - the findings: the numbers behind the summary;
 - the analysis version, who ran it and the result hash.
 
@@ -454,7 +520,7 @@ shown in the viewer. Each result shows:
 [algorithms.md](algorithms.md) explains each method, its thresholds and its limits in detail.
 
 **Marking regions for an analysis.** Some analyses take regions (for example face regions). Open
-**Settings**, click **Pick on image** and click pairs of corners on the viewer; press **Esc** when
+its settings (**⚙**), click **Pick on image** and click pairs of corners on the viewer; press **Esc** when
 done.
 
 ### 9.4 Camera references (PRNU)
@@ -469,7 +535,7 @@ built from images known to come from it.
 3. Give it a name and optionally the camera make and model, tick the known images, and click
    **Build from n images**.
 4. On the questioned image, open **Camera identification (PRNU)**, choose the reference, and click
-   **Run**. In **Settings** you can turn on searching for cropping (on by default) and for
+   **Run**. In its settings (**⚙**) you can turn on searching for cropping (on by default) and for
    down-scaling.
 
 ---
@@ -548,9 +614,9 @@ distortion.
 
 The **Audit** tab shows:
 
-- **The hash chain status**: "Hash chain intact (n entries)" or, if the log has been altered,
-  "BROKEN at entry n".
-- **Independent review**: click **Run reviewer** (or **Review again**). The reviewer re-hashes the
+- **The hash chain status**: "✓ Log intact · n entries" or, if the log has been altered,
+  "Hash chain BROKEN at entry n".
+- **Independent review** (hover **ⓘ** for what it checks): click **Run reviewer** (or **Review again**). The reviewer re-hashes the
   originals, checks the audit log, re-runs every rendered chain twice from the originals, re-runs
   analyses and measurements and compares hashes, checks the AI model files, and flags generative,
   unjustified or unaccepted steps. It reports **PASS**, **WARN** (points the report must explain)
@@ -558,20 +624,22 @@ The **Audit** tab shows:
   **Show passed checks** to see them. Run it before you write a report.
 - **Case notes**: type a note and click **Add**. Notes are logged and printed in the report.
 - **The log**: every action, newest first, with who did it (agents are marked), when, and the
-  output hash.
+  start of the output hash. Click the copy button next to a hash to copy it in full. Removals
+  and restores of evidence and chains appear here with their reasons.
 
 ---
 
 ## 12. Reports
 
-The top bar of an open case has three report links. Each opens in a new browser tab.
+Click **Report ▾** in the top bar of an open case and choose one. Each opens in a new browser
+tab.
 
-- **HTML**: the report for reading on screen.
-- **PDF**: the same report for printing and disclosure.
-- **Bundle**: the complete case record as JSON, for archiving or for another tool.
+- **HTML report**: the report for reading on screen.
+- **PDF report**: the same report for printing and disclosure.
+- **JSON bundle**: the complete case record with every hash, for archiving or for another tool.
 
 The report contains, in order: the evidence received with hashes and integrity checked at report
-time; each enhancement chain with every step, its parameters, references and notes, before and
+time, and any evidence removed from the case with who removed it, when and why; each enhancement chain with every step, its parameters, references and notes, before and
 after images, and whether it reproduced bit for bit; the authentication analyses with maps,
 reading guides and detector accuracy; measurements with intervals and assumptions; triage results
 and rules; the independent review; the audit trail; and the software environment (versions of the
@@ -619,12 +687,12 @@ is in the [README](../README.md#connecting-an-agent). What an agent can and cann
 |---|---|
 | "frame ranges are limited to 600 frames" | Use a shorter range, or several chains. |
 | "the result would be wider than 8192 pixels" | Crop to the region of interest before AI super resolution. |
-| A multi-frame filter says it needs a frame range | Set **Range start** and **Range end** on a video (7.6). |
+| A multi-frame filter says it needs a frame range | Set **[ In** and **Out ]** on a video (7.6). |
 | Export PNG is greyed out | Save and render first; accept or remove agent proposals; justify any generative step. |
 | "This recorder export cannot be opened directly" | Make a working copy (5.3). |
 | Carved video plays at the wrong speed | Re-convert with the recorder's real frame rate. |
 | Double encoding says the codec is not supported | It works on H.264 and MPEG-1/2/4 Part 2 streams, not on H.265. |
-| Face check finds no face | The detector misses small, turned or covered faces; mark them in **Settings**. |
+| Face check finds no face | The detector misses small, turned or covered faces; mark them in its settings (**⚙**). |
 | PRNU: "the image is larger than the camera reference" | Build the reference from images at the camera's full resolution. |
 | The browser shows "Invalid host header" | You are reaching the workbench by a name other than 127.0.0.1 or localhost; an administrator adds it to `allowed_hosts` in `workbench.ini`. |
 | The preview says "Updating preview..." for a long time | Heavy steps on full frames are slow. Crop first, or switch heavy steps off while adjusting earlier ones. |
@@ -644,9 +712,14 @@ with the lab's validation records.
 | Fit to window | **F** |
 | Actual pixels (1:1) | **1** |
 | Show the original while held | Hold **B** |
-| Stop picking points | **Esc** |
+| Draw a crop box | **C** (or **⛶ Crop**), then drag; hold **Shift** for a square |
+| Stop picking points, cancel a crop, close a confirmation | **Esc** |
 | Place a point | Click (without dragging) while picking |
-| Previous or next frame | **◀** / **▶** buttons |
+| Undo / redo a chain edit | **Ctrl+Z** / **Ctrl+Y** (or **Ctrl+Shift+Z**) |
+| Remove the selected step | **Del** |
+| Add the first filter matching the search | **Enter** in the filter search box |
+| Previous or next frame | **J** / **L** (or **◀** / **▶**) |
+| Ten frames back or forward | **Shift+J** / **Shift+L** |
 
 ---
 
