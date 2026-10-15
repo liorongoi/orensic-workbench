@@ -212,8 +212,9 @@ timestamps. Lost RTP packets are counted and the frames around them may show dam
 
 1. Read the identification line (for example "Identified as Dahua DAV · carries H264 video").
 2. Choose a method:
-   - **parse** (offered when Lucida has its own parser for the format, and then chosen by
-     default) reads the vendor file record by record. Every compressed frame stays
+   - **parse** (offered when Lucida has its own parser for the format, and chosen by default
+     unless the file is an AVI or transport stream that already plays) reads the vendor file
+     record by record. Every compressed frame stays
      byte-identical and keeps the recorder's own timing: per-frame times, the recorder clock and
      the frame rate it wrote. Gaps (missing frames) and timestamps that go backwards are listed.
      For Dahua files holding several cameras, the first channel is extracted and the others are
@@ -932,6 +933,7 @@ is in the [README](../README.md#connecting-an-agent). What an agent can and cann
 | A multi-frame filter says it needs a frame range | Set **[ In** and **Out ]** on a video (7.6). |
 | Export PNG is greyed out | Save and render first; accept or remove agent proposals; justify any generative step. |
 | "This recorder export cannot be opened directly" | Make a working copy (5.3). |
+| A recorder file is refused as a closed format | Export a standard MP4 or AVI from the vendor's software, as the message says (5.3). |
 | Carved video plays at the wrong speed | Re-convert with the recorder's real frame rate, or use parse if it is offered. |
 | Parse fails (a "parser:" error, or the codec was not recognised) | The file may be damaged or a variant of the format. Try remux, then carve. |
 | Double encoding says the codec is not supported | It works on H.264 and MPEG-1/2/4 Part 2 streams, not on H.265. |
