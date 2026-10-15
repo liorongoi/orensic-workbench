@@ -90,6 +90,13 @@ foreach ($d in $vcDlls) {
 }
 New-Item -ItemType Directory -Force "$Payload\vcredist" | Out-Null
 $vcSha = Get-Pinned $VcRedistUrl "$Payload\vcredist\vc_redist.x64.exe" ""
+# aka.ms always serves the current release, so its hash cannot be pinned: require Microsoft's
+# Authenticode signature instead, since an all-users install runs it as administrator.
+$sig = Get-AuthenticodeSignature "$Payload\vcredist\vc_redist.x64.exe"
+if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notmatch "O=Microsoft Corporation") {
+    throw "vc_redist.x64.exe is not validly signed by Microsoft ($($sig.Status): $($sig.SignerCertificate.Subject))"
+}
+Write-Host "  signed by $($sig.SignerCertificate.Subject)"
 
 Step "Python dependencies (wheels for Windows x64, CPython 3.12)"
 $wheels = "$Work\wheels"

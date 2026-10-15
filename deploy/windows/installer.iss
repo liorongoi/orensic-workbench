@@ -63,9 +63,13 @@ Type: filesandordirs; Name: "{app}\launcher"
 Source: "{#PayloadDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Dirs]
-; Case data stays when the workbench is uninstalled.
-Name: "{code:DataDir}"; Flags: uninsneveruninstall; Permissions: users-modify
-Name: "{code:DataDir}\import"; Flags: uninsneveruninstall; Permissions: users-modify
+; Case data stays when the workbench is uninstalled. A per-user install keeps the folder's
+; inherited permissions, so only that user (and administrators) can reach it. An all-users
+; install shares it with every examiner who signs in to this computer.
+Name: "{code:DataDir}"; Flags: uninsneveruninstall; Check: not IsAdminInstallMode
+Name: "{code:DataDir}\import"; Flags: uninsneveruninstall; Check: not IsAdminInstallMode
+Name: "{code:DataDir}"; Flags: uninsneveruninstall; Permissions: users-modify; Check: IsAdminInstallMode
+Name: "{code:DataDir}\import"; Flags: uninsneveruninstall; Permissions: users-modify; Check: IsAdminInstallMode
 
 [INI]
 Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "data_dir"; String: "{code:DataDir}"; Flags: uninsdeletesection
