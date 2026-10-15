@@ -48,7 +48,7 @@ def _write_key(path: Path, key) -> None:
 def _name(cn: str) -> x509.Name:
     # The common name is only a label (browsers match the alternative names), and X.509 caps it
     # at 64 characters; a long domain name would otherwise stop the certificate being made.
-    return x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Forensic Workbench"),
+    return x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Lucida"),
                       x509.NameAttribute(NameOID.COMMON_NAME, cn[:64])])
 
 
@@ -75,7 +75,7 @@ def ensure_certificate(folder: Path, names: list[str] | None = None, addresses: 
 
     if not (ca_crt.exists() and ca_key.exists()):
         k = ec.generate_private_key(ec.SECP256R1())
-        subject = _name(f"Forensic Workbench local authority ({socket.gethostname()})")
+        subject = _name(f"Lucida local authority ({socket.gethostname()})")
         cert = (x509.CertificateBuilder().subject_name(subject).issuer_name(subject).public_key(k.public_key())
                 .serial_number(x509.random_serial_number()).not_valid_before(now - dt.timedelta(minutes=5))
                 .not_valid_after(now + dt.timedelta(days=365 * CA_YEARS))

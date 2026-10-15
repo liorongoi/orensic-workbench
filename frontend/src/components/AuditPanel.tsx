@@ -137,6 +137,8 @@ function describe(e: AuditEntry): string {
       return ` · ${p.filename}${p.reason ? `: ${p.reason}` : ""}`;
     case "evidence.restore":
       return ` · ${p.filename}`;
+    case "chain.restore":
+      return ` · ${p.name}`;
     case "chain.remove":
       return ` · ${p.name}${p.reason ? `: ${p.reason}` : ""}`;
     case "evidence.verify":

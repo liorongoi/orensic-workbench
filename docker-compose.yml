@@ -1,11 +1,11 @@
-# Single-examiner deployment. The workbench needs no outbound network: models are bundled,
+# Single-examiner deployment. Lucida needs no outbound network: models are bundled,
 # C2PA is validated offline, and agents connect to the MCP servers from inside the network.
-# Docker does not publish ports from a container that is only on an internal network, so the
-# workbench also joins a plain "ui" network to serve the browser. To block outbound traffic,
+# Docker does not publish ports from a container that is only on an internal network, so
+# Lucida also joins a plain "ui" network to serve the browser. To block outbound traffic,
 # run on an air-gapped host or firewall the host; the MCP servers stay internal-only.
 services:
   workbench:
-    image: forensic-workbench:0.3.0
+    image: lucida:0.3.0
     build: .
     ports:
       - "127.0.0.1:8000:8000"   # local browser only; put a TLS proxy in front for a lab network
@@ -20,7 +20,7 @@ services:
 
   # Optional: the MCP servers for an agent (e.g. a self-hosted LLM client) on the same internal network.
   mcp-authenticate:
-    image: forensic-workbench:0.3.0
+    image: lucida:0.3.0
     command: ["python", "-m", "forensic.mcp_server", "authenticate", "--http", "8103", "--host", "0.0.0.0"]
     volumes: ["./data:/data", "./import:/import:ro"]
     environment:

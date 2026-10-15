@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, Field
 
-from . import __version__, formats, media
+from . import APP_NAME, __version__, formats, media
 from . import measure as measure_mod
 from .accounts import Accounts, AuthError, actor_for
 from .agents import WORKFLOWS, plan_enhancement
@@ -47,7 +47,7 @@ async def _authenticate(request: Request) -> None:
     user = accounts().session_user(token)
     _user.set(user)
     if user is None and request.url.path.startswith("/api/") and request.url.path not in OPEN_PATHS:
-        raise HTTPException(401, "sign in to use the workbench")
+        raise HTTPException(401, "sign in to use Lucida")
 
 
 @asynccontextmanager
@@ -58,7 +58,7 @@ async def _lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Forensic Workbench", version=__version__, dependencies=[Depends(_authenticate)],
+app = FastAPI(title=APP_NAME, version=__version__, dependencies=[Depends(_authenticate)],
               lifespan=_lifespan)
 
 # Answer only requests addressed to this computer by name. Without this check a web page could
@@ -107,7 +107,7 @@ def jobs() -> JobQueue:
 def user() -> dict:
     u = _user.get()
     if u is None:
-        raise HTTPException(401, "sign in to use the workbench")
+        raise HTTPException(401, "sign in to use Lucida")
     return u
 
 
@@ -426,6 +426,7 @@ def get_case(case_id: str):
         "evidence": w.list_evidence(case_id),
         "removed_evidence": w.list_evidence(case_id, removed=True),
         "chains": w.list_chains(case_id),
+        "removed_chains": w.list_chains(case_id, removed=True),
         "analyses": w.list_analysis_results(case_id),
         "camera_references": w.list_camera_references(case_id),
         "measurements": w.list_measurements(case_id),
@@ -593,6 +594,11 @@ def update_chain(chain_id: str, body: ChainUpdate, x_examiner: str | None = Head
 @app.post("/api/chains/{chain_id}/remove")
 def remove_chain(chain_id: str, body: RemoveIn, x_examiner: str | None = Header(None)):
     return wb().remove_chain(chain_id, actor(x_examiner), body.reason)
+
+
+@app.post("/api/chains/{chain_id}/restore")
+def restore_chain(chain_id: str, x_examiner: str | None = Header(None)):
+    return wb().restore_chain(chain_id, actor(x_examiner))
 
 
 class AcceptIn(BaseModel):

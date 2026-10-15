@@ -47,7 +47,10 @@ code, .hash { font-family: var(--mono); font-size: 11px; }
 
 .app { display: flex; flex-direction: column; height: 100%; }
 .topbar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
-.brand { color: var(--text); font-weight: 700; text-decoration: none; letter-spacing: 0.2px; }
+.brand { display: inline-flex; align-items: center; gap: 8px; color: var(--text); text-decoration: none; }
+.wordmark { font-family: "Instrument Serif", Georgia, "Times New Roman", serif; font-style: italic; font-weight: 400; font-size: 22px; line-height: 1; letter-spacing: 0.2px; }
+.signin-brand { display: flex; align-items: center; gap: 12px; margin: 0 0 4px; }
+.signin-brand .wordmark { font-size: 40px; }
 .crumb { color: var(--muted); }
 .examiner { margin-left: 12px; color: var(--muted); }
 
@@ -328,3 +331,4 @@ details.guide summary { cursor: pointer; font-style: normal; color: var(--muted)
 .verdict-line { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .result .verdict-line { white-space: normal; }
 .detector.red .detector-name b, .stage-head .light.red + b { color: var(--bad); }
+.removed-chains { margin: -2px 0 8px; }

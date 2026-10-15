@@ -1,13 +1,13 @@
-"""Windows launcher for an installed Forensic Workbench.
+"""Windows launcher for an installed Lucida.
 
 Runs with the Python bundled in the installation (<app>\\python\\python.exe):
 
-    workbench_launcher.py run [--no-browser]   start the workbench and open it in the browser
+    workbench_launcher.py run [--no-browser]   start Lucida and open it in the browser
     workbench_launcher.py selftest [--pause]   check the installed files, then the acceptance self-test
 
 Settings come from <app>\\workbench.ini (written by the installer); environment
 variables of the same name (FORENSIC_DATA_DIR, ...) override it. Nothing here
-makes a network connection other than to the workbench on this machine.
+makes a network connection other than to Lucida on this machine.
 """
 
 from __future__ import annotations
@@ -110,7 +110,7 @@ def run(open_browser: bool) -> int:
     url = f"{'https' if tls else 'http'}://{browse_host}:{net['port']}"
     cafile = tls and (tls["authority"] or tls["cert"])
     if _health(url, cafile=cafile):
-        print(f"The Forensic Workbench is already running at {url}")
+        print(f"Lucida is already running at {url}")
         if open_browser:
             webbrowser.open(url)
         return 0
@@ -125,17 +125,17 @@ def run(open_browser: bool) -> int:
                 return
             time.sleep(0.5)
 
-    print("Forensic Workbench")
+    print("Lucida")
     print(f"  Address:     {url}")
     print(f"  Case data:   {os.environ['FORENSIC_DATA_DIR']}")
     print(f"  Import from: {os.environ['FORENSIC_IMPORT_DIR']}")
     if tls:
         lan = next((n for n in tls["names"] if n != "localhost" and "." in n), None) or socket.gethostname().lower()
-        print(f"  Lab network: https://{lan}:{net['port']} (examiners sign in with their workbench accounts)")
+        print(f"  Lab network: https://{lan}:{net['port']} (examiners sign in with their Lucida accounts)")
         if tls["authority"]:
             print(f"  Certificate: install {tls['authority']} on each examiner PC once")
             print(f"               (Trusted Root Certification Authorities); SHA-256 {tls['authority_sha256']}")
-    print("Close this window to stop the workbench.\n")
+    print("Close this window to stop Lucida.\n")
     if open_browser:
         threading.Thread(target=_open_when_ready, daemon=True).start()
 
@@ -194,7 +194,7 @@ def selftest(pause: bool) -> int:
         out = sys.stdout
         sys.stdout = _Tee(out, log)
         try:
-            print(f"Forensic Workbench acceptance self-test, {dt.datetime.now().isoformat(timespec='seconds')}")
+            print(f"Lucida acceptance self-test, {dt.datetime.now().isoformat(timespec='seconds')}")
             print(f"Installation: {APP}")
             print(f"Computer:     {os.environ.get('COMPUTERNAME', '?')}  Python {sys.version.split()[0]}\n")
             ok, detail = verify_installation()
@@ -226,7 +226,7 @@ def main(argv=None) -> int:
         import traceback
 
         traceback.print_exc()
-        print(f"\nThe Forensic Workbench stopped: {e}")
+        print(f"\nLucida stopped: {e}")
         code = 1
     # Keep a window opened from a shortcut on screen long enough to read why it stopped.
     if code and sys.stdin and sys.stdin.isatty() and not (a.cmd == "selftest" and a.pause):
