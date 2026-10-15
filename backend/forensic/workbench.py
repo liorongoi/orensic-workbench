@@ -363,11 +363,12 @@ class Workbench:
         row["removed"] = json.loads(removed) if removed else None
         return row
 
-    def list_chains(self, case_id: str) -> list[dict]:
-        """Chains still in the case: not removed themselves, and on evidence that is not removed."""
+    def list_chains(self, case_id: str, removed: bool = False) -> list[dict]:
+        """Chains on evidence that is still in the case; `removed=True` lists the removed ones instead."""
+        cond = "IS NOT NULL" if removed else "IS NULL"
         rows = self.db.all(
             "SELECT c.* FROM chains c JOIN evidence e ON e.id = c.evidence_id"
-            " WHERE c.case_id = ? AND c.removed_json IS NULL AND e.removed_json IS NULL ORDER BY c.created_at",
+            f" WHERE c.case_id = ? AND c.removed_json {cond} AND e.removed_json IS NULL ORDER BY c.created_at",
             (case_id,),
         )
         for r in rows:
@@ -386,6 +387,18 @@ class Workbench:
             self.audit.append(actor, "chain.remove", case_id=ch["case_id"], target=chain_id,
                               params={"name": ch["name"], "evidence_id": ch["evidence_id"], "graph_hash": ch["graph_hash"],
                                       "output_hash": ch["output_hash"], "reason": reason.strip()[:500]})
+        return self.get_chain(chain_id)
+
+    def restore_chain(self, chain_id: str, actor: Actor) -> dict:
+        if actor.kind != "human":
+            raise ValueError("only an examiner can restore a chain")
+        ch = self.get_chain(chain_id)
+        if ch["removed"]:
+            if self._evidence_row(ch["evidence_id"])["removed_json"]:
+                raise ValueError("restore the evidence item first")
+            self.db.execute("UPDATE chains SET removed_json = NULL WHERE id = ?", (chain_id,))
+            self.audit.append(actor, "chain.restore", case_id=ch["case_id"], target=chain_id,
+                              params={"name": ch["name"], "evidence_id": ch["evidence_id"], "graph_hash": ch["graph_hash"]})
         return self.get_chain(chain_id)
 
     def update_chain(self, chain_id: str, graph: dict, actor: Actor, name: str | None = None) -> dict:

@@ -69,6 +69,8 @@ export function Workspace({ caseId, filters, analyses }: Props) {
   const [uploading, setUploading] = useState<string | null>(null);
   const [auditKey, setAuditKey] = useState(0);
   const [removed, setRemoved] = useState<Evidence[]>([]);
+  const [removedChains, setRemovedChains] = useState<Chain[]>([]);
+  const [showRemovedChains, setShowRemovedChains] = useState(false);
   const [showRemoved, setShowRemoved] = useState(false);
   const [confirm, setConfirm] = useState<{ kind: "evidence" | "chain"; id: string; reason: string } | null>(null);
   const [crop, setCrop] = useState<{ nodeId: string | null } | null>(null);
@@ -100,6 +102,7 @@ export function Workspace({ caseId, filters, analyses }: Props) {
     setCase(d.case);
     setEvidence(d.evidence);
     setRemoved(d.removed_evidence ?? []);
+    setRemovedChains(d.removed_chains ?? []);
     setChains(d.chains);
     setRuns(d.analyses);
     setReferences(d.camera_references);
@@ -314,11 +317,24 @@ export function Workspace({ caseId, filters, analyses }: Props) {
 
   const removeChain = async (id: string, reason: string) => {
     try {
-      await api.removeChain(id, reason);
+      const gone = await api.removeChain(id, reason);
       const rest = chains.filter((c) => c.id !== id);
       setChains(rest);
+      setRemovedChains((rc) => [...rc, gone]);
       const mine = rest.filter((c) => c.evidence_id === evId);
       openChain(mine[mine.length - 1] ?? null);
+      setAuditKey((k) => k + 1);
+    } catch (e) {
+      setStatus({ kind: "bad", text: (e as Error).message });
+    }
+  };
+
+  const restoreChain = async (id: string) => {
+    try {
+      const c = await api.restoreChain(id);
+      setRemovedChains((rc) => rc.filter((x) => x.id !== id));
+      setChains((cs) => [...cs, c].sort((a, b) => a.created_at.localeCompare(b.created_at)));
+      openChain(c);
       setAuditKey((k) => k + 1);
     } catch (e) {
       setStatus({ kind: "bad", text: (e as Error).message });
@@ -507,6 +523,7 @@ export function Workspace({ caseId, filters, analyses }: Props) {
   const pickPoints = (pickNode?.params[picking!.param] as number[][] | undefined) ?? undefined;
 
   const evChains = useMemo(() => chains.filter((c) => c.evidence_id === evId), [chains, evId]);
+  const evRemovedChains = removedChains.filter((c) => c.evidence_id === evId);
   const triageBy = useMemo(() => Object.fromEntries(triage.map((t) => [t.evidence_id, t])), [triage]);
 
   const overlays: Overlay[] = [];
@@ -804,6 +821,23 @@ export function Workspace({ caseId, filters, analyses }: Props) {
                   🗑
                 </button>
               </div>
+              {evRemovedChains.length > 0 && (
+                <div className="removed-chains">
+                  <button className="link small" onClick={() => setShowRemovedChains((v) => !v)}>
+                    {showRemovedChains ? "Hide" : "Show"} removed chains ({evRemovedChains.length})
+                  </button>
+                  {showRemovedChains && (
+                    <ul className="removed-list">
+                      {evRemovedChains.map((c) => (
+                        <li key={c.id} title={`Removed by ${c.removed?.by ?? "?"}${c.removed?.reason ? `\n${c.removed.reason}` : ""}`}>
+                          <span className="ev-name">{c.name}</span>
+                          <button className="small-btn" onClick={() => restoreChain(c.id)}>Restore</button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
               {chain && confirm?.kind === "chain" && confirm.id === chain.id &&
                 confirmBox(() => {
                   removeChain(chain.id, confirm.reason);
