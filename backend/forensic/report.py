@@ -144,9 +144,29 @@ def conversion_text(ev: dict, names: dict) -> str | None:
     src = names.get(ev.get("derived_from"), ev.get("derived_from"))
     text = (f"Working copy made from {src} (SHA-256 {conv.get('source_sha256')}) by {conv['method']}: {conv['description']}"
             + (f" Command: {conv['command']}." if conv.get("command") else "")
-            + (f" Carving kept {conv['carve']['nal_units_kept']} NAL units and dropped {conv['carve']['nal_units_dropped']};"
-               f" frame times are synthetic at {conv['frame_rate']:g} fps." if conv.get("carve") else "")
+            + (_carve_text(conv) if conv.get("carve") else "")
+            + (_parse_text(conv) if conv.get("timing") else "")
             + f" {conv.get('ffmpeg', '')}.")
+    return text
+
+
+def _carve_text(conv: dict) -> str:
+    c = conv["carve"]
+    kept = (f"{c['jpeg_frames_kept']} JPEG frames" if "jpeg_frames_kept" in c
+            else f"{c['nal_units_kept']} units and dropped {c['nal_units_dropped']}")
+    return f" Carving kept {kept}; frame times are synthetic at {conv['frame_rate']:g} fps."
+
+
+def _parse_text(conv: dict) -> str:
+    t = conv["timing"]
+    text = (f" Parser {conv.get('parser')} read {t['frames']} {str(conv.get('codec', '')).upper()} frames"
+            f" ({t['key_frames']} key frames) with timing from the {t['source']};"
+            f" median frame interval {t['median_frame_interval_ms']} ms.")
+    if t.get("recorder_clock_start"):
+        text += f" Recorder clock {t['recorder_clock_start']} to {t['recorder_clock_end']} (precision {t['recorder_clock_precision']})."
+    text += f" Timing gaps: {t['gap_count']}; timestamp anomalies: {t['timestamp_anomaly_count']}."
+    for note in conv.get("notes") or []:
+        text += f" Note: {note}."
     return text
 
 

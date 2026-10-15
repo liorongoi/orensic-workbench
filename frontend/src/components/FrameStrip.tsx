@@ -55,6 +55,7 @@ export function FrameStrip({ frames, current, range, onSeek, onSetStart, onSetEn
             <>
               {" "}· <b style={{ color: COLORS[f.type] }}>{f.type}</b>
               {f.time !== null && ` · ${f.time.toFixed(3)} s`}
+              {f.recorder_time && ` · recorder ${f.recorder_time.replace("T", " ")}`}
               {f.size !== null && ` · ${f.size.toLocaleString()} B`}
             </>
           )}

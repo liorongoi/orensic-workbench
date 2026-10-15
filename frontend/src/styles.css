@@ -209,6 +209,7 @@ code.block { display: block; white-space: pre-wrap; max-height: 260px; overflow:
 .plan-result ol { padding-left: 18px; margin: 6px 0; }
 .convert-panel { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
 .convert-panel p { margin: 0; }
+.convert-panel p.warn { color: var(--warn); }
 .measure-fields { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
 .measure-field { display: flex; align-items: center; gap: 6px; }
 .measure-field .grow { flex: 1; }

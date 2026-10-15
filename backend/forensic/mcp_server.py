@@ -128,8 +128,9 @@ def _evidence(srv: MCPServer) -> None:
     def extract_frame(evidence_id: str, frame: int = 0, max_side: int = 1024) -> Image:
         return _png(wb().source_frame(evidence_id, frame), max_side)
 
-    @srv.tool(description="Identify a recorder export's container family (Dahua DAV, Hikvision, MPEG-PS/TS, raw "
-              "H.264/H.265...) from its signatures, and list the conversion methods.")
+    @srv.tool(description="Identify a recorder export's container family (Dahua DAV, Hikvision, Xiongmai/XMEye, "
+              "HiSilicon HXVS, MPEG-PS/TS, raw H.264/H.265/MPEG-4/MPEG-2...) from its signatures, whether Lucida has "
+              "a native parser for it, and list the conversion methods.")
     def identify_container(evidence_id: str) -> dict:
         w = wb()
         with open(w.evidence_path(evidence_id), "rb") as f:
@@ -137,8 +138,10 @@ def _evidence(srv: MCPServer) -> None:
         return {"identified": ident, "methods": formats.METHODS}
 
     @srv.tool(description="Convert a recorder export into a standard file as a new, linked evidence item. "
-              "method 'remux' stream-copies what FFmpeg can demux (keeps timestamps); 'carve' extracts the raw "
-              "H.264/H.265 stream from an unknown container (frame times then come from frame_rate). "
+              "method 'parse' uses Lucida's own parser for the vendor container (when identify_container says "
+              "parser: true) and keeps the recorder's per-frame timing; 'remux' stream-copies what FFmpeg can demux "
+              "(keeps timestamps); 'carve' extracts the raw H.264/H.265/MPEG-4/MPEG-2/JPEG stream from an unknown "
+              "container (frame times then come from frame_rate). "
               "The original is never modified.")
     def convert_evidence(evidence_id: str, method: str, frame_rate: float = 25.0) -> dict:
         return wb().convert_evidence(evidence_id, method, agent(), frame_rate=frame_rate)
@@ -321,7 +324,7 @@ def _authenticate(srv: MCPServer) -> None:
                 description="Check a video's container, frame structure and timestamps.")
     def video_prompt(case_id: str, evidence_id: str) -> str:
         return (f"Case {case_id}, evidence {evidence_id}. 1. identify_container; if it is a recorder export that will not "
-                "play, convert_evidence (remux first, carve if remux fails) and work on the converted item. 2. file_analysis "
+                "play, convert_evidence (parse when a native parser exists, else remux, carve if both fail) and work on the converted item. 2. file_analysis "
                 "for container, GOP structure and timestamp gaps. 3. list_frames around any gap and look at the frames either side. "
                 "4. Summarise in add_note as opinion: gaps can be dropped frames, motion-triggered recording or deletion.")
 

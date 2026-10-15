@@ -1153,20 +1153,66 @@ typical scene survey provides; a scene reconstruction from multiple views is pla
 `forensic/formats.py`.
 
 **Identification.** The first 64 KB are matched against signatures: Dahua DAV (`DHAV`),
-Hikvision (`IMKH` header), MPEG program and transport streams, raw H.264 and H.265 elementary
-streams, AVI, MP4/MOV, ASF and Matroska. The elementary codec is guessed by counting NAL unit
-types (SPS, PPS, IDR for H.264; VPS, SPS, PPS for H.265).
+Hikvision (`IMKH` header; older `4HKH` header), HiSilicon (`HXVS` / `HXVT`), Xiongmai
+(`00 00 01 FC/FE` key-frame headers with a plausible codec, frame rate and size), MPEG program
+and transport streams, raw H.264, H.265, MPEG-4 Part 2 and MPEG-2 elementary streams, AVI,
+MP4/MOV, ASF and Matroska. The elementary codec is guessed by counting start codes: VOL and VOP
+headers for MPEG-4, sequence and picture headers for MPEG-2 (both checked first, since their
+codes have the H.264 forbidden bit set and so never start an H.264 NAL unit), SPS, PPS and slice
+NAL units for H.264, VPS, SPS and PPS for H.265, and complete JPEG images (walked marker by
+marker) for Motion JPEG.
+
+**Parse (native vendor parsers).** `forensic/dvr.py`. No vendor SDK is used; each layout comes
+from a public open-source demuxer:
+
+- *Dahua DAV* (FFmpeg `libavformat/dhav.c`): 24-byte `DHAV` header (frame type, channel, frame
+  number, record length, packed date, 16-bit millisecond counter, extension length), extension
+  records (0x80/0x82 picture size, 0x81 codec and frame rate), payload, `dhav` trailer. Time is
+  the date to the second plus the millisecond counter's steps within it, as FFmpeg does; a step
+  back larger than half the counter range is a wrap, a smaller one is reported as an anomaly.
+  Records are kept per channel: FFmpeg's demuxer mixes all channels into one stream, Lucida
+  extracts the first and lists the others.
+- *Xiongmai* (OpenIPC python-dvr): `00 00 01 FC` key frame (codec, frame rate, width/8,
+  height/8, packed date, length), `FD` P frame (length), `FE` JPEG frame, `FA` audio and `F9`
+  information records. Frames are timed by the frame rate in the latest key-frame header; each
+  key frame's recorder date is compared with that and departures over 2 s are listed as clock
+  jumps.
+- *HiSilicon* (FFmpeg `libavformat/hxvs.c`, VLC `hx.c`): 16-byte `HXVS` (H.264) or `HXVT`
+  (H.265) header with the picture size, then `HXVF` records of one NAL unit each with a
+  millisecond timestamp and a key flag, `HXAF` audio and an `HXFI` index. NAL units with the
+  same timestamp form one frame.
+- *MPEG program stream* (ISO/IEC 13818-1), including Hikvision's 40-byte `IMKH` header and its
+  private-stream metadata: pack headers (MPEG-1 and MPEG-2), the first video stream's PES
+  payloads are joined, split into pictures, and each PTS is given to the first picture that
+  begins in its PES packet. Pictures without a PTS are placed evenly between their neighbours
+  and counted.
+
+The frames are written into MPEG transport stream by Lucida's own writer (PAT, PMT, one PES per
+frame with its PTS on a 90 kHz clock, PCR 100 ms ahead), so the bytes are deterministic and
+nothing is re-encoded. Motion JPEG has no transport-stream mapping and is stream-copied into
+Matroska at the measured rate. The record keeps the timing summary: frame and key-frame count,
+median interval, measured and recorded frame rate, recorder clock span and precision, every gap
+over 1.5 intervals and every timestamp that went backwards (which is placed one interval after
+the previous frame so the copy plays; the original value is listed).
 
 **Remux (stream copy).** Containers FFmpeg can read are copied into MPEG transport stream with
 `-c copy` and bit-exact flags: no re-encoding, so every compressed frame is byte-identical to the
 recorder's, and the recorder's timestamps are kept. For Hikvision, the 40-byte vendor header is
 skipped.
 
-**Carve.** For unknown containers, every Annex B start code is found; each NAL unit is kept if it
-is syntactically valid (forbidden bit clear, a type in the valid range) and cut where a known
-vendor marker (`DHAV`, `IMKH`, `HXVS` and others) begins, so container bytes are not fed to the
-decoder. The result is a raw H.264/H.265 stream; since it has no timestamps, frame n is placed at
-n / frame rate seconds and the report says so.
+**Carve.** For unknown containers, every start code is found; each unit is kept if it is
+syntactically valid (for H.264/H.265 the forbidden bit clear and a type in the valid range; for
+MPEG-4 and MPEG-2 a start code value that the standard defines) and cut where a known vendor
+marker (`DHAV`, `IMKH`, `HXVS`, `HXVF` and others) begins, so container bytes are not fed to
+the decoder. Motion JPEG is carved as complete JPEG images. The result has no timestamps, so
+frame n is placed at n / frame rate seconds and the report says so.
+
+**Validation.** There are no vendor recordings in the repository, so `tests/test_dvr_formats.py`
+builds files in each vendor layout around real encoded streams (H.264, H.265, MPEG-4, MPEG-2,
+Motion JPEG) and checks that the working copy decodes to exactly the same pictures (FFmpeg
+per-frame MD5) at the timing written into the container, including gaps, a clock that steps
+back, a corrupted record, a second camera channel and interleaved audio. The constructed Dahua
+file is also read by FFmpeg's own `dhav` demuxer with the same pictures and times.
 
 Either way the output is a new evidence item recording the original's hash, the method, the
 exact command (with local paths removed) and the FFmpeg version, so a second examiner can repeat
