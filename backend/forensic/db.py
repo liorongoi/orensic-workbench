@@ -126,6 +126,9 @@ CREATE TABLE IF NOT EXISTS reviews (
 MIGRATIONS = [
     ("evidence", "derived_from", "TEXT"),
     ("evidence", "conversion_json", "TEXT"),
+    # Set when an examiner removes an item from the case; the row and the stored file are kept.
+    ("evidence", "removed_json", "TEXT"),
+    ("chains", "removed_json", "TEXT"),
 ]
 
 
@@ -154,7 +157,12 @@ class Database:
         for table, column, kind in MIGRATIONS:
             cols = {r[1] for r in self._conn.execute(f"PRAGMA table_info({table})")}
             if column not in cols:
-                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+                try:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+                except sqlite3.OperationalError as e:
+                    # Another connection opening the same database added it first.
+                    if "duplicate column" not in str(e):
+                        raise
 
     def execute(self, sql: str, params: tuple | dict = ()) -> sqlite3.Cursor:
         with self._lock:

@@ -89,7 +89,7 @@ class Workbench:
 
     def list_cases(self) -> list[dict]:
         return self.db.all(
-            "SELECT c.*, (SELECT COUNT(*) FROM evidence e WHERE e.case_id = c.id) AS evidence_count "
+            "SELECT c.*, (SELECT COUNT(*) FROM evidence e WHERE e.case_id = c.id AND e.removed_json IS NULL) AS evidence_count "
             "FROM cases c ORDER BY created_at DESC"
         )
 
@@ -186,9 +186,53 @@ class Workbench:
     def evidence_path(self, evidence_id: str) -> Path:
         return Path(self._evidence_row(evidence_id)["stored_path"])
 
-    def list_evidence(self, case_id: str) -> list[dict]:
-        rows = self.db.all("SELECT * FROM evidence WHERE case_id = ? ORDER BY ingested_at", (case_id,))
+    def list_evidence(self, case_id: str, removed: bool = False) -> list[dict]:
+        """Evidence in the case; `removed=True` lists the items an examiner removed instead."""
+        cond = "IS NOT NULL" if removed else "IS NULL"
+        rows = self.db.all(f"SELECT * FROM evidence WHERE case_id = ? AND removed_json {cond} ORDER BY ingested_at", (case_id,))
         return [_public_evidence(r) for r in rows]
+
+    def remove_evidence(self, evidence_id: str, actor: Actor, reason: str = "") -> dict:
+        """Take an item (and its working copies and chains) out of the case.
+
+        Nothing is deleted: the original stays in the write-once store with its hash, the
+        rows stay in the database, and the removal is an audit entry that can be undone.
+        """
+        if actor.kind != "human":
+            raise ValueError("only an examiner can remove evidence")
+        row = self._evidence_row(evidence_id)
+        if row["removed_json"]:
+            return self.get_evidence(evidence_id)
+        mark = canonical_json({"by": actor.name, "at": now_iso(), "reason": reason.strip()[:500]})
+        ids = [evidence_id]
+        for r in self.db.all("SELECT id FROM evidence WHERE derived_from = ? AND removed_json IS NULL", (evidence_id,)):
+            ids.append(r["id"])
+        chains = []
+        for eid in ids:
+            self.db.execute("UPDATE evidence SET removed_json = ? WHERE id = ?", (mark, eid))
+            chains += [r["id"] for r in self.db.all("SELECT id FROM chains WHERE evidence_id = ? AND removed_json IS NULL", (eid,))]
+        self.audit.append(actor, "evidence.remove", case_id=row["case_id"], target=evidence_id,
+                          params={"filename": row["filename"], "sha256": row["sha256"], "reason": reason.strip()[:500],
+                                  "working_copies": ids[1:], "chains_hidden": chains, "original_kept": True},
+                          output_hash=row["sha256"])
+        return self.get_evidence(evidence_id)
+
+    def restore_evidence(self, evidence_id: str, actor: Actor) -> dict:
+        if actor.kind != "human":
+            raise ValueError("only an examiner can restore evidence")
+        row = self._evidence_row(evidence_id)
+        if not row["removed_json"]:
+            return self.get_evidence(evidence_id)
+        mark = row["removed_json"]
+        ids = [evidence_id] + [r["id"] for r in self.db.all(
+            "SELECT id FROM evidence WHERE derived_from = ? AND removed_json = ?", (evidence_id, mark))]
+        for eid in ids:
+            self.db.execute("UPDATE evidence SET removed_json = NULL WHERE id = ?", (eid,))
+        self.audit.append(actor, "evidence.restore", case_id=row["case_id"], target=evidence_id,
+                          params={"filename": row["filename"], "sha256": row["sha256"], "working_copies": ids[1:]},
+                          output_hash=row["sha256"])
+        return self.get_evidence(evidence_id)
+
 
     def verify_evidence(self, evidence_id: str, actor: Actor) -> dict:
         row = self._evidence_row(evidence_id)
@@ -297,6 +341,8 @@ class Workbench:
         ev = self._evidence_row(evidence_id)
         if ev["case_id"] != case_id:
             raise ValueError("evidence does not belong to this case")
+        if ev["removed_json"]:
+            raise ValueError("that evidence item was removed from the case; restore it first")
         g = self._normalise_for(evidence_id, graph or {"source": {}, "nodes": []})
         g = self._tag_agent_nodes(g, actor)
         cid, ts = new_id(), now_iso()
@@ -314,13 +360,34 @@ class Workbench:
         if not row:
             raise NotFound(f"chain {chain_id} not found")
         row["graph"] = json.loads(row.pop("graph_json"))
+        removed = row.pop("removed_json", None)
+        row["removed"] = json.loads(removed) if removed else None
         return row
 
     def list_chains(self, case_id: str) -> list[dict]:
-        rows = self.db.all("SELECT * FROM chains WHERE case_id = ? ORDER BY created_at", (case_id,))
+        """Chains still in the case: not removed themselves, and on evidence that is not removed."""
+        rows = self.db.all(
+            "SELECT c.* FROM chains c JOIN evidence e ON e.id = c.evidence_id"
+            " WHERE c.case_id = ? AND c.removed_json IS NULL AND e.removed_json IS NULL ORDER BY c.created_at",
+            (case_id,),
+        )
         for r in rows:
             r["graph"] = json.loads(r.pop("graph_json"))
+            r["removed"] = json.loads(r.pop("removed_json")) if r["removed_json"] else None
         return rows
+
+    def remove_chain(self, chain_id: str, actor: Actor, reason: str = "") -> dict:
+        """Take an enhancement chain out of the case. Its rows and audit history are kept."""
+        if actor.kind != "human":
+            raise ValueError("only an examiner can remove a chain")
+        ch = self.get_chain(chain_id)
+        if not ch["removed"]:
+            mark = canonical_json({"by": actor.name, "at": now_iso(), "reason": reason.strip()[:500]})
+            self.db.execute("UPDATE chains SET removed_json = ? WHERE id = ?", (mark, chain_id))
+            self.audit.append(actor, "chain.remove", case_id=ch["case_id"], target=chain_id,
+                              params={"name": ch["name"], "evidence_id": ch["evidence_id"], "graph_hash": ch["graph_hash"],
+                                      "output_hash": ch["output_hash"], "reason": reason.strip()[:500]})
+        return self.get_chain(chain_id)
 
     def update_chain(self, chain_id: str, graph: dict, actor: Actor, name: str | None = None) -> dict:
         old = self.get_chain(chain_id)
@@ -535,7 +602,9 @@ class Workbench:
         if evidence_id:
             ids = self.db.all("SELECT id FROM analyses WHERE evidence_id = ? ORDER BY created_at", (evidence_id,))
         else:
-            ids = self.db.all("SELECT id FROM analyses WHERE case_id = ? ORDER BY created_at", (case_id,))
+            ids = self.db.all(
+                "SELECT a.id FROM analyses a JOIN evidence e ON e.id = a.evidence_id"
+                " WHERE a.case_id = ? AND e.removed_json IS NULL ORDER BY a.created_at", (case_id,))
         return [self.get_analysis_result(r["id"]) for r in ids]
 
     def _resolve(self, case_id: str, kind: str, rid: str):
@@ -643,7 +712,9 @@ class Workbench:
         return row
 
     def list_measurements(self, case_id: str) -> list[dict]:
-        ids = self.db.all("SELECT id FROM measurements WHERE case_id = ? ORDER BY created_at", (case_id,))
+        ids = self.db.all(
+            "SELECT m.id FROM measurements m JOIN evidence e ON e.id = m.evidence_id"
+            " WHERE m.case_id = ? AND e.removed_json IS NULL ORDER BY m.created_at", (case_id,))
         return [self.get_measurement(r["id"]) for r in ids]
 
     # Triage (Smart Report) ----------------------------------------------------------------------
@@ -681,7 +752,7 @@ class Workbench:
 
     def list_triage(self, case_id: str) -> list[dict]:
         out = []
-        for ev in self.db.all("SELECT id FROM evidence WHERE case_id = ? ORDER BY ingested_at", (case_id,)):
+        for ev in self.db.all("SELECT id FROM evidence WHERE case_id = ? AND removed_json IS NULL ORDER BY ingested_at", (case_id,)):
             t = self.latest_triage(ev["id"])
             if t:
                 out.append(t)
@@ -732,6 +803,8 @@ def _public_evidence(row: dict) -> dict:
     conv = row.pop("conversion_json", None)
     row["conversion"] = json.loads(conv) if conv else None
     row.pop("stored_path")
+    removed = row.pop("removed_json", None)
+    row["removed"] = json.loads(removed) if removed else None
     return row
 
 

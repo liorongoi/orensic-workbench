@@ -106,6 +106,7 @@ def build_bundle(wb: Workbench, case_id: str, actor: Actor, verify: bool = True)
         "standards": STANDARDS,
         "case": case,
         "evidence": evidence,
+        "removed_evidence": wb.list_evidence(case_id, removed=True),
         "chains": chains,
         "analyses": analyses,
         "camera_references": wb.list_camera_references(case_id),
@@ -257,6 +258,11 @@ def render_html(wb: Workbench, bundle: dict) -> str:
             f"<td>{e(ev['media_type'])} ({dims}{extra})</td><td class='hash'>{ev['sha256']}<br>{ev['md5']}</td><td>{status}</td></tr>"
         )
     out.append("</table>")
+    if bundle.get("removed_evidence"):
+        out.append("<p class='muted'>Removed from the case by an examiner (originals kept in the store; see audit trail): "
+                   + "; ".join(f"{e(r['filename'])} (SHA-256 {r['sha256'][:16]}…, {e(r['removed']['by'])}"
+                               + (f": {e(r['removed']['reason'])}" if r["removed"]["reason"] else "") + ")"
+                               for r in bundle["removed_evidence"]) + "</p>")
 
     out.append("<h2>2. Enhancement</h2>")
     if not bundle["chains"]:
@@ -437,6 +443,11 @@ def render_pdf(wb: Workbench, bundle: dict) -> bytes:
         conv_txt = f"<br/><font size='6.5' color='#5b6573'>{e(conv)}</font>" if conv else ""
         rows.append([f"{e(ev['filename'])}<br/>{ev['size']:,} bytes{conv_txt}", e(ev["media_type"]), f"<font name='Courier' size='6.5'>{ev['sha256']}<br/>{ev['md5']}</font>", status])
     s.append(table(rows, [0.25 * width, 0.12 * width, 0.45 * width, 0.18 * width]))
+    if bundle.get("removed_evidence"):
+        s.append(Paragraph("Removed from the case by an examiner (originals kept in the store; see audit trail): "
+                           + "; ".join(f"{e(r['filename'])} (SHA-256 {r['sha256'][:16]}…, {e(r['removed']['by'])}"
+                                       + (f": {e(r['removed']['reason'])}" if r["removed"]["reason"] else "") + ")"
+                                       for r in bundle["removed_evidence"]), small))
 
     s.append(Paragraph("2. Enhancement", h2))
     for i, ch in enumerate(bundle["chains"], 1):

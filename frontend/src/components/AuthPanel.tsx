@@ -23,6 +23,24 @@ interface Props {
   onPoints: (p: Record<string, number[][]>) => void;
 }
 
+/** Analysis stages in the order an examiner works through them (as in Amped Authenticate). */
+const STAGES: [string, string[]][] = [
+  ["File", ["File analysis"]],
+  ["Global", ["Video authentication", "Global analysis"]],
+  ["Camera", ["Camera identification"]],
+  ["Local", ["Local analysis"]],
+  ["AI / deepfake", ["Synthetic media"]],
+  ["Geometric", ["Geometric analysis"]],
+];
+
+const stageOf = (category: string) => STAGES.find(([, cats]) => cats.includes(category))?.[0] ?? "Other";
+
+/** red: the latest run raised a warning; green: ran clean; none: not run. */
+function verdict(run: AnalysisRun | undefined): "red" | "green" | "none" {
+  if (!run) return "none";
+  return run.result.flags.some((f) => f.level === "warning") ? "red" : "green";
+}
+
 /** Key under which points clicked on the image for an analysis parameter are kept. */
 export const authField = (analysis: string, param: string) => `auth:${analysis}:${param}`;
 
@@ -76,7 +94,7 @@ function TriageBox({ evidence, triage, onTriage }: { evidence: Evidence; triage:
           )}
         </>
       ) : (
-        <p className="muted small">Runs metadata and JPEG compression checks and sorts the item green, yellow or red. A colour is where to look first, never a finding.</p>
+        <p className="muted small" title="Runs metadata and JPEG compression checks and sorts the item green, yellow or red. A colour is where to look first, never a finding.">Not run yet</p>
       )}
       {error && <p className="error small">{error}</p>}
     </div>
@@ -108,27 +126,55 @@ export function AuthPanel(props: Props) {
 
   const mine = runs.filter((r) => r.evidence_id === evidence.id).slice().reverse();
   const byId = Object.fromEntries(catalogue.map((a) => [a.id, a]));
+  const latest: Record<string, AnalysisRun> = {};
+  for (const r of mine) latest[r.name] ??= r;
+  const stages = [...STAGES.map(([s]) => s), "Other"]
+    .map((st) => [st, applicable.filter((a) => stageOf(a.category) === st)] as const)
+    .filter(([, as]) => as.length);
+  const [closed, setClosed] = useState<Record<string, boolean>>({});
+  const showRun = (r: AnalysisRun) => {
+    const first = Object.entries(r.result.maps)[0];
+    if (first) onShowMap(first[1], `${byId[r.name]?.name ?? r.name}: ${first[0].replace(/_/g, " ")}`);
+  };
 
   return (
     <div className="auth-panel">
       <TriageBox evidence={evidence} triage={triage} onTriage={onTriage} />
       <div className="detectors">
-        {applicable.map((a) => (
-          <div key={a.id} className={`detector${a.unavailable ? " analysis-unavailable" : ""}`}>
+        {stages.map(([stage, list]) => {
+          const flagged = list.some((a) => verdict(latest[a.id]) === "red");
+          const ran = list.filter((a) => latest[a.id]).length;
+          return (
+          <div key={stage} className="stage">
+            <button className="stage-head" onClick={() => setClosed((c) => ({ ...c, [stage]: !c[stage] }))}>
+              <span className="caret">{closed[stage] ? "▸" : "▾"}</span>
+              <span className={`light ${flagged ? "red" : ran ? "green" : ""}`} />
+              <b>{stage}</b>
+              <span className="muted small">{ran}/{list.length} run</span>
+            </button>
+            {!closed[stage] && list.map((a) => (
+          <div key={a.id} className={`detector ${verdict(latest[a.id])}${a.unavailable ? " analysis-unavailable" : ""}${latest[a.id] ? " clickable" : ""}`}
+            onClick={() => latest[a.id] && showRun(latest[a.id])}>
             <div className="detector-head">
-              <div>
+              <span className={`light ${verdict(latest[a.id])}`} title={latest[a.id]?.result.summary ?? "Not run"} />
+              <div title={[a.description, cardLine(a)].filter(Boolean).join("\n\n")} className="detector-name">
                 <b>{a.name}</b>
-                {a.ai && <span className="badge ai" title="Uses a learned model; flagged AI-assisted in the report">AI-assisted</span>}
-                <div className="muted small">{a.category}</div>
+                {a.ai && <span className="badge ai" title="Uses a learned model; flagged AI-assisted in the report">AI</span>}
+                {latest[a.id] && <div className="small verdict-line">{latest[a.id].result.summary}</div>}
               </div>
-              <span className="spacer" />
-              {a.params.length > 0 && !a.unavailable && <button onClick={() => setOpen(open === a.id ? null : a.id)}>Settings</button>}
-              <button className="primary" onClick={() => run(a)} disabled={busy !== null || !!a.unavailable} title={a.unavailable ?? undefined}>
-                {busy === a.id ? "Running…" : "Run"}
+              
+              {a.params.length > 0 && !a.unavailable && (
+                <button className={`icon${open === a.id ? " active" : ""}`} onClick={(e) => { e.stopPropagation(); setOpen(open === a.id ? null : a.id); }} title="Settings">
+                  ⚙
+                </button>
+              )}
+              <button className={latest[a.id] ? "" : "primary"} onClick={(e) => { e.stopPropagation(); run(a); }} disabled={busy !== null || !!a.unavailable} title={a.unavailable ?? undefined}>
+                {busy === a.id ? "Running…" : latest[a.id] ? "Re-run" : "Run"}
               </button>
             </div>
             {a.id === "camera.prnu" && (
               <select
+                onClick={(e) => e.stopPropagation()}
                 className="ref-select"
                 value={String(params[a.id]?.reference_id ?? "")}
                 onChange={(e) => setParams((p) => ({ ...p, [a.id]: { ...(p[a.id] ?? {}), reference_id: e.target.value } }))}
@@ -142,10 +188,9 @@ export function AuthPanel(props: Props) {
               </select>
             )}
             {a.unavailable && <div className="muted small">{a.unavailable}</div>}
-            {cardLine(a) && <div className="muted small card-line" title={a.card?.known_failure_modes.join("\n")}>{cardLine(a)}</div>}
             {open === a.id && (
-              <>
-                <p className="small">{a.description}</p>
+              <div onClick={(e) => e.stopPropagation()}>
+                {cardLine(a) && <p className="muted small" title={a.card?.known_failure_modes.join("\n")}>{cardLine(a)}</p>}
                 <ParamForm
                   params={a.params.filter((p) => p.name !== "reference_id")}
                   values={{
@@ -162,23 +207,27 @@ export function AuthPanel(props: Props) {
                   onPick={(p) => props.onStartPick(authField(a.id, p.name), 200, false)}
                   picking={props.pickField?.startsWith(`auth:${a.id}:`) ? props.pickField.split(":")[2] : null}
                 />
-              </>
+              </div>
             )}
           </div>
-        ))}
+            ))}
+          </div>
+          );
+        })}
       </div>
       {error && <p className="error">{error}</p>}
       {evidence.media_type === "image" && <ReferencePanel caseId={caseId} evidence={allEvidence} references={references} onCreated={onReference} />}
 
-      <h3>Results</h3>
+      <h3>History</h3>
       {mine.length === 0 && <p className="muted small">No analyses run on this item yet.</p>}
       {mine.map((r) => {
         const spec = byId[r.name];
         return (
-          <details key={r.id} className="result" open={r === mine[0]}>
-            <summary>
+          <details key={r.id} className="result">
+            <summary onClick={() => showRun(r)}>
+              <span className={`light ${verdict(r)}`} />
               <b>{spec?.name ?? r.name}</b> <span className="muted small">{new Date(r.created_at).toLocaleTimeString()}</span>
-              <div className="small">{r.result.summary}</div>
+              <div className="small verdict-line">{r.result.summary}</div>
             </summary>
             {r.result.flags.length > 0 && (
               <ul className="flags">
@@ -199,10 +248,15 @@ export function AuthPanel(props: Props) {
                 ))}
               </div>
             )}
-            {spec?.reading_guide && <p className="small guide">How to read this: {spec.reading_guide}</p>}
+            {spec?.reading_guide && (
+              <details className="small guide">
+                <summary>How to read this</summary>
+                {spec.reading_guide}
+              </details>
+            )}
             {r.name === "file.metadata" ? <MetadataView findings={r.result.findings} /> : <Findings findings={r.result.findings} />}
-            <p className="muted small">
-              {r.name} v{r.version} · {r.actor} · result hash <span className="hash">{r.output_hash.slice(0, 16)}…</span>
+            <p className="muted small" title={`Result hash ${r.output_hash}`}>
+              {r.name} v{r.version} · {r.actor}
             </p>
           </details>
         );
