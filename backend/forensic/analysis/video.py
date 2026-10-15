@@ -47,6 +47,8 @@ def macroblock_stats(path, settings, max_frames: int = 3000) -> list[dict]:
         body = raw.split("] ", 1)[1]
         if not body.strip() or re.fullmatch(r"[ 0-9]+", body.strip()):
             continue
+        # FFmpeg 7+ prefixes each row with its pixel offset ("  0 ", " 16 "); 6.x does not.
+        body = re.sub(r"^ *\d+ ", "", body)
         for k in range(0, len(body) - 1, 3):
             t = body[k]
             if t == " ":

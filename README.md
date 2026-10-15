@@ -33,7 +33,8 @@ FORENSIC_DATA_DIR=./data uvicorn forensic.api:app --port 8000
 For front-end development run `npm run dev` in `frontend/` (port 5173, proxies `/api`
 to port 8000).
 
-Docker and air-gapped installation: see [docs/deployment.md](docs/deployment.md). After any
+Windows (offline installer), Docker and air-gapped installation: see
+[docs/deployment.md](docs/deployment.md). After any
 installation, `python -m forensic.selftest` checks the tools, models and a full case end to end.
 
 Tests: `cd backend && pytest` (about 60 tests, a couple of minutes; includes a quick
@@ -153,5 +154,5 @@ deploy/airgap/      offline bundle build and install scripts
 frontend/           React + TypeScript viewer (Vite)
 docs/validation/    latest published validation results
 docs/ai-models.md   bundled models, generative policy, installing a lab detector
-docs/deployment.md  Docker, air-gapped installation, self-test
+docs/deployment.md  Windows installer, Docker, air-gapped installation, self-test
 ```
