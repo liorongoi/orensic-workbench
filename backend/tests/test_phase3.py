@@ -19,7 +19,7 @@ from forensic.filters import get_filter
 from forensic.measure import measure
 from forensic.report import build_bundle, render_html, render_pdf
 
-from .conftest import EXAMINER, _scene, ingest
+from .conftest import sign_in, EXAMINER, _scene, ingest
 
 AGENT = Actor("test-agent", "agent")
 JUSTIFICATION = "Shown to the court only to illustrate the vehicle's general shape, not to read the plate."
@@ -375,8 +375,8 @@ def test_phase3_api(tmp_path, jpeg_path):
     from forensic.workbench import Workbench
 
     api._wb = Workbench(load_settings(tmp_path / "data"))
-    c = TestClient(api.app)
-    h = {"X-Examiner": "Test Examiner"}
+    c = sign_in(TestClient(api.app))
+    h = {}
     assert any(m["id"] == "face.yunet" for m in c.get("/api/models").json())
     case = c.post("/api/cases", json={"name": "c", "examiner": "Test Examiner"}, headers=h).json()
     ev = c.post(f"/api/cases/{case['id']}/evidence", files={"file": ("a.jpg", jpeg_path.read_bytes())}, headers=h).json()

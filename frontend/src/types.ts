@@ -295,3 +295,35 @@ export interface Review {
   actor: string;
   created_at: string;
 }
+
+export interface User {
+  username: string;
+  full_name: string;
+  role: "admin" | "examiner";
+  disabled?: boolean;
+  created_at?: string;
+}
+
+export interface Job {
+  id: string;
+  kind: string;
+  label: string;
+  lane: "cpu" | "gpu";
+  case_id: string | null;
+  owner: string;
+  owner_name: string;
+  status: "queued" | "running" | "done" | "failed" | "cancelled";
+  error: string | null;
+  position: number | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface JobOverview {
+  slots: { cpu: number; gpu: number };
+  running: { cpu: number; gpu: number };
+  queued: { cpu: number; gpu: number };
+  active: Job[];
+  recent: Job[];
+}
