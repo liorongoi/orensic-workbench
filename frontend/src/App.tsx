@@ -41,7 +41,7 @@ export default function App() {
           }}
         >
           <h1>Forensic Workbench</h1>
-          <p className="muted">Every action you take is recorded in the case audit log under this name.</p>
+          <p className="muted">Your actions are logged under this name.</p>
           <input autoFocus placeholder="Examiner name" value={draftName} onChange={(e) => setDraftName(e.target.value)} />
           <button className="primary">Continue</button>
         </form>
@@ -57,10 +57,14 @@ export default function App() {
           <>
             <span className="crumb">/ {caseName}</span>
             <span className="spacer" />
-            <span className="muted small">Report:</span>
-            <a className="button" href={urls.report(caseId, "html")} target="_blank" rel="noreferrer">HTML</a>
-            <a className="button" href={urls.report(caseId, "pdf")} target="_blank" rel="noreferrer">PDF</a>
-            <a className="button" href={urls.report(caseId, "json")} target="_blank" rel="noreferrer">Bundle</a>
+            <details className="menu">
+              <summary className="button">Report ▾</summary>
+              <div className="menu-items">
+                <a href={urls.report(caseId, "html")} target="_blank" rel="noreferrer">HTML report</a>
+                <a href={urls.report(caseId, "pdf")} target="_blank" rel="noreferrer">PDF report</a>
+                <a href={urls.report(caseId, "json")} target="_blank" rel="noreferrer" title="Machine-readable bundle with every hash">JSON bundle</a>
+              </div>
+            </details>
           </>
         )}
         {!caseId && <span className="spacer" />}

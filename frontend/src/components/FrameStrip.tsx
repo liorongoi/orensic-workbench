@@ -46,9 +46,9 @@ export function FrameStrip({ frames, current, range, onSeek, onSetStart, onSetEn
   return (
     <div className="frame-strip">
       <div className="frame-row">
-        <button onClick={() => onSeek(Math.max(0, current - 1))} title="Previous frame">◀</button>
+        <button onClick={() => onSeek(Math.max(0, current - 1))} title="Previous frame (J, Shift+J = 10)">◀</button>
         <input type="range" min={0} max={n - 1} value={current} onChange={(e) => onSeek(parseInt(e.target.value, 10))} />
-        <button onClick={() => onSeek(Math.min(n - 1, current + 1))} title="Next frame">▶</button>
+        <button onClick={() => onSeek(Math.min(n - 1, current + 1))} title="Next frame (L, Shift+L = 10)">▶</button>
         <span className="frame-info">
           Frame {current} / {n - 1}
           {f && (
@@ -59,27 +59,23 @@ export function FrameStrip({ frames, current, range, onSeek, onSetStart, onSetEn
             </>
           )}
         </span>
-        {onSetStart && <button onClick={onSetStart} title="Start the chain's frame range here">Range start</button>}
-        {onSetEnd && <button onClick={onSetEnd} title="End the chain's frame range here">Range end</button>}
-        {range && (
-          <span className="muted small">
-            Range {range.start}–{range.end} ({range.end - range.start + 1} frames)
+        {onSetStart && <button onClick={onSetStart} title="Start the chain's frame range here">[ In</button>}
+        {onSetEnd && <button onClick={onSetEnd} title="End the chain's frame range here">Out ]</button>}
+        {range && range.end > range.start && (
+          <span className="muted small" title="Frame range used by the chain">
+            {range.start}–{range.end} ({range.end - range.start + 1})
           </span>
         )}
       </div>
       <canvas
         ref={canvas}
         className="frame-types"
+        title="Frame types: red I, blue P, green B. Click to jump."
         onClick={(e) => {
           const r = e.currentTarget.getBoundingClientRect();
           onSeek(Math.min(n - 1, Math.max(0, Math.floor(((e.clientX - r.left) / r.width) * n))));
         }}
       />
-      <div className="legend small muted">
-        <span><i style={{ background: COLORS.I }} /> I frame</span>
-        <span><i style={{ background: COLORS.P }} /> P frame</span>
-        <span><i style={{ background: COLORS.B }} /> B frame</span>
-      </div>
     </div>
   );
 }

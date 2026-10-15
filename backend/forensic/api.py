@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -35,10 +36,16 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 _wb: Workbench | None = None
 
 
+_wb_lock = threading.Lock()
+
+
 def wb() -> Workbench:
+    # Requests run on a thread pool; the first few must not each open their own Workbench.
     global _wb
     if _wb is None:
-        _wb = Workbench()
+        with _wb_lock:
+            if _wb is None:
+                _wb = Workbench()
     return _wb
 
 
@@ -197,6 +204,7 @@ def get_case(case_id: str):
     return {
         "case": w.get_case(case_id),
         "evidence": w.list_evidence(case_id),
+        "removed_evidence": w.list_evidence(case_id, removed=True),
         "chains": w.list_chains(case_id),
         "analyses": w.list_analysis_results(case_id),
         "camera_references": w.list_camera_references(case_id),
@@ -264,6 +272,20 @@ def get_evidence(evidence_id: str):
 @app.post("/api/evidence/{evidence_id}/verify")
 def verify_evidence(evidence_id: str, x_examiner: str | None = Header(None)):
     return wb().verify_evidence(evidence_id, actor(x_examiner))
+
+
+class RemoveIn(BaseModel):
+    reason: str = ""
+
+
+@app.post("/api/evidence/{evidence_id}/remove")
+def remove_evidence(evidence_id: str, body: RemoveIn, x_examiner: str | None = Header(None)):
+    return wb().remove_evidence(evidence_id, actor(x_examiner), body.reason)
+
+
+@app.post("/api/evidence/{evidence_id}/restore")
+def restore_evidence(evidence_id: str, x_examiner: str | None = Header(None)):
+    return wb().restore_evidence(evidence_id, actor(x_examiner))
 
 
 @app.get("/api/evidence/{evidence_id}/frames")
@@ -344,6 +366,11 @@ def get_chain(chain_id: str):
 @app.put("/api/chains/{chain_id}")
 def update_chain(chain_id: str, body: ChainUpdate, x_examiner: str | None = Header(None)):
     return wb().update_chain(chain_id, body.graph, actor(x_examiner), body.name)
+
+
+@app.post("/api/chains/{chain_id}/remove")
+def remove_chain(chain_id: str, body: RemoveIn, x_examiner: str | None = Header(None)):
+    return wb().remove_chain(chain_id, actor(x_examiner), body.reason)
 
 
 class AcceptIn(BaseModel):
