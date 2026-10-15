@@ -75,10 +75,10 @@ the audit log under that name; Lucida takes it from the signed-in account, so no
 act under another examiner's name. Click your name for **Change password** and **Sign out**
 (and **Users**, if you are an administrator).
 
-**Where you can sign in.** As installed, Lucida answers only on the Lucida machine
-itself (address `127.0.0.1`), so every examiner signs in at that computer. Opening it to other
-PCs on the lab network is an administrator setting described in
-[deployment.md](deployment.md#several-examiners).
+**Where you can sign in.** Unless the administrator turned on lab-network access, Lucida
+answers only on the computer it runs on (address `127.0.0.1`), so every examiner signs in at that
+computer. With lab-network access on, examiners can also sign in from their own PCs at
+`https://<computer name>:<port>` (see 13.4).
 
 ---
 
@@ -807,6 +807,58 @@ folder is shared by the members of the local **Forensic Examiners** Windows grou
 
 ---
 
+### 13.4 Using Lucida from other PCs on the lab network
+
+Lucida can let examiners work from their own PCs, so the workstation does the heavy work while
+each examiner uses a browser at their desk.
+
+**Turning it on (administrator, once).** Either tick **Let examiners connect from other PCs on the
+lab network** when installing (silent install: `/TASKS="labnetwork"`), or set `network = lab` in
+`workbench.ini` and restart Lucida. Lucida then:
+
+- serves the lab network over **HTTPS** only;
+- creates, without any internet connection, its own certificate authority and a certificate for
+  this computer's names and addresses, kept in the `tls` folder of the case data folder (renewed
+  automatically if the names change). A lab that has its own certificate sets `tls_cert` and
+  `tls_key` in `workbench.ini` instead;
+- on an all-users installation, opens its port in Windows Firewall for domain and private
+  networks only, never public ones. On a per-user installation Windows asks the first time
+  Lucida starts.
+
+When it starts, the Lucida window prints the lab-network address and the certificate's SHA-256
+fingerprint, for example:
+
+```
+  Lab network: https://lab-ws01:8000 (examiners sign in with their Lucida accounts)
+  Certificate: install ...\tls\workbench-ca.crt on each examiner PC once
+               (Trusted Root Certification Authorities); SHA-256 3F:9A:...
+```
+
+**On each examiner PC (once).**
+
+1. Copy `workbench-ca.crt` from the `tls` folder of the case data folder to the PC.
+2. Check that its SHA-256 fingerprint matches the one the Lucida window prints: run
+   `certutil -dump workbench-ca.crt` and compare the **Cert Hash(sha256)** line, ignoring spaces,
+   colons and upper or lower case. (The certificate dialog's **Thumbprint** is SHA-1, a different
+   number, and `certutil -hashfile` hashes the file's text, not the certificate.) Do not install
+   it if they differ.
+3. Install it: double-click it > **Install Certificate** > **Local Machine** > **Place all
+   certificates in the following store** > **Trusted Root Certification Authorities**. Or, as
+   administrator: `certutil -addstore Root workbench-ca.crt`.
+4. Open `https://<computer name>:<port>` (the address the Lucida window prints) in Chrome, Edge or
+   Firefox and sign in with your Lucida account. Bookmark it.
+
+Everything works as on the workstation itself: the same cases, the same job queue, and your actions
+recorded under your account. Uploading large videos over the network takes longer than on the
+workstation.
+
+**What protects it.** Every request needs a signed-in Lucida account; passwords and the sign-in
+cookie travel only over HTTPS; Lucida answers only requests addressed to the computer's own names
+and addresses. AI agents connecting over the network need a separate secret token (see
+[deployment.md](deployment.md#examiners-on-other-pcs)).
+
+---
+
 ## 14. Connecting an AI agent
 
 An AI assistant (for example Claude Desktop, or a self-hosted model with an MCP client) can drive
@@ -836,7 +888,9 @@ is in the [README](../README.md#connecting-an-agent). What an agent can and cann
 | Double encoding says the codec is not supported | It works on H.264 and MPEG-1/2/4 Part 2 streams, not on H.265. |
 | Face check finds no face | The detector misses small, turned or covered faces; mark them in its settings (**⚙**). |
 | PRNU: "the image is larger than the camera reference" | Build the reference from images at the camera's full resolution. |
-| The browser shows "Invalid host header" | You are reaching Lucida by a name other than 127.0.0.1 or localhost; an administrator adds it to `allowed_hosts` in `workbench.ini`. |
+| The browser shows "Invalid host header" | You are reaching Lucida by a name it does not know (for example an alias or a different address). Use the address the Lucida window prints, or an administrator adds the name to `allowed_hosts` in `workbench.ini`. |
+| An examiner PC says the connection is not private or the certificate is not trusted | Install `workbench-ca.crt` on that PC as described in 13.4, after checking its fingerprint, then restart the browser. |
+| An examiner PC cannot reach the lab-network address at all | Check that lab-network access is on, that both PCs are on the same network, and that the network is not set to "Public" in Windows (the firewall rule covers domain and private networks only). |
 | Self-test says the models run on the CPU on a machine with a graphics card | The card failed the exact-reproduction check, or its driver is missing or too old. Update the graphics driver and run the self-test again. Results are still correct on the CPU, only slower. |
 | The preview says "Updating preview..." for a long time | Heavy steps on full frames are slow. Crop first, or switch heavy steps off while adjusting earlier ones. |
 | "too many wrong passwords; wait a minute and try again" | Wait one minute. If the password is forgotten, an administrator resets it (13.1). |
