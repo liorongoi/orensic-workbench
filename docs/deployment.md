@@ -29,7 +29,7 @@ shows the address and log, and the browser opens the workbench; closing the wind
 The Start menu also has **Self-test** and **Case data folder**.
 
 Settings live in `<install folder>\workbench.ini` (`data_dir`, `import_dir`, `host`, `port`, and
-optionally `c2pa_trust_anchors`). Running a newer installer upgrades in place and keeps
+optionally `c2pa_trust_anchors` and `allowed_hosts`, the extra names browsers may use to reach it). Running a newer installer upgrades in place and keeps
 these settings and the case data. Silent installation for managed rollouts:
 
 ```
