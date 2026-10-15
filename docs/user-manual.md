@@ -283,6 +283,24 @@ For video, the frame strip under the viewer shows:
 Frames are selected by their position in the decoded stream, so frame 1234 is always the same
 frame.
 
+### 6.3 Video: macroblocks, QP and motion vectors
+
+For H.264, MPEG-1/2, MPEG-4 Part 2 and H.263 video, **▦ MB** in the viewer toolbar (or **M**)
+shows how the encoder coded the current frame, block by block (16×16 pixels). A bar under the
+viewer picks what to draw:
+
+- **Type** colours each block: red intra (coded from scratch), blue forward (predicted from an
+  earlier frame), green backward (from a later frame), purple bi (from both), yellow direct,
+  grey skip (copied without new detail). The bar shows each class's share of the frame.
+- **QP** is a heat map of the quantiser: blue is a low QP (more detail kept), red a high one.
+- **MV** draws the motion vectors: yellow forward, cyan backward.
+- **Grid** draws the macroblock grid.
+
+Hover a block to read its position, class and QP in the status bar. **Flip**, **Swipe** and
+**Side by side** compare the overlay with the plain frame. Use it to pick the frames worth
+enhancing or averaging (intra blocks and a low QP carry the most real detail) and to see which
+regions were only copied from another frame. Read-only: nothing is recorded in the audit trail.
+
 ---
 
 ## 7. Enhance
@@ -922,6 +940,7 @@ is in the [README](../README.md#connecting-an-agent). What an agent can and cann
 | "This recorder export cannot be opened directly" | Make a working copy (5.3). |
 | Carved video plays at the wrong speed | Re-convert with the recorder's real frame rate, or use parse if it is offered. |
 | Parse fails (a "parser:" error, or the codec was not recognised) | The file may be damaged or a variant of the format. Try remux, then carve. |
+| ▦ MB is missing for a video | Macroblocks are read from the decoder for H.264 and MPEG-1/2/4 Part 2 and H.263, not H.265 or Motion JPEG. |
 | Double encoding says the codec is not supported | It works on H.264 and MPEG-1/2/4 Part 2 streams, not on H.265. |
 | Face check finds no face | The detector misses small, turned or covered faces; mark them in its settings (**⚙**). |
 | PRNU: "the image is larger than the camera reference" | Build the reference from images at the camera's full resolution. |
