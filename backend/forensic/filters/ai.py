@@ -72,6 +72,65 @@ def ai_super_resolution(img, p):
     return np.clip(out, 0.0, 1.0)
 
 
+ESRGAN_MODELS = {"full": "sr.realesrgan_x4plus", "compact": "sr.realesrgan_compact_x4"}
+ESRGAN_TILE = 192
+ESRGAN_MARGIN = 24
+
+
+def _tiled_rgb_x4(model_id: str, img: np.ndarray) -> np.ndarray:
+    """Run a 4x RGB network tile by tile, with overlapping margins that are cut away again.
+
+    The tile grid depends only on the image size, never on the device or the thread count,
+    so a re-run gives the same result.
+    """
+    h, w = img.shape[:2]
+    chw = np.ascontiguousarray(img.transpose(2, 0, 1), np.float32)
+    out = np.empty((3, h * 4, w * 4), np.float32)
+    for y0 in range(0, h, ESRGAN_TILE):
+        for x0 in range(0, w, ESRGAN_TILE):
+            y1, x1 = min(h, y0 + ESRGAN_TILE), min(w, x0 + ESRGAN_TILE)
+            a0, b0 = max(0, y0 - ESRGAN_MARGIN), max(0, x0 - ESRGAN_MARGIN)
+            a1, b1 = min(h, y1 + ESRGAN_MARGIN), min(w, x1 + ESRGAN_MARGIN)
+            res = models.run(model_id, chw[None, :, a0:a1, b0:b1])[0]
+            out[:, y0 * 4 : y1 * 4, x0 * 4 : x1 * 4] = res[:, (y0 - a0) * 4 : (y1 - a0) * 4, (x0 - b0) * 4 : (x1 - b0) * 4]
+    return out.transpose(1, 2, 0)
+
+
+@register(
+    "ai.realesrgan",
+    name="AI enhance and enlarge (Real-ESRGAN)",
+    version="1.0.0",
+    category="AI-assisted",
+    description="Enlarges a colour image 1-4x with Real-ESRGAN, a network trained on photographs degraded the way "
+    "real cameras degrade them (blur, sensor noise, resizing and JPEG compression), so it also removes "
+    "compression blocks and noise. Much sharper than the older FSRCNN/ESPCN step on CCTV stills, but it is "
+    "trained to produce natural-looking texture and invents detail: characters, faces and edges in the result "
+    "may be wrong. Scale 1 keeps the size and only cleans the image. Illustrative only: crop to the region of "
+    "interest first, and use multi-frame super resolution for evidential work.",
+    reference="X. Wang, L. Xie, C. Dong and Y. Shan, 'Real-ESRGAN: Training Real-World Blind Super-Resolution with "
+    "Pure Synthetic Data', ICCV Workshops 2021; X. Wang et al., 'ESRGAN: Enhanced Super-Resolution Generative "
+    "Adversarial Networks', ECCV Workshops 2018.",
+    params=[
+        Param("model", "choice", "full", "Network", choices=tuple(ESRGAN_MODELS),
+              help="full: best quality (RRDBNet); compact: about ten times faster"),
+        Param("scale", "choice", "4", "Scale factor", choices=("1", "2", "3", "4"),
+              help="The network enlarges 4x; smaller factors are reduced from that by area averaging"),
+    ],
+    generative=True,
+    ai=True,
+    models=lambda p: [ESRGAN_MODELS[p["model"]]],
+)
+def ai_realesrgan(img, p):
+    s = int(p["scale"])
+    h, w = img.shape[:2]
+    if max(h, w) * 4 > MAX_OUTPUT_SIDE:
+        raise FilterError(f"the network's 4x result would be wider than {MAX_OUTPUT_SIDE} pixels: crop to the region of interest first")
+    out = np.clip(_tiled_rgb_x4(ESRGAN_MODELS[p["model"]], img), 0.0, 1.0)
+    if s != 4:
+        out = cv2.resize(out, (w * s, h * s), interpolation=cv2.INTER_AREA)
+    return np.ascontiguousarray(np.clip(out, 0.0, 1.0), np.float32)
+
+
 def detect_faces(img: np.ndarray, min_score: float = 0.6) -> list[dict]:
     """Faces found by YuNet: box [x, y, w, h], five landmarks and the detector's confidence."""
     h, w = img.shape[:2]

@@ -10,19 +10,28 @@ reproducibility probe passes, otherwise on every CPU core), and named with its w
 |---|---|---|---|
 | `sr.fsrcnn_x2/x3/x4` | Single-image super resolution (FSRCNN, Dong et al. 2016) | Apache-2.0 | `ai.super_resolution` (generative) |
 | `sr.espcn_x2/x3/x4` | Single-image super resolution (ESPCN, Shi et al. 2016) | Apache-2.0 | `ai.super_resolution` (generative) |
+| `sr.realesrgan_x4plus` | Real-world super resolution and clean-up, 4x (Real-ESRGAN RRDBNet, Wang et al. 2021) | BSD-3-Clause | `ai.realesrgan` (generative) |
+| `sr.realesrgan_compact_x4` | The same, small fast model (Real-ESRGAN SRVGGNetCompact) | BSD-3-Clause | `ai.realesrgan` (generative) |
 | `face.yunet` | Face detection (YuNet, Wu et al. 2023) | MIT | `face.consistency`, `redact.faces` |
 
 Sources, training data and limits are in `backend/forensic/models/manifest.json`; licence texts
 in `backend/forensic/models/licences/`. The super-resolution weights were converted from the
 authors' TensorFlow graphs by `backend/tools/convert_sr_models.py`, which pins the source file
-hashes and copies the weights unchanged.
+hashes and copies the weights unchanged; the Real-ESRGAN weights were converted from the authors'
+PyTorch checkpoints by `backend/tools/convert_realesrgan.py`, which reads them without PyTorch,
+refuses anything in the file other than tensors, and copies the weights unchanged.
+
+Real-ESRGAN is trained on photographs degraded the way real cameras degrade them (blur, sensor
+noise, resizing, JPEG), so on CCTV stills it is far sharper and cleaner than FSRCNN/ESPCN, which
+were trained on clean bicubic downscaling. It is also trained adversarially to produce natural
+texture, so it invents more: treat characters and faces in its output as suggestions only.
 
 `python -m forensic.models list` lists them; `python -m forensic.models verify` re-hashes them.
 
 ## Generative steps
 
 A filter is *generative* when its output can contain detail the camera never recorded
-(today: `ai.super_resolution`). The code enforces:
+(today: `ai.super_resolution` and `ai.realesrgan`). The code enforces:
 
 - Output is watermarked "ILLUSTRATIVE ONLY" wherever it is stored, exported or printed; the UI
   shows the same banner over the live preview.

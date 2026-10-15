@@ -1,0 +1,40 @@
+{
+  "detector": "tamper.copy_move",
+  "name": "Clone (copy-move) detection",
+  "version": "1.0.0",
+  "validated_on": "2026-10-15",
+  "corpus": "six real photographs from the scikit-image sample data (astronaut, coffee, chelsea, rocket, motorcycle_left, motorcycle_right), each manipulated at seeded random places; 60 cases per condition",
+  "seeded": true,
+  "results": {
+    "detection": {
+      "task": "Was an area of the image copied to another place in it (square of 18% of the short side)?",
+      "positives": "60 images, each manipulated four ways (see true_positive_rate_by_condition)",
+      "negatives": "the same 60 images untouched, as given and re-saved at JPEG 85",
+      "detected_means": "the box around one side of a reported copy covers at least 30% of the pasted square",
+      "true_positive_rate_by_condition": {
+        "moved": 0.7,
+        "moved, then JPEG 85": 0.5667,
+        "rotated 15 deg and scaled 1.1": 0.5,
+        "rotated and scaled, then JPEG 90": 0.4833
+      },
+      "false_positive_rate": 0.0,
+      "false_positive_rate_after_jpeg85": 0.0,
+      "shift_within_3px_when_found": 1.0
+    }
+  },
+  "known_failure_modes": [
+    "Repeated patterns in the scene (tiles, windows, fences, text, logos, symmetric objects) produce genuine matches that are not edits.",
+    "Copies into or from flat, textureless areas (sky, walls) carry too few features to be found.",
+    "Strong blur, noise or low-quality JPEG applied to the copy, or a copy smaller than about 30 x 30 pixels, is usually missed.",
+    "Only copies within one image are found: an area pasted from another photograph needs the noise map, ELA or double-JPEG analyses."
+  ],
+  "software": {
+    "forensic_workbench": "0.3.0",
+    "numpy": "2.5.4",
+    "opencv": "5.0.0",
+    "pillow": "12.3.0",
+    "pywavelets": "1.8.0",
+    "python": "3.13.16"
+  },
+  "how_to_reproduce": "python -m forensic.validation run --only phase4 --pristine <folder with those six images>"
+}

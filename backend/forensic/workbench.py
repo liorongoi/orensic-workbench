@@ -656,12 +656,12 @@ class Workbench:
     def smart_report(self, evidence_id: str, actor: Actor) -> dict:
         """Run the triage battery on one item and record a traffic-light reading with its reasons."""
         from .analysis.video import VPF_CODECS
-        from .triage import BATTERY, assess
+        from .triage import BATTERY, JPEG_ONLY, assess
 
         row = self._evidence_row(evidence_id)
         runs = []
         for aid, params in BATTERY.get(row["media_type"], []):
-            if aid.startswith("tamper.") and row["media_type"] == "image" and not formats_is_jpeg(Path(row["stored_path"])):
+            if aid in JPEG_ONLY and row["media_type"] == "image" and not formats_is_jpeg(Path(row["stored_path"])):
                 continue
             if aid == "video.double_encoding" and json.loads(row["probe_json"]).get("codec") not in VPF_CODECS:
                 continue
