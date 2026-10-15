@@ -26,7 +26,7 @@ At the end it offers the acceptance self-test: it re-hashes every installed file
 installer's `SHA256SUMS`, then runs `forensic.selftest`, and saves its output under
 `<case data>\logs`. Start the workbench from **Start > Forensic Workbench**: a console window
 shows the address and log, and the browser opens the workbench; closing the window stops it.
-The Start menu also has **Self-test** and **Case data folder**.
+The Start menu also has **Self-test**, **Case data folder**, **User manual** and **Algorithm guide**.
 
 Settings live in `<install folder>\workbench.ini` (`data_dir`, `import_dir`, `host`, `port`, and
 optionally `c2pa_trust_anchors` and `allowed_hosts`, the extra names browsers may use to reach it). Running a newer installer upgrades in place and keeps

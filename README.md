@@ -33,6 +33,9 @@ FORENSIC_DATA_DIR=./data uvicorn forensic.api:app --port 8000
 For front-end development run `npm run dev` in `frontend/` (port 5173, proxies `/api`
 to port 8000).
 
+How to use it: [docs/user-manual.md](docs/user-manual.md). How every algorithm works and why it
+was chosen: [docs/algorithms.md](docs/algorithms.md).
+
 Windows (offline installer), Docker and air-gapped installation: see
 [docs/deployment.md](docs/deployment.md). After any
 installation, `python -m forensic.selftest` checks the tools, models and a full case end to end.
@@ -155,4 +158,6 @@ frontend/           React + TypeScript viewer (Vite)
 docs/validation/    latest published validation results
 docs/ai-models.md   bundled models, generative policy, installing a lab detector
 docs/deployment.md  Windows installer, Docker, air-gapped installation, self-test
+docs/user-manual.md how to operate the workbench
+docs/algorithms.md  every algorithm, its parameters, and why it was chosen over the alternatives
 ```
