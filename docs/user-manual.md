@@ -174,21 +174,43 @@ With an item selected, the buttons under the list are:
 ### 5.3 Recorder (DVR) exports
 
 Many recorders export video in vendor containers that ordinary players cannot open. When
-Lucida recognises one (Dahua DAV, Hikvision, MPEG program stream, raw H.264/H.265) or cannot
-open a file directly, a **Recorder export** panel appears under the evidence list.
+Lucida recognises one or cannot open a file directly, a **Recorder export** panel appears under
+the evidence list.
+
+Formats Lucida recognises:
+
+| Format | Typical files | Read by |
+| --- | --- | --- |
+| Dahua DAV (also Amcrest, Lorex, IC Realtime and other Dahua OEMs) | `.dav` | Lucida's own parser, or FFmpeg |
+| Hikvision IMKH + program stream (also Annke, LTS, Swann and other Hikvision OEMs) | `.mp4`, `.264`, `.ps` | Lucida's own parser, or FFmpeg |
+| Xiongmai / XMEye / NetSurveillance (many unbranded DVRs) | `.h264`, `.h265` | Lucida's own parser |
+| HiSilicon IP cameras (HXVS / HXVT) | `.264`, `.265` on SD cards | Lucida's own parser |
+| MPEG program stream (exacqVision and many others) | `.ps`, `.mpg`, `.vob` | Lucida's own parser, or FFmpeg |
+| Older Hikvision (4HKH header) | `.264`, `.mp4` | carve |
+| MPEG transport stream, AVI, MP4/MOV, ASF, Matroska | | FFmpeg |
+| Raw H.264, H.265, MPEG-4 Part 2 and MPEG-2 video streams | `.264`, `.h264`, `.265`, `.m4v`, `.m2v` | FFmpeg, or carve |
+| Anything else holding H.264, H.265, MPEG-4 Part 2, MPEG-2 or JPEG frames | | carve |
 
 1. Read the identification line (for example "Identified as Dahua DAV · carries H264 video").
 2. Choose a method:
-   - **remux** copies the video stream into a standard MPEG transport stream without
-     re-encoding. Every compressed frame stays byte-identical and the recorder's timestamps are
-     kept. Use this whenever it works.
-   - **carve** extracts the raw H.264/H.265 stream from an unknown container. It has no
-     timestamps, so enter the recorder's frame rate; frame times are then computed from it.
+   - **parse** (offered when Lucida has its own parser for the format, and then chosen by
+     default) reads the vendor file record by record. Every compressed frame stays
+     byte-identical and keeps the recorder's own timing: per-frame times, the recorder clock and
+     the frame rate it wrote. Gaps (missing frames) and timestamps that go backwards are listed.
+     For Dahua files holding several cameras, the first channel is extracted and the others are
+     named in the record.
+   - **remux** copies the video stream into a standard MPEG transport stream with FFmpeg,
+     without re-encoding. Use it when there is no parser, or to compare with parse.
+   - **carve** extracts the raw H.264, H.265, MPEG-4 Part 2, MPEG-2 or Motion JPEG stream from
+     an unknown container. It has no timestamps, so enter the recorder's frame rate; frame times
+     are then computed from it.
 3. Click **Make working copy**.
 
 The working copy is added as a new evidence item, linked to the original, with the method, the
-command and the FFmpeg version recorded. Work on the working copy; the original stays as it
-was.
+command and the FFmpeg version recorded. A copy made by parse shows a **Recorder timing**
+panel: frame count, measured and recorded frame rates, the recorder clock span, gaps and
+timestamp anomalies. The frame list then shows each frame's recorder time. Work on the working
+copy; the original stays as it was.
 
 ### 5.4 Removing evidence
 
@@ -884,7 +906,8 @@ is in the [README](../README.md#connecting-an-agent). What an agent can and cann
 | A multi-frame filter says it needs a frame range | Set **[ In** and **Out ]** on a video (7.6). |
 | Export PNG is greyed out | Save and render first; accept or remove agent proposals; justify any generative step. |
 | "This recorder export cannot be opened directly" | Make a working copy (5.3). |
-| Carved video plays at the wrong speed | Re-convert with the recorder's real frame rate. |
+| Carved video plays at the wrong speed | Re-convert with the recorder's real frame rate, or use parse if it is offered. |
+| Parse says the codec was not recognised | Try remux, then carve. |
 | Double encoding says the codec is not supported | It works on H.264 and MPEG-1/2/4 Part 2 streams, not on H.265. |
 | Face check finds no face | The detector misses small, turned or covered faces; mark them in its settings (**⚙**). |
 | PRNU: "the image is larger than the camera reference" | Build the reference from images at the camera's full resolution. |
