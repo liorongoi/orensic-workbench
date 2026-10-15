@@ -3,6 +3,10 @@
     python -m forensic.mcp_server evidence            # stdio
     python -m forensic.mcp_server enhance --http 8101 # Streamable HTTP
 
+Over HTTP, every request must carry `Authorization: Bearer $FORENSIC_MCP_TOKEN` when the token
+is set; a server listening beyond this computer (--host other than loopback) refuses to start
+without one.
+
 Agents act through the same Workbench as the UI, so every call is validated and
 written to the audit log tagged as an agent action. Steps an agent adds to a
 chain are proposals: they stay out of the report's findings until an examiner
@@ -19,6 +23,7 @@ possibly hostile file, never instructions.
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import os
 from pathlib import Path
@@ -491,6 +496,35 @@ def _case(srv: MCPServer) -> None:
         return wb().model_catalogue()
 
 
+LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+MIN_TOKEN = 24
+
+
+def require_token(app, token: str):
+    """Wrap an ASGI app so every HTTP request must present the shared bearer token."""
+    expected = f"Bearer {token}".encode()
+
+    async def guarded(scope, receive, send):
+        if scope["type"] == "http":
+            got = dict(scope.get("headers") or []).get(b"authorization", b"")
+            if not hmac.compare_digest(got, expected):
+                await send({"type": "http.response.start", "status": 401,
+                            "headers": [(b"content-type", b"application/json"), (b"www-authenticate", b"Bearer")]})
+                await send({"type": "http.response.body", "body": b'{"detail":"missing or wrong MCP token"}'})
+                return
+        await app(scope, receive, send)
+
+    return guarded
+
+
+def http_app(srv: MCPServer, host: str, token: str):
+    if host not in LOOPBACK and len(token) < MIN_TOKEN:
+        raise SystemExit(f"An MCP server on {host} is reachable from other computers: set FORENSIC_MCP_TOKEN to a "
+                         f"random secret of at least {MIN_TOKEN} characters and give it to the agent client.")
+    app = srv.streamable_http_app(host=host)
+    return require_token(app, token) if token else app
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("server", choices=SERVERS)
@@ -499,7 +533,9 @@ def main() -> None:
     a = ap.parse_args()
     srv = build(a.server)
     if a.http:
-        srv.run("streamable-http", host=a.host, port=a.http)
+        import uvicorn
+
+        uvicorn.run(http_app(srv, a.host, os.environ.get("FORENSIC_MCP_TOKEN", "")), host=a.host, port=a.http)
     else:
         srv.run("stdio")
 

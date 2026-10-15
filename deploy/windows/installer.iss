@@ -57,6 +57,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"
+Name: "labnetwork"; Description: "Let examiners connect from other PCs on the lab network (HTTPS, Lucida sign-in)"; GroupDescription: "Network:"; Flags: unchecked
 
 [InstallDelete]
 ; An upgrade replaces the runtime wholesale so no file from an older version lingers.
@@ -84,6 +85,7 @@ Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "data_dir"; String: 
 Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "import_dir"; String: "{code:DataDir}\import"
 Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "host"; String: "127.0.0.1"; Flags: createkeyifdoesntexist
 Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "port"; String: "{code:Port}"
+Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "network"; String: "{code:NetworkMode}"
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Start Lucida and open it in the browser"
@@ -98,6 +100,10 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{#Python}"; Parameters: "-X utf8 ""
 Filename: "{app}\vcredist\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing the Microsoft Visual C++ runtime..."; Check: NeedsVCRedist; Flags: waituntilterminated
 Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" selftest --pause"; WorkingDir: "{app}"; Description: "Run the acceptance self-test now (recommended)"; Flags: postinstall skipifsilent
 Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; Description: "Start {#AppName}"; Flags: postinstall nowait unchecked skipifsilent
+
+[UninstallRun]
+; Removes the inbound rule an all-users lab-network install added (harmless when there is none).
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Lucida"""; Flags: runhidden; RunOnceId: "DelFirewallRule"; Check: IsAdminInstallMode
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\launcher\__pycache__"
@@ -142,8 +148,8 @@ begin
 
   PortPage := CreateInputQueryPage(DataPage.ID,
     'Local web address', 'Which port should Lucida use on this computer?',
-    'Lucida runs in your browser at http://127.0.0.1:<port>. It only accepts connections from this computer. ' +
-    'Keep 8000 unless another program already uses it.');
+    'Lucida runs in your browser at http://127.0.0.1:<port>. Unless you choose the lab-network option on a ' +
+    'later page, it only accepts connections from this computer. Keep 8000 unless another program already uses it.');
   PortPage.Add('Port:', False);
   PortPage.Values[0] := ParamOr('PORT', GetPreviousData('Port', '8000'));
 end;
@@ -180,12 +186,28 @@ begin
   Result := Trim(PortPage.Values[0]);
 end;
 
+function WebAddress(): String;
+begin
+  if WizardIsTaskSelected('labnetwork') then
+    Result := 'https://' + Lowercase(GetComputerNameString) + ':' + Port('') + ' (lab network)'
+  else
+    Result := 'http://127.0.0.1:' + Port('') + ' (this computer only)';
+end;
+
+function NetworkMode(Param: String): String;
+begin
+  if WizardIsTaskSelected('labnetwork') then
+    Result := 'lab'
+  else
+    Result := 'local';
+end;
+
 function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoTypeInfo,
   MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo: String): String;
 begin
   Result := MemoDirInfo + NewLine + NewLine +
     'Case data folder:' + NewLine + Space + DataDir('') + NewLine + NewLine +
-    'Web address:' + NewLine + Space + 'http://127.0.0.1:' + Port('') + NewLine + NewLine +
+    'Web address:' + NewLine + Space + WebAddress() + NewLine + NewLine +
     'Included (no internet connection needed):' + NewLine +
     Space + 'Python runtime and all libraries' + NewLine +
     Space + 'FFmpeg and FFprobe' + NewLine +
@@ -224,10 +246,27 @@ begin
     ExaminersGroup + ':(OI)(CI)M" /T /C /Q', True);
 end;
 
+procedure OpenFirewall();
+var
+  Sys: String;
+begin
+  // Lab-network install: let examiner PCs reach the workbench port on domain and private
+  // networks (never public ones). A per-user install cannot change the firewall; Windows asks
+  // the first time the workbench starts instead.
+  Sys := ExpandConstant('{sys}');
+  RunHidden(Sys + '\netsh.exe', 'advfirewall firewall delete rule name="Lucida"', False);
+  if WizardIsTaskSelected('labnetwork') then
+    RunHidden(Sys + '\netsh.exe', 'advfirewall firewall add rule name="Lucida" dir=in action=allow ' +
+      'protocol=TCP localport=' + Port('') + ' profile=domain,private', False);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if (CurStep = ssPostInstall) and IsAdminInstallMode then
+  begin
     RestrictDataDir();
+    OpenFirewall();
+  end;
 end;
 
 function NeedsVCRedist(): Boolean;

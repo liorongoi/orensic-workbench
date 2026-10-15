@@ -23,7 +23,11 @@ services:
     image: lucida:0.3.0
     command: ["python", "-m", "forensic.mcp_server", "authenticate", "--http", "8103", "--host", "0.0.0.0"]
     volumes: ["./data:/data", "./import:/import:ro"]
-    environment: { FORENSIC_MODELS_DIR: /data/models }
+    environment:
+      FORENSIC_MODELS_DIR: /data/models
+      # Required: the server listens beyond loopback, so every agent request must carry this token
+      # (Authorization: Bearer ...). Set it in .env, e.g. FORENSIC_MCP_TOKEN=$(openssl rand -hex 24)
+      FORENSIC_MCP_TOKEN: ${FORENSIC_MCP_TOKEN:-}
     networks: [internal]
     profiles: [agents]
 
