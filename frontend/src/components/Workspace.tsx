@@ -828,6 +828,12 @@ export function Workspace({ caseId, filters, analyses }: Props) {
                   onChange={edit}
                   onPick={startPick}
                   onDrawCrop={startCrop}
+                  onStartPick={(nodeId, p) => {
+                    setCrop(null);
+                    setExtPick(null);
+                    setView({ kind: "chain" });
+                    setPicking({ nodeId, param: p.name, count: p.count ?? (p.name === "roi" ? 2 : undefined) });
+                  }}
                   drawingCrop={!!crop?.nodeId && crop.nodeId === selected}
                   onSave={save}
                   onRender={render}

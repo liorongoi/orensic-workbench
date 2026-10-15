@@ -24,6 +24,8 @@ interface Props {
   onVerify: () => void;
   onAccept: () => void;
   onDrawCrop: (nodeId: string) => void;
+  /** Enter point-picking for a just-added step, without touching the graph. */
+  onStartPick: (nodeId: string, p: ParamSchema) => void;
   drawingCrop: boolean;
   onUndo: () => void;
   onRedo: () => void;
@@ -91,6 +93,10 @@ export function ChainEditor(props: Props) {
     nodes.splice(idx, 0, node);
     update(nodes);
     props.onSelect(node.id);
+    // A filter set by drawing on the image goes straight into drawing mode.
+    const pts = f.params.find((p) => p.type === "points");
+    if (f.id === "geometry.crop") props.onDrawCrop(node.id);
+    else if (pts) props.onStartPick(node.id, pts);
     pushRecent(f.id);
     setAdding(false);
     setQuery("");
