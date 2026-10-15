@@ -116,6 +116,13 @@ export interface Evidence {
   ingested_at: string;
   derived_from?: string | null;
   conversion?: Conversion | null;
+  removed?: Removal | null;
+}
+
+export interface Removal {
+  by: string;
+  at: string;
+  reason: string;
 }
 
 export interface ChainNode {
@@ -146,6 +153,7 @@ export interface Chain {
   output_hash: string | null;
   created_at: string;
   updated_at: string;
+  removed?: Removal | null;
 }
 
 export interface Flag {

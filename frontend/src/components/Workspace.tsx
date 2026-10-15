@@ -32,6 +32,7 @@ interface Props {
 }
 
 type Tab = "enhance" | "authenticate" | "measure" | "audit";
+const TAB_LABEL: Record<Tab, string> = { enhance: "Enhance", authenticate: "Authenticate", measure: "Measure", audit: "Audit & review" };
 type ExtPick = { field: string; count: number };
 
 const PROPRIETARY = new Set(["dahua_dav", "hikvision", "mpeg_ps", "annexb_h264", "annexb_hevc"]);
@@ -67,7 +68,23 @@ export function Workspace({ caseId, filters, analyses }: Props) {
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState<string | null>(null);
   const [auditKey, setAuditKey] = useState(0);
-  const [showUpto, setShowUpto] = useState(false);
+  const [removed, setRemoved] = useState<Evidence[]>([]);
+  const [showRemoved, setShowRemoved] = useState(false);
+  const [confirm, setConfirm] = useState<{ kind: "evidence" | "chain"; id: string; reason: string } | null>(null);
+  const [crop, setCrop] = useState<{ nodeId: string | null } | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [collapsed, setCollapsed] = useState<{ left: boolean; right: boolean }>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("panels") ?? "") as { left: boolean; right: boolean };
+    } catch {
+      return { left: false, right: false };
+    }
+  });
+  // Undo / redo over the draft graph of the open chain.
+  const past = useRef<Graph[]>([]);
+  const future = useRef<Graph[]>([]);
+  const lastEdit = useRef(0);
+  const [, setHistoryTick] = useState(0);
   const fileInput = useRef<HTMLInputElement>(null);
   // Until the examiner sets a range explicitly, a single-frame source follows the frame scrubber.
   const rangeTouched = useRef(false);
@@ -82,6 +99,7 @@ export function Workspace({ caseId, filters, analyses }: Props) {
     const d = await api.caseDetail(caseId);
     setCase(d.case);
     setEvidence(d.evidence);
+    setRemoved(d.removed_evidence ?? []);
     setChains(d.chains);
     setRuns(d.analyses);
     setReferences(d.camera_references);
@@ -101,6 +119,57 @@ export function Workspace({ caseId, filters, analyses }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseId]);
 
+  const resetHistory = () => {
+    past.current = [];
+    future.current = [];
+    setHistoryTick((t) => t + 1);
+  };
+
+  /** Open a chain in the editor, showing its last step. */
+  const openChain = (c: Chain | null) => {
+    setChainId(c?.id ?? null);
+    setDraft(c ? c.graph : null);
+    setSelected(c?.graph.nodes.length ? c.graph.nodes[c.graph.nodes.length - 1].id : null);
+    rangeTouched.current = false;
+    setPicking(null);
+    setCrop(null);
+    resetHistory();
+  };
+
+  /** Every examiner edit to the draft goes through here so it can be undone. */
+  const edit = (g: Graph) => {
+    if (!draft) return;
+    const now = Date.now();
+    // Slider drags fire many changes; keep one undo step per burst.
+    if (now - lastEdit.current > 400 || !past.current.length) {
+      past.current = [...past.current.slice(-99), draft];
+      future.current = [];
+    }
+    lastEdit.current = now;
+    setDraft(g);
+    setHistoryTick((t) => t + 1);
+  };
+
+  const undo = () => {
+    const prev = past.current.pop();
+    if (!prev || !draft) return;
+    future.current = [draft, ...future.current];
+    lastEdit.current = 0;
+    setDraft(prev);
+    if (selected && !prev.nodes.some((n) => n.id === selected)) setSelected(prev.nodes.length ? prev.nodes[prev.nodes.length - 1].id : null);
+    setHistoryTick((t) => t + 1);
+  };
+
+  const redo = () => {
+    const next = future.current.shift();
+    if (!next || !draft) return;
+    past.current = [...past.current, draft];
+    lastEdit.current = 0;
+    setDraft(next);
+    if (selected && !next.nodes.some((n) => n.id === selected)) setSelected(next.nodes.length ? next.nodes[next.nodes.length - 1].id : null);
+    setHistoryTick((t) => t + 1);
+  };
+
   const selectEvidence = (id: string, allChains = chains) => {
     setEvId(id);
     setView({ kind: "chain" });
@@ -108,12 +177,10 @@ export function Workspace({ caseId, filters, analyses }: Props) {
     setExtPick(null);
     setMpoints({});
     setStatus(null);
-    setSelected(null);
+    setConfirm(null);
     const c = allChains.filter((x) => x.evidence_id === id);
     const first = c[c.length - 1] ?? null;
-    setChainId(first?.id ?? null);
-    setDraft(first ? first.graph : null);
-    rangeTouched.current = false;
+    openChain(first);
     setFrame(first?.graph.source.frames?.start ?? 0);
   };
 
@@ -129,15 +196,20 @@ export function Workspace({ caseId, filters, analyses }: Props) {
     const ctrl = new AbortController();
     let graph: Graph;
     let upto: string | null = null;
+    const editing = picking?.nodeId ?? crop?.nodeId ?? null;
     if (!draft || (tab === "measure" && !measureOnChain)) {
       graph = { source: { frames: isVideo ? { start: frame, end: frame } : null }, nodes: [] };
-    } else if (picking) {
-      // Points are picked on the image as it enters the step being edited.
-      const idx = draft.nodes.findIndex((n) => n.id === picking.nodeId);
+    } else if (editing) {
+      // Points and boxes are drawn on the image as it enters the step being edited.
+      const idx = draft.nodes.findIndex((n) => n.id === editing);
       graph = { ...draft, nodes: draft.nodes.slice(0, Math.max(0, idx)) };
+    } else if (tab === "enhance" && selected === null) {
+      // The Source row shows the source.
+      graph = { ...draft, nodes: [] };
     } else {
       graph = draft;
-      if (showUpto && selected) upto = selected;
+      // Like a history panel: the viewer follows the selected step.
+      if (tab === "enhance" && selected && draft.nodes.some((n) => n.id === selected)) upto = selected;
     }
     const offset = graph.source.frames ? Math.max(0, frame - graph.source.frames.start) : 0;
     setPreview((p) => ({ ...p, busy: true }));
@@ -157,18 +229,46 @@ export function Workspace({ caseId, filters, analyses }: Props) {
       clearTimeout(t);
       ctrl.abort();
     };
-  }, [ev?.id, draft, frame, picking, view.kind, selected, showUpto, tab, measureOnChain]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ev?.id, draft, frame, picking, crop, view.kind, selected, tab, measureOnChain]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const keys = useRef<(e: KeyboardEvent) => void>(() => {});
+  keys.current = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      setPicking(null);
+      setExtPick(null);
+      setCrop(null);
+      setConfirm(null);
+      return;
+    }
+    const t = e.target as HTMLElement;
+    if (t.closest("input, textarea, select, [contenteditable]")) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && (e.key === "z" || e.key === "Z") && !e.shiftKey) {
+      e.preventDefault();
+      undo();
+    } else if (mod && (e.key === "y" || e.key === "Y" || ((e.key === "z" || e.key === "Z") && e.shiftKey))) {
+      e.preventDefault();
+      redo();
+    } else if (!mod && (e.key === "c" || e.key === "C") && ev && ev.media_type !== "container") {
+      startCrop(null);
+    } else if (!mod && isVideo && frames.length && (e.key === "j" || e.key === "J" || e.key === "l" || e.key === "L")) {
+      const step = (e.key.toLowerCase() === "l" ? 1 : -1) * (e.shiftKey ? 10 : 1);
+      seek(Math.min(frames.length - 1, Math.max(0, frame + step)));
+    }
+  };
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setPicking(null);
-        setExtPick(null);
-      }
-    };
+    const onKey = (e: KeyboardEvent) => keys.current(e);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("panels", JSON.stringify(collapsed));
+    } catch {
+      /* storage unavailable */
+    }
+  }, [collapsed]);
 
   const upload = async (files: FileList | null) => {
     if (!files) return;
@@ -187,31 +287,120 @@ export function Workspace({ caseId, filters, analyses }: Props) {
     setAuditKey((k) => k + 1);
   };
 
-  const newChain = async () => {
-    if (!ev) return;
+  const newChain = async (graph?: Graph, name?: string): Promise<Chain | null> => {
+    if (!ev) return null;
     const n = chains.filter((c) => c.evidence_id === ev.id).length + 1;
-    const c = await api.createChain(caseId, ev.id, `Enhancement ${n}`, {
-      source: { frames: isVideo ? { start: frame, end: frame } : null },
-      nodes: [],
-    });
-    setChains((cs) => [...cs, c]);
-    setChainId(c.id);
-    setDraft(c.graph);
-    setSelected(null);
-    rangeTouched.current = false;
-    setAuditKey((k) => k + 1);
+    try {
+      const c = await api.createChain(
+        caseId,
+        ev.id,
+        name ?? `Enhancement ${n}`,
+        graph ?? { source: { frames: isVideo ? { start: frame, end: frame } : null }, nodes: [] },
+      );
+      setChains((cs) => [...cs, c]);
+      openChain(c);
+      setAuditKey((k) => k + 1);
+      return c;
+    } catch (e) {
+      setStatus({ kind: "bad", text: (e as Error).message });
+      return null;
+    }
+  };
+
+  const duplicateChain = async () => {
+    if (!chain || !draft) return;
+    await newChain(draft, `${chain.name} (copy)`);
+  };
+
+  const removeChain = async (id: string, reason: string) => {
+    try {
+      await api.removeChain(id, reason);
+      const rest = chains.filter((c) => c.id !== id);
+      setChains(rest);
+      const mine = rest.filter((c) => c.evidence_id === evId);
+      openChain(mine[mine.length - 1] ?? null);
+      setAuditKey((k) => k + 1);
+    } catch (e) {
+      setStatus({ kind: "bad", text: (e as Error).message });
+    }
+  };
+
+  const removeEvidence = async (id: string, reason: string) => {
+    try {
+      await api.removeEvidence(id, reason);
+      const d = await reload();
+      if (id === evId || !d.evidence.some((e) => e.id === evId)) {
+        if (d.evidence.length) selectEvidence(d.evidence[0].id, d.chains);
+        else {
+          setEvId(null);
+          openChain(null);
+        }
+      }
+      setAuditKey((k) => k + 1);
+    } catch (e) {
+      setStatus({ kind: "bad", text: (e as Error).message });
+    }
+  };
+
+  const restoreEvidence = async (id: string) => {
+    try {
+      await api.restoreEvidence(id);
+      const d = await reload();
+      selectEvidence(id, d.chains);
+      setAuditKey((k) => k + 1);
+    } catch (e) {
+      setStatus({ kind: "bad", text: (e as Error).message });
+    }
   };
 
   const switchChain = (id: string) => {
     const c = chains.find((x) => x.id === id);
     if (!c) return;
-    setChainId(c.id);
-    setDraft(c.graph);
-    setSelected(null);
-    rangeTouched.current = false;
-    setPicking(null);
+    openChain(c);
     setStatus(null);
     setView({ kind: "chain" });
+  };
+
+  /** Crop tool: drag a box on the image. A new crop step goes after the selected step. */
+  const startCrop = (nodeId: string | null) => {
+    if (crop && crop.nodeId === nodeId) {
+      setCrop(null);
+      return;
+    }
+    setTab("enhance");
+    setView({ kind: "chain" });
+    setPicking(null);
+    setExtPick(null);
+    setCrop({ nodeId });
+  };
+
+  const applyCrop = async ([x, y, width, height]: [number, number, number, number]) => {
+    const target = crop;
+    setCrop(null);
+    if (!target) return;
+    const params = { x, y, width, height };
+    if (target.nodeId && draft) {
+      edit({ ...draft, nodes: draft.nodes.map((n) => (n.id === target.nodeId ? { ...n, params: { ...n.params, ...params } } : n)) });
+      return;
+    }
+    const spec = filters.find((f) => f.id === "geometry.crop");
+    let g = draft;
+    if (!chain || !g) {
+      const c = await newChain();
+      if (!c) return;
+      g = c.graph;
+    }
+    const ids = new Set(g.nodes.map((n) => n.id));
+    let k = g.nodes.length + 1;
+    while (ids.has(`n${k}`)) k++;
+    const node = { id: `n${k}`, filter: "geometry.crop", version: spec?.version, params, enabled: true };
+    // The box was drawn on the output of the selected step (the source if none is selected).
+    const at = selected ? g.nodes.findIndex((n) => n.id === selected) + 1 : chain ? 0 : g.nodes.length;
+    const nodes = [...g.nodes];
+    nodes.splice(at, 0, node);
+    if (chain && draft) edit({ ...g, nodes });
+    else setDraft({ ...g, nodes });
+    setSelected(node.id);
   };
 
   const save = async (): Promise<Chain | null> => {
@@ -284,7 +473,8 @@ export function Workspace({ caseId, filters, analyses }: Props) {
     }
     setView({ kind: "chain" });
     setPicking({ nodeId, param: p.name, count: p.count ?? (p.name === "roi" ? 2 : undefined) });
-    if (draft) setDraft({ ...draft, nodes: draft.nodes.map((n) => (n.id === nodeId ? { ...n, params: { ...n.params, [p.name]: [] } } : n)) });
+    setCrop(null);
+    if (draft) edit({ ...draft, nodes: draft.nodes.map((n) => (n.id === nodeId ? { ...n, params: { ...n.params, [p.name]: [] } } : n)) });
   };
 
   const startExtPick = (field: string, count: number, reset: boolean) => {
@@ -309,7 +499,7 @@ export function Workspace({ caseId, filters, analyses }: Props) {
     const node = draft.nodes.find((n) => n.id === picking.nodeId);
     if (!node) return;
     const pts = [...((node.params[picking.param] as number[][]) ?? []), [Math.round(x), Math.round(y)]];
-    setDraft({ ...draft, nodes: draft.nodes.map((n) => (n.id === node.id ? { ...n, params: { ...n.params, [picking.param]: pts } } : n)) });
+    edit({ ...draft, nodes: draft.nodes.map((n) => (n.id === node.id ? { ...n, params: { ...n.params, [picking.param]: pts } } : n)) });
     if (picking.count && pts.length >= picking.count) setPicking(null);
   };
 
@@ -357,96 +547,204 @@ export function Workspace({ caseId, filters, analyses }: Props) {
     const cur = draft.source.frames ?? { start: frame, end: frame };
     let next = which === "start" ? { start: frame, end: Math.max(frame, cur.end) } : { start: Math.min(cur.start, frame), end: frame };
     if (next.end - next.start > 599) next = which === "start" ? { start: frame, end: frame + 599 } : { start: frame - 599, end: frame };
-    setDraft({ ...draft, source: { ...draft.source, frames: next } });
+    edit({ ...draft, source: { ...draft.source, frames: next } });
   };
+
+  const seek = (n: number) => {
+    setFrame(n);
+    if (draft && range && !rangeTouched.current && range.start === range.end && n !== range.start) {
+      setDraft({ ...draft, source: { ...draft.source, frames: { start: n, end: n } } });
+    }
+  };
+
+  const selIndex = draft && selected ? draft.nodes.findIndex((n) => n.id === selected) : -1;
+  const selName = selIndex >= 0 ? filters.find((f) => f.id === draft!.nodes[selIndex].filter)?.name ?? draft!.nodes[selIndex].filter : null;
+  const viewerLabel =
+    view.kind === "map"
+      ? view.label
+      : crop
+        ? "Crop: drag a box"
+        : !draft || (tab === "measure" && !measureOnChain) || (tab === "enhance" && selIndex < 0)
+          ? "Source"
+          : tab === "enhance" && draft.nodes.length && selIndex < draft.nodes.length - 1
+            ? `Step ${selIndex + 1} of ${draft.nodes.length} · ${selName}`
+            : draft.nodes.length
+              ? "Result"
+              : "Source";
 
   if (!kase) return <div className="loading">Loading case…</div>;
 
-  return (
-    <div className="workspace">
-      <aside className="left">
-        <div className="panel-title">
-          Evidence <span className="spacer" />
-          <button onClick={runTriage} className="small-btn" disabled={triageBusy || !evidence.length} title="Smart Report on every item: where to look first">
-            {triageBusy ? "Triage…" : "Triage all"}
-          </button>
-          <button onClick={() => fileInput.current?.click()} className="primary small-btn">+ Add</button>
-          <input ref={fileInput} type="file" multiple hidden onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
+  const kindTag = (e: Evidence) => (e.media_type === "video" ? "VID" : e.media_type === "container" ? "REC" : "IMG");
+  const meta = (e: Evidence) =>
+    e.media_type === "container"
+      ? `${e.probe.format} · needs conversion`
+      : `${e.probe.width}×${e.probe.height}` + (e.media_type === "video" ? ` · ${e.probe.frame_count} fr` : "") + (e.derived_from ? " · copy" : "");
+
+  const confirmBox = (onYes: () => void, what: string) =>
+    confirm && (
+      <div className="confirm" onClick={(e) => e.stopPropagation()}>
+        <div className="small">
+          Remove {what} from the case? {confirm.kind === "evidence" && "The original file is kept and the removal is logged."}
         </div>
-        <div
-          className="dropzone"
-          onDragOver={(e) => e.preventDefault()}
+        <input
+          autoFocus
+          type="text"
+          placeholder="Reason (optional, logged)"
+          value={confirm.reason}
+          onChange={(e) => setConfirm({ ...confirm, reason: e.target.value })}
+          onKeyDown={(e) => e.key === "Enter" && onYes()}
+        />
+        <div className="row">
+          <button className="danger" onClick={onYes}>Remove</button>
+          <button onClick={() => setConfirm(null)}>Cancel</button>
+        </div>
+      </div>
+    );
+
+  return (
+    <div className={`workspace${collapsed.left ? " no-left" : ""}${collapsed.right ? " no-right" : ""}`}>
+      {collapsed.left ? (
+        <button className="rail left-rail" onClick={() => setCollapsed((c) => ({ ...c, left: false }))} title="Show evidence">
+          ›
+        </button>
+      ) : (
+        <aside
+          className={`left${dragOver ? " drag-over" : ""}`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
           onDrop={(e) => {
             e.preventDefault();
+            setDragOver(false);
             upload(e.dataTransfer.files);
           }}
         >
-          {uploading ?? "Drop images or video here. Originals are hashed and stored read-only."}
-        </div>
-        <ul className="evidence-list">
-          {evidence.map((e) => (
-            <li key={e.id} className={e.id === evId ? "selected" : ""} onClick={() => selectEvidence(e.id)}>
-              <div className="ev-name">
-                {triageBy[e.id] && <span className={`light ${triageBy[e.id].level}`} title={triageBy[e.id].result.line} />}
-                <span className={`kind ${e.media_type}`}>{e.media_type === "video" ? "VID" : e.media_type === "container" ? "REC" : "IMG"}</span> {e.filename}
-              </div>
-              <div className="muted small">
-                {e.media_type === "container"
-                  ? `${e.probe.format} · needs conversion`
-                  : `${e.probe.width}×${e.probe.height}` + (e.media_type === "video" ? ` · ${e.probe.frame_count} frames · ${e.probe.codec}` : "")}{" "}
-                · {(e.size / 1024).toFixed(0)} KB
-                {e.derived_from && " · working copy"}
-              </div>
-              <div className="hash small" title={`SHA-256 ${e.sha256}\nMD5 ${e.md5}`}>SHA-256 {e.sha256.slice(0, 16)}…</div>
-            </li>
-          ))}
-        </ul>
-        {ev && (
-          <div className="ev-actions">
-            <button
-              onClick={async () => {
-                const r = await api.verifyEvidence(ev.id);
-                setStatus(r.ok && r.read_only ? { kind: "ok", text: "Original verified: hash matches and file is read-only." } : { kind: "bad", text: "Original FAILED verification." });
+          <div className="panel-title">
+            Evidence <span className="count">{evidence.length || ""}</span>
+            <span className="spacer" />
+            <button onClick={runTriage} className="small-btn" disabled={triageBusy || !evidence.length} title="Smart Report on every item: where to look first">
+              {triageBusy ? "Triage…" : "Triage"}
+            </button>
+            <button onClick={() => fileInput.current?.click()} className="primary small-btn" title="Add images or video (or drop files here)">
+              + Add
+            </button>
+            <button className="icon" onClick={() => setCollapsed((c) => ({ ...c, left: true }))} title="Hide panel">
+              ‹
+            </button>
+            <input ref={fileInput} type="file" multiple hidden onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
+          </div>
+          {(uploading || !evidence.length || dragOver) && (
+            <div className="dropzone" onClick={() => fileInput.current?.click()}>
+              {uploading ?? "Drop images or video here"}
+            </div>
+          )}
+          <ul className="evidence-list">
+            {evidence.map((e) => (
+              <li
+                key={e.id}
+                className={e.id === evId ? "selected" : ""}
+                onClick={() => selectEvidence(e.id)}
+                title={`${e.filename}\n${(e.size / 1024).toFixed(0)} KB · ingested ${new Date(e.ingested_at).toLocaleString()} by ${e.ingested_by}\nSHA-256 ${e.sha256}\nMD5 ${e.md5}`}
+              >
+                <div className="ev-row">
+                  {triageBy[e.id] ? <span className={`light ${triageBy[e.id].level}`} title={triageBy[e.id].result.line} /> : <span className="light" />}
+                  <span className={`kind ${e.media_type}`}>{kindTag(e)}</span>
+                  <span className="ev-name">{e.filename}</span>
+                  <span className="ev-meta">{meta(e)}</span>
+                  <button
+                    className="icon ev-del"
+                    title="Remove from case"
+                    onClick={(x) => {
+                      x.stopPropagation();
+                      setConfirm({ kind: "evidence", id: e.id, reason: "" });
+                    }}
+                  >
+                    🗑
+                  </button>
+                </div>
+                {confirm?.kind === "evidence" && confirm.id === e.id &&
+                  confirmBox(() => {
+                    removeEvidence(e.id, confirm.reason);
+                    setConfirm(null);
+                  }, `“${e.filename}”`)}
+              </li>
+            ))}
+          </ul>
+          {ev && (
+            <div className="ev-actions">
+              <button
+                onClick={async () => {
+                  const r = await api.verifyEvidence(ev.id);
+                  setStatus(r.ok && r.read_only ? { kind: "ok", text: "Original verified: hash matches, read-only." } : { kind: "bad", text: "Original FAILED verification." });
+                  setAuditKey((k) => k + 1);
+                }}
+                title="Re-hash the stored original and check it is read-only"
+              >
+                ✓ Verify
+              </button>
+              <a className="button" href={urls.original(ev.id)} download title="Download the original file">
+                ⤓ Original
+              </a>
+            </div>
+          )}
+          {ev && catalogue && !ev.derived_from && (ev.media_type === "container" || PROPRIETARY.has(ev.probe.identified?.family ?? "") || ["h264", "hevc"].includes(ev.probe.format ?? "")) && (
+            <ConvertPanel
+              key={ev.id}
+              evidence={ev}
+              methods={catalogue.conversion_methods}
+              onConverted={async (c) => {
+                const d = await reload();
+                selectEvidence(c.id, d.chains);
                 setAuditKey((k) => k + 1);
               }}
-            >
-              Verify original
-            </button>
-            <a className="button" href={urls.original(ev.id)} download>
-              Download original
-            </a>
-          </div>
-        )}
-        {ev && catalogue && !ev.derived_from && (ev.media_type === "container" || PROPRIETARY.has(ev.probe.identified?.family ?? "") || ["h264", "hevc"].includes(ev.probe.format ?? "")) && (
-          <ConvertPanel
-            key={ev.id}
-            evidence={ev}
-            methods={catalogue.conversion_methods}
-            onConverted={async (c) => {
-              const d = await reload();
-              selectEvidence(c.id, d.chains);
-              setAuditKey((k) => k + 1);
-            }}
-          />
-        )}
-      </aside>
+            />
+          )}
+          {removed.length > 0 && (
+            <div className="removed">
+              <button className="link small" onClick={() => setShowRemoved((v) => !v)}>
+                {showRemoved ? "Hide" : "Show"} removed ({removed.length})
+              </button>
+              {showRemoved && (
+                <ul className="removed-list">
+                  {removed.map((r) => (
+                    <li key={r.id} title={`Removed by ${r.removed?.by} ${r.removed ? new Date(r.removed.at).toLocaleString() : ""}${r.removed?.reason ? `\n${r.removed.reason}` : ""}`}>
+                      <span className="ev-name">{r.filename}</span>
+                      <button className="small-btn" onClick={() => restoreEvidence(r.id)}>Restore</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </aside>
+      )}
 
       <main className="center">
         <Viewer
           src={view.kind === "map" ? urls.derived(view.digest) : ev?.media_type === "container" ? null : preview.url}
-          overlays={view.kind === "chain" ? overlays : undefined}
+          overlays={view.kind === "chain" && !crop ? overlays : undefined}
           compareSrc={ev ? urls.frame(ev.id, sourceFrame) : null}
-          label={view.kind === "map" ? view.label : draft ? (showUpto && selected ? `Result up to step ${selected}` : "Result (live preview)") : "Original"}
+          label={viewerLabel}
           busy={view.kind === "chain" && preview.busy}
           error={view.kind === "chain" ? preview.error : null}
           points={picking ? pickPoints : undefined}
-          pickHint={picking ? `Click on the image to place points${picking.count ? ` (${pickPoints?.length ?? 0}/${picking.count})` : ""}. Esc to stop.` : extHint}
+          pickHint={picking ? `Click to place points${picking.count ? ` (${pickPoints?.length ?? 0}/${picking.count})` : ""} · Esc to stop` : crop ? "Drag a box · Shift = square · Esc to cancel" : extHint}
           onPick={picking || extPick ? onPick : undefined}
+          onRect={crop && preview.url && !preview.busy ? applyCrop : undefined}
           illustrative={view.kind === "chain" && !!draft && draft.nodes.some((n) => n.enabled && filters.find((f) => f.id === n.filter)?.generative)}
+          tools={
+            ev && ev.media_type !== "container" ? (
+              <button className={crop ? "active" : ""} onClick={() => startCrop(null)} title="Crop: drag a box on the image (C)">
+                ⛶ Crop
+              </button>
+            ) : null
+          }
         />
         {view.kind === "map" && (
           <div className="map-bar">
-            Showing analysis map. <button onClick={() => setView({ kind: "chain" })}>Back to image</button>
+            Analysis map <button onClick={() => setView({ kind: "chain" })}>Back to image</button>
           </div>
         )}
         {isVideo && frames.length > 0 && (
@@ -454,18 +752,18 @@ export function Workspace({ caseId, filters, analyses }: Props) {
             frames={frames}
             current={frame}
             range={range}
-            onSeek={(n) => {
-              setFrame(n);
-              if (draft && range && !rangeTouched.current && range.start === range.end && n !== range.start) {
-                setDraft({ ...draft, source: { ...draft.source, frames: { start: n, end: n } } });
-              }
-            }}
+            onSeek={seek}
             onSetStart={draft ? () => setRange("start") : undefined}
             onSetEnd={draft ? () => setRange("end") : undefined}
           />
         )}
       </main>
 
+      {collapsed.right ? (
+        <button className="rail right-rail" onClick={() => setCollapsed((c) => ({ ...c, right: false }))} title="Show tools">
+          ‹
+        </button>
+      ) : (
       <aside className="right">
         <div className="tabs">
           {(["enhance", "authenticate", "measure", "audit"] as Tab[]).map((t) => (
@@ -475,18 +773,78 @@ export function Workspace({ caseId, filters, analyses }: Props) {
               onClick={() => {
                 setTab(t);
                 setExtPick(null);
+                setCrop(null);
               }}
             >
-              {t[0].toUpperCase() + t.slice(1)}
+              {TAB_LABEL[t]}
             </button>
           ))}
+          <button className="icon tab-hide" onClick={() => setCollapsed((c) => ({ ...c, right: true }))} title="Hide panel">
+            ›
+          </button>
         </div>
         <div className="tab-body">
           {tab !== "audit" && ev?.media_type === "container" && (
-            <p className="muted">This recorder export cannot be opened directly. Make a working copy with the panel on the left; the original stays untouched.</p>
+            <p className="muted">Convert this recorder file first (left panel). The original stays untouched.</p>
           )}
           {tab === "enhance" && ev && ev.media_type !== "container" && (
             <>
+              <div className="chain-picker">
+                <select value={chainId ?? ""} onChange={(e) => switchChain(e.target.value)} disabled={!evChains.length} title="Enhancement chain">
+                  {!evChains.length && <option value="">No chains yet</option>}
+                  {evChains.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <button className="icon" onClick={() => newChain()} title="New chain">＋</button>
+                <button className="icon" onClick={duplicateChain} disabled={!chain} title="Duplicate this chain (to compare a variation)">⧉</button>
+                <button className="icon" onClick={() => chain && setConfirm({ kind: "chain", id: chain.id, reason: "" })} disabled={!chain} title="Remove this chain">
+                  🗑
+                </button>
+              </div>
+              {chain && confirm?.kind === "chain" && confirm.id === chain.id &&
+                confirmBox(() => {
+                  removeChain(chain.id, confirm.reason);
+                  setConfirm(null);
+                }, `chain “${chain.name}”`)}
+              {chain && draft ? (
+                <ChainEditor
+                  filters={filters}
+                  chain={chain}
+                  graph={draft}
+                  dirty={dirty}
+                  isVideo={isVideo}
+                  selected={selected}
+                  steps={preview.steps}
+                  picking={picking}
+                  status={status}
+                  busy={busy}
+                  onSelect={(id) => {
+                    setSelected(id);
+                    setCrop(null);
+                  }}
+                  onChange={edit}
+                  onPick={startPick}
+                  onDrawCrop={startCrop}
+                  drawingCrop={!!crop?.nodeId && crop.nodeId === selected}
+                  onSave={save}
+                  onRender={render}
+                  onVerify={verify}
+                  onAccept={accept}
+                  onUndo={undo}
+                  onRedo={redo}
+                  canUndo={past.current.length > 0}
+                  canRedo={future.current.length > 0}
+                  frame={Math.max(0, frame - (draft.source.frames?.start ?? frame))}
+                />
+              ) : (
+                <div className="empty">
+                  <button className="primary" onClick={() => newChain()}>Start enhancing</button>
+                  <span className="muted small">or press C to crop</span>
+                </div>
+              )}
               {catalogue && (
                 <PlannerPanel
                   key={ev.id}
@@ -507,54 +865,10 @@ export function Workspace({ caseId, filters, analyses }: Props) {
                   onOpenChain={(id) => {
                     reload().then((d) => {
                       const c = d.chains.find((x) => x.id === id);
-                      if (c) {
-                        setChainId(c.id);
-                        setDraft(c.graph);
-                        setSelected(null);
-                      }
+                      if (c) openChain(c);
                     });
                   }}
                 />
-              )}
-              <div className="chain-picker">
-                <select value={chainId ?? ""} onChange={(e) => switchChain(e.target.value)} disabled={!evChains.length}>
-                  {!evChains.length && <option value="">No chains yet</option>}
-                  {evChains.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-                <button onClick={newChain}>New chain</button>
-              </div>
-              {chain && draft ? (
-                <>
-                  <label className="small upto">
-                    <input type="checkbox" checked={showUpto} onChange={(e) => setShowUpto(e.target.checked)} /> Show result up to the selected step
-                  </label>
-                  <ChainEditor
-                    filters={filters}
-                    chain={chain}
-                    graph={draft}
-                    dirty={dirty}
-                    isVideo={isVideo}
-                    selected={selected}
-                    steps={preview.steps}
-                    picking={picking}
-                    status={status}
-                    busy={busy}
-                    onSelect={setSelected}
-                    onChange={setDraft}
-                    onPick={startPick}
-                    onSave={save}
-                    onRender={render}
-                    onVerify={verify}
-                    onAccept={accept}
-                    frame={Math.max(0, frame - (draft.source.frames?.start ?? frame))}
-                  />
-                </>
-              ) : (
-                <p className="muted">Create a chain to start enhancing. Every step is recorded and can be re-run from the original.</p>
               )}
             </>
           )}
@@ -621,6 +935,7 @@ export function Workspace({ caseId, filters, analyses }: Props) {
           {tab !== "enhance" && status && <p className={`status ${status.kind}`}>{status.text}</p>}
         </div>
       </aside>
+      )}
     </div>
   );
 }

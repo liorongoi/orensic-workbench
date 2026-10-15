@@ -76,7 +76,7 @@ function TriageBox({ evidence, triage, onTriage }: { evidence: Evidence; triage:
           )}
         </>
       ) : (
-        <p className="muted small">Runs metadata and JPEG compression checks and sorts the item green, yellow or red. A colour is where to look first, never a finding.</p>
+        <p className="muted small" title="Runs metadata and JPEG compression checks and sorts the item green, yellow or red. A colour is where to look first, never a finding.">Not run yet</p>
       )}
       {error && <p className="error small">{error}</p>}
     </div>
@@ -116,13 +116,17 @@ export function AuthPanel(props: Props) {
         {applicable.map((a) => (
           <div key={a.id} className={`detector${a.unavailable ? " analysis-unavailable" : ""}`}>
             <div className="detector-head">
-              <div>
+              <div title={[a.description, cardLine(a)].filter(Boolean).join("\n\n")}>
                 <b>{a.name}</b>
-                {a.ai && <span className="badge ai" title="Uses a learned model; flagged AI-assisted in the report">AI-assisted</span>}
-                <div className="muted small">{a.category}</div>
+                {a.ai && <span className="badge ai" title="Uses a learned model; flagged AI-assisted in the report">AI</span>}
+                <span className="muted small"> · {a.category}</span>
               </div>
               <span className="spacer" />
-              {a.params.length > 0 && !a.unavailable && <button onClick={() => setOpen(open === a.id ? null : a.id)}>Settings</button>}
+              {a.params.length > 0 && !a.unavailable && (
+                <button className={`icon${open === a.id ? " active" : ""}`} onClick={() => setOpen(open === a.id ? null : a.id)} title="Settings">
+                  ⚙
+                </button>
+              )}
               <button className="primary" onClick={() => run(a)} disabled={busy !== null || !!a.unavailable} title={a.unavailable ?? undefined}>
                 {busy === a.id ? "Running…" : "Run"}
               </button>
@@ -142,10 +146,9 @@ export function AuthPanel(props: Props) {
               </select>
             )}
             {a.unavailable && <div className="muted small">{a.unavailable}</div>}
-            {cardLine(a) && <div className="muted small card-line" title={a.card?.known_failure_modes.join("\n")}>{cardLine(a)}</div>}
             {open === a.id && (
               <>
-                <p className="small">{a.description}</p>
+                {cardLine(a) && <p className="muted small" title={a.card?.known_failure_modes.join("\n")}>{cardLine(a)}</p>}
                 <ParamForm
                   params={a.params.filter((p) => p.name !== "reference_id")}
                   values={{
@@ -199,10 +202,15 @@ export function AuthPanel(props: Props) {
                 ))}
               </div>
             )}
-            {spec?.reading_guide && <p className="small guide">How to read this: {spec.reading_guide}</p>}
+            {spec?.reading_guide && (
+              <details className="small guide">
+                <summary>How to read this</summary>
+                {spec.reading_guide}
+              </details>
+            )}
             {r.name === "file.metadata" ? <MetadataView findings={r.result.findings} /> : <Findings findings={r.result.findings} />}
-            <p className="muted small">
-              {r.name} v{r.version} · {r.actor} · result hash <span className="hash">{r.output_hash.slice(0, 16)}…</span>
+            <p className="muted small" title={`Result hash ${r.output_hash}`}>
+              {r.name} v{r.version} · {r.actor}
             </p>
           </details>
         );

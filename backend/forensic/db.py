@@ -126,6 +126,9 @@ CREATE TABLE IF NOT EXISTS reviews (
 MIGRATIONS = [
     ("evidence", "derived_from", "TEXT"),
     ("evidence", "conversion_json", "TEXT"),
+    # Set when an examiner removes an item from the case; the row and the stored file are kept.
+    ("evidence", "removed_json", "TEXT"),
+    ("chains", "removed_json", "TEXT"),
 ]
 
 
