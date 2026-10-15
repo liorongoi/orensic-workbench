@@ -39,17 +39,24 @@ SIGNATURES: list[tuple[str, str, bytes, str]] = [
      "documented layout: use carve."),
     ("mpeg_ps", "MPEG program stream", rb"^\x00\x00\x01\xba", "Generic program stream; common in DVR exports "
      "(exacqVision .ps, many recorders' .mpg / .vob)."),
-    ("mpeg_ts", "MPEG transport stream", rb"^\x47.{187}\x47", "Generic transport stream."),
+    ("mpeg_ts", "MPEG transport stream", rb"^(?:\x47.{187}\x47|....\x47.{191}\x47)", "Transport stream (also M2TS). Native parser "
+     "finds video under vendor or private stream types and reports lost packets."),
     ("annexb_h264", "Raw H.264 elementary stream", rb"^\x00\x00\x00?\x01[\x67\x27\x47]", "Bare H.264 bitstream (starts with an SPS)."),
     ("annexb_hevc", "Raw H.265 elementary stream", rb"^\x00\x00\x00?\x01\x40\x01", "Bare H.265 bitstream (starts with a VPS)."),
     ("annexb_mpeg4", "Raw MPEG-4 Part 2 elementary stream", rb"^\x00\x00\x01[\xb0\xb5\x20-\x2f]",
      "Bare MPEG-4 ASP bitstream, used by many older DVRs."),
     ("annexb_mpeg2", "Raw MPEG-2 video elementary stream", rb"^\x00\x00\x01\xb3", "Bare MPEG-1/2 video bitstream."),
-    ("avi", "AVI", rb"^RIFF....AVI ", "Standard AVI; some DVRs use non-standard FourCCs."),
+    ("pcap", "Network capture (pcap / pcapng)", rb"^(?:\xd4\xc3\xb2\xa1|\xa1\xb2\xc3\xd4|\x4d\x3c\xb2\xa1|\xa1\xb2\x3c\x4d|\x0a\x0d\x0d\x0a)",
+     "Wireshark / tcpdump capture of a camera's or recorder's RTSP stream. Native parser rebuilds the H.264, H.265 "
+     "or MPEG-PS video from RTP over UDP or RTSP-interleaved TCP, with RTP timing and the capture clock."),
+    ("avi", "AVI", rb"^RIFF....AVI ", "AVI; many DVRs (Geovision, Hikvision, Mace and others) use non-standard FourCCs "
+     "that players reject. Native parser reads the video chunks whatever the FourCC."),
     ("isobmff", "MP4 / MOV", rb"^....ftyp", "Standard ISO base media file."),
     ("asf", "ASF / WMV", rb"^\x30\x26\xb2\x75\x8e\x66\xcf\x11", "Windows Media container."),
     ("matroska", "Matroska / WebM", rb"^\x1a\x45\xdf\xa3", "Matroska container."),
 ]
+
+SEARCHED = {f for f, _, pattern, _ in SIGNATURES if not pattern.startswith(b"^")}
 
 # Byte patterns of container headers that can sit between NAL units in a vendor stream.
 # Carving cuts a NAL unit where one of these begins, so container bytes are not fed to the decoder.
@@ -68,6 +75,8 @@ def sniff(head: bytes) -> dict:
             if m:
                 hits.append({"family": family, "label": label, "notes": notes, "at": m.start()})
     codec = guess_codec(head)
+    # A signature that matches at the very start of the file outranks one found further in.
+    hits.sort(key=lambda h: (h["at"] != 0 or h["family"] in SEARCHED))
     family = hits[0]["family"] if hits else None
     return {"candidates": hits, "family": family, "label": hits[0]["label"] if hits else None,
             "elementary_codec": codec, "parser": family in dvr.PARSERS}
@@ -230,11 +239,29 @@ def _ffmpeg(cmd: list[str]) -> None:
         raise MediaError(proc.stderr.decode(errors="replace")[-2000:])
 
 
+# Closed or encrypted formats with no public layout: what to do instead, keyed by file extension.
+CLOSED_FORMATS = {
+    ".avk": "Avigilon AVK is encrypted. Export from Avigilon Control Center / Unity as MP4 or AVI (native format).",
+    ".g64": "Genetec G64 is proprietary. Export from Genetec Security Desk as MP4 or ASF, or keep G64 and use the Genetec player.",
+    ".g64x": "Genetec G64X is encrypted. Export from Genetec Security Desk as MP4 or ASF.",
+    ".sec": "Samsung/Hanwha SEC is a self-contained player bundle. Export from Wisenet as AVI or MP4.",
+    ".exe": "A self-playing export (the player is bundled with the video). Ask for the recorder's native files, "
+    "or export from the player as AVI or MP4.",
+    ".nvf": "Dedicated Micros NVF has no public layout. Export as AVI from the recorder's software.",
+    ".vxg": "Verint / Nice export with no public layout. Export as AVI or MP4 from the vendor software.",
+}
+
+
+def closed_format_hint(filename: str) -> str | None:
+    return CLOSED_FORMATS.get(Path(filename).suffix.lower())
+
+
 METHODS = {
     "parse": "Read the vendor container record by record with Lucida's own parser for that format, keep every "
     "compressed frame byte-identical, and write them into MPEG transport stream with the recorder's own frame "
-    "timing (Motion JPEG goes into Matroska). For Dahua DAV, Hikvision, Xiongmai/XMEye, HiSilicon HXVS and MPEG "
-    "program streams. Gaps and timestamp anomalies are listed in the record.",
+    "timing (Motion JPEG goes into Matroska). For Dahua DAV, Hikvision, Xiongmai/XMEye, HiSilicon HXVS, MPEG "
+    "program and transport streams, AVI with vendor FourCCs and network captures (pcap) of RTSP streams. Gaps "
+    "and timestamp anomalies are listed in the record.",
     "remux": "Stream copy into MPEG transport stream with FFmpeg (no re-encoding; the recorder's own timestamps "
     "are kept). For containers FFmpeg can demux, including Dahua DAV and most MPEG program/transport streams.",
     "carve": "Carve the raw video stream (H.264, H.265, MPEG-4 Part 2, MPEG-2 or Motion JPEG) out of the file and "

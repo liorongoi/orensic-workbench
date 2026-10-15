@@ -1186,6 +1186,27 @@ from a public open-source demuxer:
   payloads are joined, split into pictures, and each PTS is given to the first picture that
   begins in its PES packet. Pictures without a PTS are placed evenly between their neighbours
   and counted.
+- *MPEG transport stream* (ISO/IEC 13818-1): 188-, 192- (M2TS) or 204-byte packets found by
+  sync-byte spacing; PAT and PMT read for the declared stream types; PES reassembled per PID;
+  the video PID is the largest one whose payload is recognisably H.264, H.265, MPEG-4 or MPEG-2,
+  whatever type the PMT declares (recorders use private types such as 0x06 or 0x80). Frames are
+  timed by DTS where present, else PTS. Continuity-counter gaps are counted as lost packets.
+- *AVI* (Microsoft RIFF AVI and OpenDML): the first video stream's `strh` gives the frame rate
+  (dwRate / dwScale), `strf` the size and FourCC; `NNdc`/`NNdb` chunks of that stream are the
+  frames, whatever the FourCC. An empty chunk is a dropped frame and advances the clock, so it
+  shows as a gap. Vendor bytes before a frame's first start code are cut and counted.
+- *Network captures* (`forensic/dvr_net.py`): pcap (µs and ns) and pcapng (section, interface
+  with `if_tsresol`, enhanced and simple packet blocks); Ethernet with VLAN tags, Linux cooked
+  v1/v2, raw IP and loopback; IPv4 and IPv6. RTP is taken from UDP and from RTSP connections
+  (TCP reassembled by sequence number, then `$`-framed interleaved packets, RFC 2326 10.12).
+  RTSP's SDP (`a=rtpmap`) names the payload types where the capture has it; otherwise each RTP
+  stream is depacketized as H.264 (RFC 6184: single NAL, STAP-A, FU-A) and H.265 (RFC 7798:
+  single NAL, AP, FU) and kept when the result is a valid stream, or read as MPEG-PS when its
+  payload starts with a pack header (Hikvision, GB/T 28181). The video stream is the largest
+  one that qualifies. Packets are ordered by extended sequence number, duplicates dropped and
+  gaps counted as lost; each RTP timestamp (90 kHz, unwrapped) times one picture. The wall
+  clock is the capture time of the first packet, so it includes network delay and the capture
+  computer's clock error, and the record says so.
 
 The frames are written into MPEG transport stream by Lucida's own writer (PAT, PMT, one PES per
 frame with its PTS on a 90 kHz clock, PCR 100 ms ahead), so the bytes are deterministic and
@@ -1212,7 +1233,12 @@ builds files in each vendor layout around real encoded streams (H.264, H.265, MP
 Motion JPEG) and checks that the working copy decodes to exactly the same pictures (FFmpeg
 per-frame MD5) at the timing written into the container, including gaps, a clock that steps
 back, a corrupted record, a second camera channel and interleaved audio. The constructed Dahua
-file is also read by FFmpeg's own `dhav` demuxer with the same pictures and times.
+file is also read by FFmpeg's own `dhav` demuxer with the same pictures and times. The
+constructed AVI is read by FFmpeg's AVI demuxer when its FourCC is one FFmpeg knows, and the
+constructed pcap and pcapng captures are read by Scapy with the same packet times and RTP
+fields. The AVI, transport stream and capture tests add dropped frames, an unknown FourCC with
+per-frame vendor headers, a private stream type, M2TS packets, lost and reordered packets, RTP
+sequence and timestamp wrap, a TCP retransmission and a second RTP stream.
 
 Either way the output is a new evidence item recording the original's hash, the method, the
 exact command (with local paths removed) and the FFmpeg version, so a second examiner can repeat

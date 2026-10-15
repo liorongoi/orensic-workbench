@@ -113,10 +113,13 @@ class Workbench:
             info = media.probe(stored["path"], self.settings)
         except media.MediaError as e:
             if not (identified["family"] or identified["elementary_codec"]):
+                hint = formats.closed_format_hint(filename)
                 self.audit.append(
                     actor, "evidence.rejected", case_id=case_id, target=filename,
-                    params={"reason": str(e)[:500], "sha256": stored["sha256"]},
+                    params={"reason": str(e)[:500], "sha256": stored["sha256"], "hint": hint},
                 )
+                if hint:
+                    raise media.MediaError(f"{hint} ({str(e)[-300:]})") from e
                 raise
             # A recorder export FFmpeg cannot open directly: keep it so it can be converted.
             info = {"media_type": "container", "format": identified["label"] or "unknown container",

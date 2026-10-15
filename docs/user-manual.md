@@ -194,9 +194,21 @@ Formats Lucida recognises:
 | HiSilicon IP cameras (HXVS / HXVT) | `.264`, `.265` on SD cards | Lucida's own parser |
 | MPEG program stream (exacqVision and many others) | `.ps`, `.mpg`, `.vob` | Lucida's own parser, or FFmpeg |
 | Older Hikvision (4HKH header) | `.264`, `.mp4` | carve |
-| MPEG transport stream, AVI, MP4/MOV, ASF, Matroska | | FFmpeg |
+| AVI with a vendor FourCC or per-frame vendor headers (Hikvision HKVI, Geovision GMP4, Mace and other DVRs) | `.avi` | Lucida's own parser (FFmpeg reads the standard ones) |
+| MPEG transport stream, including vendor stream types and captures with lost packets; M2TS | `.ts`, `.m2ts`, `.mts` | FFmpeg, or Lucida's own parser for the loss and timing check |
+| Network capture of a camera's or recorder's RTSP stream (Wireshark, tcpdump) | `.pcap`, `.pcapng` | Lucida's own parser: H.264, H.265 or MPEG-PS over RTP, by UDP or inside the RTSP connection |
+| MP4/MOV, ASF, Matroska | | FFmpeg |
 | Raw H.264, H.265, MPEG-4 Part 2 and MPEG-2 video streams | `.264`, `.h264`, `.265`, `.m4v`, `.m2v` | FFmpeg, or carve |
 | Anything else holding H.264, H.265, MPEG-4 Part 2, MPEG-2 or JPEG frames | | carve |
+
+Some formats are closed or encrypted and have no public description: Avigilon `.avk`, Genetec
+`.g64` / `.g64x`, Samsung/Hanwha `.sec`, Dedicated Micros `.nvf`, Verint `.vxg` and self-playing
+`.exe` exports. Lucida refuses them with a message saying how to export a standard file from the
+vendor's software instead.
+
+For a network capture, the working copy's clock comes from the capture computer, so it includes
+network delay and that computer's clock error; the frame spacing comes from the camera's RTP
+timestamps. Lost RTP packets are counted and the frames around them may show damage.
 
 1. Read the identification line (for example "Identified as Dahua DAV · carries H264 video").
 2. Choose a method:
