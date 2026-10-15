@@ -116,8 +116,8 @@ def inconsistent_regions(sigma: np.ndarray, reliable: np.ndarray, lum: np.ndarra
     "chosen ratios. In the map, dark means less noise than elsewhere at that brightness and bright yellow more. "
     "Hatched areas are too textured, too dark or too bright to measure.",
     reference="B. Mahdian and S. Saic, 'Using noise inconsistencies for blind image forensics', Image and Vision "
-    "Computing 27(10), 2009; D. L. Donoho and I. M. Johnstone, 'Ideal spatial adaptation by wavelet shrinkage', "
-    "Biometrika 81(3), 1994.",
+    "Computing 27(10), 2009; X. Liu, M. Tanaka and M. Okutomi, 'Single-image noise level estimation for "
+    "blind denoising', IEEE Trans. Image Processing 22(12), 2013.",
     applies_to=("image",),
     reading_guide="Noise naturally varies with brightness (darker areas of many cameras are noisier) and is "
     "reduced by focus blur and by strong compression, so compare areas of similar brightness and sharpness. "
@@ -158,7 +158,7 @@ def noise_map(ctx: AnalysisContext, p: dict) -> AnalysisResult:
         found.append(r)
     findings = {
         "typical_noise_sigma": round(ref, 3),
-        "noise_units": "standard deviation in 8-bit grey levels, from the finest diagonal wavelet band",
+        "noise_units": "standard deviation in 8-bit grey levels, from the smallest eigenvalues of the covariance of 5 x 5 patches in each window",
         "reliable_share": round(float(reliable.mean()), 3),
         "regions": found,
     }
