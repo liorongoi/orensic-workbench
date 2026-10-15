@@ -135,10 +135,10 @@ class JobQueue:
         self._waiters: dict[str, threading.Event] = {}
         self._outcome: dict[str, tuple[Any, BaseException | None]] = {}
         self._stopped = False
-        # Jobs that were running when the workbench last stopped did not finish.
+        # Jobs that were running when Lucida last stopped did not finish.
         wb.db.execute(
             "UPDATE jobs SET status = 'failed', finished_at = ?, error = ? WHERE status = 'running'",
-            (now_iso(), "the workbench was restarted while this job ran; start it again"),
+            (now_iso(), "Lucida was restarted while this job ran; start it again"),
         )
         self._threads = [
             threading.Thread(target=self._worker, args=(lane,), name=f"job-{lane}-{i}", daemon=True)

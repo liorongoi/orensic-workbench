@@ -18,7 +18,7 @@ for a in "$@"; do
   esac
 done
 version="$(python3 -c "import re,sys;print(re.search(r'^version = \"(.+)\"', open('$here/backend/pyproject.toml').read(), re.M).group(1))")"
-out="${out:-$here/dist/forensic-workbench-$version-airgap}"
+out="${out:-$here/dist/lucida-$version-airgap}"
 rm -rf "$out" && mkdir -p "$out"
 
 echo "Building the UI..."
@@ -38,8 +38,8 @@ python3 -m pip download --dest "$out/wheelhouse" pip setuptools wheel
 
 if [ "$docker" = 1 ]; then
   echo "Building and saving the container image..."
-  docker build -t "forensic-workbench:$version" "$here"
-  docker save "forensic-workbench:$version" | gzip > "$out/forensic-workbench-$version-image.tar.gz"
+  docker build -t "lucida:$version" "$here"
+  docker save "lucida:$version" | gzip > "$out/lucida-$version-image.tar.gz"
   cp "$here/Dockerfile" "$here/docker-compose.yml" "$out/"
 fi
 

@@ -6,6 +6,7 @@ import { JobQueue } from "./components/JobQueue";
 import { SignIn } from "./components/SignIn";
 import { Workspace } from "./components/Workspace";
 import type { AnalysisSchema, FilterSchema, User } from "./types";
+import logo from "./assets/lucida.svg";
 
 function readHash() {
   const m = location.hash.match(/^#\/case\/([\w-]+)/);
@@ -72,7 +73,10 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <a href="#/" className="brand">Forensic Workbench</a>
+        <a href="#/" className="brand">
+          <img src={logo} alt="" width={22} height={22} />
+          <span className="wordmark">Lucida</span>
+        </a>
         {caseId && (
           <>
             <span className="crumb">/ {caseName}</span>
