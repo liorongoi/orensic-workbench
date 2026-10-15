@@ -46,8 +46,10 @@ def _write_key(path: Path, key) -> None:
 
 
 def _name(cn: str) -> x509.Name:
+    # The common name is only a label (browsers match the alternative names), and X.509 caps it
+    # at 64 characters; a long domain name would otherwise stop the certificate being made.
     return x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Forensic Workbench"),
-                      x509.NameAttribute(NameOID.COMMON_NAME, cn)])
+                      x509.NameAttribute(NameOID.COMMON_NAME, cn[:64])])
 
 
 def fingerprint(cert_path: Path) -> str:

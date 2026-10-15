@@ -41,6 +41,14 @@ def test_certificate_names_the_machine_and_verifies(tmp_path):
         th.join(5)
 
 
+def test_long_domain_names_fit(tmp_path):
+    long = "runnervm" + "x" * 20 + ".abcdefghijklmnopqrstuvwxyz.bx.internal.cloudapp.net"
+    t = ensure_certificate(tmp_path, ["localhost", long], ["127.0.0.1"])
+    alt = x509.load_pem_x509_certificate(t["cert"].read_bytes()).extensions.get_extension_for_class(
+        x509.SubjectAlternativeName).value
+    assert long in alt.get_values_for_type(x509.DNSName)
+
+
 def test_certificate_is_kept_until_the_names_change(tmp_path):
     first = ensure_certificate(tmp_path, ["localhost"], ["127.0.0.1"])
     pem, ca = first["cert"].read_bytes(), first["authority"].read_bytes()
