@@ -14,6 +14,7 @@ hash in the report next to every step or analysis that used it.
 | `sr.realesrgan_x4plus` | Real-world super resolution and clean-up, 4x (Real-ESRGAN RRDBNet, Wang et al. 2021) | BSD-3-Clause | `ai.realesrgan` (generative) |
 | `sr.realesrgan_compact_x4` | The same, small fast model (Real-ESRGAN SRVGGNetCompact) | BSD-3-Clause | `ai.realesrgan` (generative) |
 | `face.yunet` | Face detection (YuNet, Wu et al. 2023) | MIT | `face.consistency`, `redact.faces` |
+| `detector.commfor_vit_s16_384` | Generated-image detection, GAN and diffusion (Community Forensics ViT-S/16-384, Park and Owens 2025) | MIT | `synthetic.generated` |
 
 Sources, training data and limits are in `backend/forensic/models/manifest.json`; licence texts
 in `backend/forensic/models/licences/`. The super-resolution weights were converted from the
@@ -47,10 +48,14 @@ A filter is *generative* when its output can contain detail the camera never rec
 
 ## Licence policy
 
-Only models whose licence allows commercial use and redistribution are bundled. Published
-AI-image and deepfake detectors were reviewed and none is bundled: the strong ones carry
-non-commercial or research-only licences or have not been validated on current generators.
-`synthetic.learned` is a slot for a detector the lab licenses and validates itself.
+Only models whose licence allows commercial use and redistribution are bundled. Of the published
+AI-image detectors reviewed, Community Forensics (CVPR 2025) is bundled: its weights are MIT-licensed,
+it was trained on about 4,800 generators, and its authors report results on generators held out from
+training. Most others carry non-commercial or research-only licences, have no licence, or are GPL.
+`tools/convert_commfor.py` converts the published safetensors file (hash pinned) to ONNX without
+PyTorch; the converted model reproduces the authors' published scores on their example images.
+`synthetic.learned` remains a slot for a further detector the lab licenses and validates itself,
+for example one trained on newer generators.
 
 ## Installing a lab detector
 

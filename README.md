@@ -127,7 +127,7 @@ Set `FORENSIC_AGENT_NAME` and `FORENSIC_AGENT_MODEL` so the audit log records wh
 
 ## Not yet
 
-- No learned AI-image or deepfake detector is bundled: the published ones reviewed carry non-commercial licences or lack validation on current generators. The slot (`synthetic.learned`) takes one the lab licenses and validates.
+- One learned generated-image detector is bundled (`synthetic.generated`: Community Forensics, CVPR 2025, MIT licence); it scores whole images for GAN and diffusion generation. A second slot (`synthetic.learned`) takes a detector the lab licenses and validates itself.
 - Every detector is so far validated on synthetic data only, including the phase 3 checks; no real photographs, real face swaps or recorder footage have been run. Run the validation with real material before relying on a detector in casework.
 - Clone detection, OCR, multi-view triangulation, native parsers for vendor formats FFmpeg cannot demux (they are carved instead), Postgres + S3 Object Lock, SSO, MCP agents sharing the API's job queue, and sandboxed parsers. Chains are linear; branching graphs use the same document format later.
 

@@ -22,7 +22,7 @@ Contents
 9. [Enhancement: multi-frame methods](#9-enhancement-multi-frame-methods)
 10. [AI-assisted steps](#10-ai-assisted-steps)
 11. [Authentication: file structure and metadata](#11-authentication-file-structure-and-metadata)
-12. [Authentication: compression, copy-move and noise analyses](#12-authentication-compression-copy-move-and-noise-analyses)
+12. [Authentication: compression, copy-move, noise and geometric analyses](#12-authentication-compression-copy-move-noise-and-geometric-analyses)
 13. [Camera identification (PRNU)](#13-camera-identification-prnu)
 14. [Synthetic media: provenance, camera traces, learned detectors](#14-synthetic-media-provenance-camera-traces-learned-detectors)
 15. [Face-swap and face-edit checks](#15-face-swap-and-face-edit-checks)
@@ -741,7 +741,7 @@ interlacing.
 
 ---
 
-## 12. Authentication: compression, copy-move and noise analyses
+## 12. Authentication: compression, copy-move, noise and geometric analyses
 
 ### 12.1 Error Level Analysis (ELA) — `forensic/analysis/compression.py`
 
@@ -885,6 +885,45 @@ deterministic and closed-form. *Alternatives:* Mahdian and Saic (2009) segment b
 and are the classic reference for the idea; learned noise residuals (Noiseprint) are far more
 sensitive but carry non-commercial terms.
 
+### 12.7 Geometric consistency: shadows, reflections, perspective — `forensic/analysis/geometry.py`
+
+Three checks of the scene's geometry, after Kee, O'Brien and Farid (shadows, ACM TOG 2013) and
+O'Brien and Farid (reflections, ACM TOG 2012). The examiner clicks pairs of points:
+
+- **Shadows**: a point on a cast shadow, then the point on the object that casts it. The line
+  from shadow to object passes through the projection of the light in the image plane.
+- **Reflections**: a point on an object, then the same point in its reflection in one flat
+  surface. All such lines meet at the vanishing point of the mirror's normal.
+- **Perspective**: two points along each of several lines that are parallel in the scene. They
+  meet at one vanishing point.
+
+Each pair becomes a wedge with its apex on the first point (the line's midpoint for
+perspective), opening around the clicked direction by a half-angle = tolerance (default 2°, for
+pairing and model error) + atan(2 x click error / segment length) (default click error 2 px, so
+short constraints widen more). Shadow and reflection wedges are one-sided, and are also tried all
+reversed (a light behind the camera projects on the other side of every shadow); perspective
+wedges are two-sided because the clicked order of a line's points is arbitrary.
+
+The constraints are consistent when one point lies in every wedge. The intersection of wedges is
+a union of convex polygons whose vertices are intersections of wedge boundary lines, so the test
+is exact: every pairwise intersection (and the corners of a box 200 image diagonals wide, which
+stands in for points at infinity) is checked against every wedge. When none fits, the smallest
+conflicting set is found by exhaustive search over subsets of 2 to 6 constraints (Helly's
+theorem bounds a conflict of convex wedges at three for one orientation). A bisection then
+reports the tolerance up to which the conflict persists (or, when consistent, the tightest
+tolerance that still fits, and the best-fit light or vanishing point at that tolerance), which is
+what an examiner reports instead of a yes/no at one arbitrary tolerance. The map draws the wedges
+(conflicting set in red), the feasible region in green and the best-fit point or an arrow
+toward it.
+
+*Why this way:* it is the published, peer-reviewed method Amped Authenticate also implements,
+it needs no training data, and its result is a geometric fact the examiner can demonstrate.
+*Known limits:* a consistent result does not show the image is authentic; mis-paired points,
+extended or multiple lights, non-planar mirrors and lens distortion produce false conflicts.
+Measured on seeded synthetic constraint sets (detector cards): no false conflicts with 1 to 2 px
+click error, and a constraint turned by 20° is found in 84 to 88 % of sets (over 90 % with five
+or more constraints, under 15 % when turned by only 5°).
+
 ---
 
 ## 13. Camera identification (PRNU)
@@ -975,17 +1014,39 @@ initialisation, and an order of magnitude faster.
 *Limits:* both traces disappear after JPEG at quality 95 or below, after resizing, and in many
 phone pipelines; the validation card gives the measured fall-off.
 
-### 14.3 Learned AI-image detector (lab-installed slot)
+### 14.3 Generated-image detector (GAN and diffusion) — `forensic/analysis/generated.py`
 
-No learned detector ships. A lab can install an ONNX model with a model card (training data,
-training date, version, input preprocessing, output activation, threshold and validation); the
-analysis then runs it in centre-crop, resize or tile mode (up to 36 tiles, mapped), and reports
-the score, the threshold, the model's identity and weights hash, and its training date.
+A learned detector ships: Community Forensics (Park and Owens, CVPR 2025), a ViT-Small/16 at
+384 x 384 trained on 2.7 million images from about 4,800 generators (mostly latent-diffusion
+models and fine-tunes, plus GANs, pixel-diffusion and commercial models) and as many real
+photographs. Its weights are MIT-licensed, so they ship in the offline installer. The published
+safetensors file was converted to ONNX by `backend/tools/convert_commfor.py` without PyTorch
+(weights copied unchanged); the converted model reproduces the authors' published scores on
+their example images to within 4e-6.
 
-*Why a slot rather than a bundled model:* the detectors reviewed (for example Ojha et al. 2023,
-Cozzolino et al. 2024) either carry non-commercial licences or have not been validated on the
-generators current at release; detectors also age quickly as generators change. Making the lab
-license, validate and record the model keeps the responsibility and the evidence trail clear.
+Inference follows the authors' evaluation protocol exactly: shorter side resized to 440 with
+bilinear filtering, centre crop 384, ImageNet normalisation, sigmoid of one logit. A score of
+0.5 or more is reported as consistent with a generated image, and 0.2 to 0.8 as uncertain
+(Amped uses a similar uncertain band). The mirrored image is scored too, and a difference over
+0.3 is flagged as an unstable score. Accuracy on held-out generators, and after JPEG
+re-compression and down-scaling, is on the detector card.
+
+*Why this model:* among the detectors with open weights it was trained on by far the most
+generators, it is the only strong one whose weights carry a permissive licence (Ojha et al.
+2023, Cozzolino et al. 2024, NPR and the GRIP/PoliMi models are non-commercial, unlicensed or
+GPL), and its authors publish an evaluation on generators held out from training. *Known
+limits:* it scores whole images, so a generated object pasted into a real photo is usually
+missed; generators released after late 2024 are not in its training data; heavy processing
+moves scores both ways.
+
+### 14.4 Learned AI-image detector (lab-installed slot)
+
+A lab can install its own ONNX detector with a model card (training data, training date,
+version, input preprocessing, output activation, threshold and validation), for example one
+trained on newer generators. The analysis runs it in centre-crop, resize or tile mode (up to 36
+tiles, mapped), and reports the score, the threshold, the model's identity and weights hash,
+and its training date. Detectors age quickly as generators change; a lab-licensed, lab-validated
+model keeps that responsibility and the evidence trail clear.
 
 ---
 
