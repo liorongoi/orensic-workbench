@@ -301,9 +301,14 @@ def write_cards(results: dict, out_dir: Path, meta: dict) -> list[Path]:
 
     if "phase3" in results:
         detectors |= phase3_cards(results["phase3"])
+    from .phase5 import FAILURE_MODES as P5_MODES
+    from .phase5 import phase5_cards
+
     if "phase4" in results:
         detectors |= phase4_cards(results["phase4"])
-    modes = FAILURE_MODES | P3_MODES | P4_MODES
+    if "phase5" in results:
+        detectors |= phase5_cards(results["phase5"])
+    modes = FAILURE_MODES | P3_MODES | P4_MODES | P5_MODES
     for det, res in detectors.items():
         a = ANALYSES[det]
         card = {
@@ -325,13 +330,18 @@ def write_cards(results: dict, out_dir: Path, meta: dict) -> list[Path]:
 
 
 def run(quick: bool = False, pristine: Path | None = None, out_dir: Path = CARD_DIR, log=print,
-        only: str | None = None) -> dict:
-    """Run the experiments and write their cards; `only="phase4"` runs just the clone and noise-map ones."""
+        only: str | None = None, camera_originals: Path | None = None) -> dict:
+    """Run the experiments and write their cards; `only` runs one group ("phase4": clone and noise map;
+    "phase5": dimples, PRNU map, fusion and quantisation tables)."""
     src = pristine_source(pristine)
     from .phase4 import run_phase4
+    from .phase5 import run_phase5
 
     if only == "phase4":
         return _finish({"phase4": run_phase4(src, quick, log=log)}, quick, pristine, out_dir)
+    if only == "phase5":
+        return _finish({"phase5": run_phase5(src, quick, camera_originals, log=log)}, quick, pristine, out_dir,
+                       camera_originals)
     n = 12 if quick else 120
     log(f"A-DJPG detection ({n} positives, {n} negatives)…")
     adjpg = eval_adjpg(src, n)
@@ -344,11 +354,13 @@ def run(quick: bool = False, pristine: Path | None = None, out_dir: Path = CARD_
     from .phase3 import run_phase3
 
     results = {"adjpg": adjpg, "adjpg_local": adjpg_local, "nadjpg": nadjpg, "prnu": pr,
-               "phase3": run_phase3(src, quick, log=log), "phase4": run_phase4(src, quick, log=log)}
-    return _finish(results, quick, pristine, out_dir)
+               "phase3": run_phase3(src, quick, log=log), "phase4": run_phase4(src, quick, log=log),
+               "phase5": run_phase5(src, quick, camera_originals, log=log)}
+    return _finish(results, quick, pristine, out_dir, camera_originals)
 
 
-def _finish(results: dict, quick: bool, pristine: Path | None, out_dir: Path | None) -> dict:
+def _finish(results: dict, quick: bool, pristine: Path | None, out_dir: Path | None,
+            camera_originals: Path | None = None) -> dict:
     import PIL
     import pywt
 
@@ -359,7 +371,8 @@ def _finish(results: dict, quick: bool, pristine: Path | None, out_dir: Path | N
         + ("; quick (CI) size" if quick else ""),
         "software": {"forensic_workbench": __version__, "numpy": np.__version__, "opencv": cv2.__version__,
                      "pillow": PIL.__version__, "pywavelets": pywt.__version__, "python": platform.python_version()},
-        "command": "python -m forensic.validation run" + (" --quick" if quick else "") + (" --pristine <folder>" if pristine else ""),
+        "command": "python -m forensic.validation run" + (" --quick" if quick else "") + (" --pristine <folder>" if pristine else "")
+        + (" --camera-originals <folder>" if camera_originals else ""),
     }
     if out_dir is not None:
         write_cards(results, out_dir, meta)
@@ -371,7 +384,7 @@ def summary_markdown(out: dict) -> str:
     m = out["meta"]
     if "adjpg" not in r:
         return "\n".join([f"# Detector validation (partial)", "", f"Generated {m['date']} by `{m['command']}` on {m['corpus']}.", ""]
-                          + _phase4_rows(r.get("phase4")) + [""])
+                          + _phase4_rows(r.get("phase4")) + _phase5_rows(r.get("phase5")) + [""])
     lines = [
         "# Detector validation",
         "",
@@ -387,7 +400,7 @@ def summary_markdown(out: dict) -> str:
         f"| NA-DJPG grid | crop between saves | {r['nadjpg']['threshold']} | {r['nadjpg']['true_positive_rate']} | {r['nadjpg']['false_positive_rate']} | {r['nadjpg']['auc']} |",
         f"| PRNU | same camera, full frame | PCE {r['prnu']['threshold']} | {r['prnu']['full_frame']['true_positive_rate']} | {r['prnu']['full_frame']['false_positive_rate']} | {r['prnu']['full_frame']['auc']} |",
         f"| PRNU | same camera, quarter crop, searched | PCE {r['prnu']['threshold']} | {r['prnu']['cropped_quarter_frame_with_search']['true_positive_rate']} | {r['prnu']['cropped_quarter_frame_with_search']['false_positive_rate']} | {r['prnu']['cropped_quarter_frame_with_search']['auc']} |",
-    ] + _phase3_rows(r.get("phase3")) + _phase4_rows(r.get("phase4")) + [
+    ] + _phase3_rows(r.get("phase3")) + _phase4_rows(r.get("phase4")) + _phase5_rows(r.get("phase5")) + [
         "",
         f"A-DJPG first-quality estimate within ±3: {r['adjpg']['first_quality_within_3']} (mean error {r['adjpg']['first_quality_mean_abs_error']}). "
         f"Detection when Q1 > Q2 (expected to fail): {r['adjpg']['tpr_when_q1_above_q2']}.",
@@ -446,3 +459,28 @@ def _phase4_rows(p4: dict | None) -> list[str]:
         f"Noise map: {nm['true_positive_rate_by_condition']}; FPR {nm['false_positive_rate']} "
         f"({nm['false_positive_rate_after_jpeg90']} after JPEG 90).",
     ]
+
+
+def _phase5_rows(p5: dict | None) -> list[str]:
+    if not p5:
+        return []
+    d, pm, fu, qt = p5["dimples"], p5["prnu_map"], p5["fusion"], p5["qtables"]
+    out = [
+        "",
+        "JPEG dimples, PRNU tampering map, fusion map and quantisation tables:",
+        "",
+        f"Dimples: TPR by bias {d['true_positive_rate_by_bias']}; FPR {d['false_positive_rate']} "
+        f"({d['false_positive_rate_double_saved']} double saved); missing-dimple area found {d['localisation']['true_positive_rate']} "
+        f"(FPR {d['localisation']['false_positive_rate']}).",
+        "",
+        f"PRNU map: {pm['true_positive_rate_by_condition']}; FPR {pm['false_positive_rate']}.",
+        "",
+        f"Fusion: {fu['true_positive_rate_by_condition']}; FPR {fu['false_positive_rate_by_history']}.",
+        "",
+        f"Quantisation tables: re-save caught {qt['true_positive_rate']}; false mismatch on held-out originals {qt['false_positive_rate']}.",
+    ]
+    if "real_camera_originals" in d:
+        rc = d["real_camera_originals"]
+        out += ["", f"Dimples on {rc['images']} real camera originals: {rc['with_dimple']} have one; "
+                f"{rc['with_dimple_after_libjpeg_resave_q90']} still do after re-saving at 90."]
+    return out

@@ -1,0 +1,34 @@
+{
+  "detector": "file.qt_database",
+  "name": "Quantisation tables vs camera database",
+  "version": "1.0.0",
+  "validated_on": "2026-10-15",
+  "corpus": "synthetic photo-like scenes generated from fixed seeds (forensic.validation.run.scene)",
+  "seeded": true,
+  "results": {
+    "detection": {
+      "task": "Do the file's tables match a camera named in EXIF? Is a re-saved file caught?",
+      "database": "282 camera models, 370 distinct table sets (built-in plus generated libjpeg)",
+      "true_positive_rate": 0.9787,
+      "true_positive_means": "files re-saved by libjpeg at quality 70-100 with EXIF still naming one of 282 known models: mismatch flagged",
+      "false_positive_rate": 0.2538,
+      "false_positive_means": "331 camera-original files from models with other recorded files, held out one at a time: mismatch wrongly flagged because the database lacks that quality setting",
+      "exif_camera_matched_when_held_out": 0.7462
+    }
+  },
+  "known_failure_modes": [
+    "The built-in database covers a few hundred camera models, far fewer than commercial databases; labs should add their own reference images.",
+    "Cameras have one table set per quality setting; a missing setting causes a false mismatch (see false_positive_rate).",
+    "Many devices and programs share tables (libjpeg at a given quality is used by countless apps); a match narrows, never proves, the source.",
+    "Anyone can re-save with a camera's tables and edit EXIF."
+  ],
+  "software": {
+    "forensic_workbench": "0.3.0",
+    "numpy": "2.5.3",
+    "opencv": "5.0.0",
+    "pillow": "12.3.0",
+    "pywavelets": "1.8.0",
+    "python": "3.13.16"
+  },
+  "how_to_reproduce": "python -m forensic.validation run --camera-originals <folder>"
+}

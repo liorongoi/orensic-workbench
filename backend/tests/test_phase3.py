@@ -287,7 +287,7 @@ def test_double_encoding(wb, case, videos):
 
 def test_triage_battery_includes_video_checks(wb, case, videos):
     t = wb.smart_report(ingest(wb, case, videos / "looped.mp4")["id"], EXAMINER)
-    assert t["level"] == "red" and t["result"]["rules_version"] == "1.2.0"
+    assert t["level"] == "red" and t["result"]["rules_version"] == "1.3.0"
     assert {a["name"] for a in t["result"]["analyses"]} >= {"video.frame_integrity", "video.double_encoding", "synthetic.provenance"}
 
 

@@ -1,0 +1,42 @@
+{
+  "detector": "tamper.fusion",
+  "name": "Fusion map",
+  "version": "1.0.0",
+  "validated_on": "2026-10-15",
+  "corpus": "synthetic photo-like scenes generated from fixed seeds (forensic.validation.run.scene)",
+  "seeded": true,
+  "results": {
+    "detection": {
+      "task": "Which area was pasted in? (fusion of A-DJPG, NA-DJPG, dimples and noise)",
+      "positives": "40 images per condition: first save at JPEG 50-79, an uncompressed area of 30% x 30% pasted, final save at 90 or 95",
+      "negatives": "the same 40 images untouched in three histories (see false_positive_rate_by_history)",
+      "detected_means": "an outlined area (belief above 0.55) covers at least 30% of the pasted rectangle",
+      "true_positive_rate_by_condition": {
+        "one trace: uncompressed area pasted into a JPEG saved before (A-DJPG only)": 0.875,
+        "two traces: the pasted area is also smoothed (A-DJPG and noise)": 0.775,
+        "two traces: pasted into a camera original with dimples (A-DJPG and dimples)": 0.725
+      },
+      "true_positive_rate": 0.7917,
+      "false_positive_rate_by_history": {
+        "single save": 0.0,
+        "double save": 0.05,
+        "camera original with dimples, re-saved": 0.0
+      },
+      "false_positive_rate": 0.0167
+    }
+  },
+  "known_failure_modes": [
+    "Only as good as its inputs: when no input's condition holds (single-saved file, no dimples) only the weak noise source remains.",
+    "Reliabilities are fixed, not learned; they are chosen from the inputs' own cards.",
+    "Inherits every input's false alarms on texture, flat areas and periodic content."
+  ],
+  "software": {
+    "forensic_workbench": "0.3.0",
+    "numpy": "2.5.3",
+    "opencv": "5.0.0",
+    "pillow": "12.3.0",
+    "pywavelets": "1.8.0",
+    "python": "3.13.16"
+  },
+  "how_to_reproduce": "python -m forensic.validation run --camera-originals <folder>"
+}
