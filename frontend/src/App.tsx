@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
-import { api, getExaminer, setExaminer, urls } from "./api";
+import { api, setExaminer, SIGNED_OUT, urls } from "./api";
+import { AccountMenu } from "./components/AccountMenu";
 import { CaseList } from "./components/CaseList";
+import { JobQueue } from "./components/JobQueue";
+import { SignIn } from "./components/SignIn";
 import { Workspace } from "./components/Workspace";
-import type { AnalysisSchema, FilterSchema } from "./types";
+import type { AnalysisSchema, FilterSchema, User } from "./types";
 import logo from "./assets/lucida.svg";
 
 function readHash() {
@@ -11,45 +14,59 @@ function readHash() {
 }
 
 export default function App() {
-  const [examiner, setName] = useState(getExaminer());
-  const [draftName, setDraftName] = useState("");
+  const [me, setMe] = useState<User | null>(null);
+  const [setupRequired, setSetupRequired] = useState<boolean | null>(null);
   const [caseId, setCaseId] = useState<string | null>(readHash());
   const [filters, setFilters] = useState<FilterSchema[]>([]);
   const [analyses, setAnalyses] = useState<AnalysisSchema[]>([]);
   const [caseName, setCaseName] = useState("");
 
+  const signedIn = (u: User | null) => {
+    setExaminer(u?.full_name ?? "");
+    setMe(u);
+  };
+
+  const checkSession = () =>
+    api
+      .authStatus()
+      .then((s) => {
+        setSetupRequired(s.setup_required);
+        signedIn(s.user);
+      })
+      .catch(() => setSetupRequired(false));
+
   useEffect(() => {
-    api.filters().then(setFilters);
-    api.analyses().then(setAnalyses);
+    checkSession();
     const onHash = () => setCaseId(readHash());
+    const onSignedOut = () => signedIn(null);
     window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
+    window.addEventListener(SIGNED_OUT, onSignedOut);
+    return () => {
+      window.removeEventListener("hashchange", onHash);
+      window.removeEventListener(SIGNED_OUT, onSignedOut);
+    };
   }, []);
 
   useEffect(() => {
-    if (caseId) api.caseDetail(caseId).then((d) => setCaseName(d.case.name)).catch(() => setCaseName(""));
-  }, [caseId]);
+    if (!me) return;
+    api.filters().then(setFilters);
+    api.analyses().then(setAnalyses);
+  }, [me?.username]);
 
-  if (!examiner) {
+  useEffect(() => {
+    if (me && caseId) api.caseDetail(caseId).then((d) => setCaseName(d.case.name)).catch(() => setCaseName(""));
+  }, [caseId, me?.username]);
+
+  if (setupRequired === null) return <p className="loading muted">Loading…</p>;
+  if (!me) {
     return (
-      <div className="signin">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!draftName.trim()) return;
-            setExaminer(draftName.trim());
-            setName(draftName.trim());
-          }}
-        >
-          <h1 className="signin-brand">
-            <img src={logo} alt="" width={40} height={40} />
-            <span className="wordmark">Lucida</span>
-          </h1>
-          <p className="muted">Your actions are logged under this name.</p>
-          <input autoFocus placeholder="Examiner name" value={draftName} onChange={(e) => setDraftName(e.target.value)} />
-          <button className="primary">Continue</button>
-        </form>
-      </div>
+      <SignIn
+        setup={setupRequired}
+        onSignedIn={(u) => {
+          setSetupRequired(false);
+          signedIn(u);
+        }}
+      />
     );
   }
 
@@ -75,18 +92,8 @@ export default function App() {
           </>
         )}
         {!caseId && <span className="spacer" />}
-        <span className="examiner" title="Recorded as the actor in the audit log">
-          {examiner}
-          <button
-            className="link"
-            onClick={() => {
-              setExaminer("");
-              setName("");
-            }}
-          >
-            change
-          </button>
-        </span>
+        <JobQueue me={me} />
+        <AccountMenu me={me} onSignedOut={() => signedIn(null)} />
       </header>
       {caseId ? (
         <Workspace key={caseId} caseId={caseId} filters={filters} analyses={analyses} />

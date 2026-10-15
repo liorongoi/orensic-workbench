@@ -29,7 +29,8 @@ shows the address and log, and the browser opens Lucida; closing the window stop
 The Start menu also has **Self-test** and **Case data folder**.
 
 Settings live in `<install folder>\workbench.ini` (`data_dir`, `import_dir`, `host`, `port`, and
-optionally `c2pa_trust_anchors` and `allowed_hosts`, the extra names browsers may use to reach it). Running a newer installer upgrades in place and keeps
+optionally `c2pa_trust_anchors`, `allowed_hosts`, the extra names browsers may use to reach it,
+and `job_workers` and `gpu_jobs`, see [Several examiners](#several-examiners)). Running a newer installer upgrades in place and keeps
 these settings and the case data. Silent installation for managed rollouts:
 
 ```
@@ -44,6 +45,37 @@ commit and the SHA-256 of the Python, FFmpeg and Visual C++ downloads it was bui
 CI installs every build on a fresh Windows runner, for one user and for all users, blocks the
 bundled Python from the network, runs the self-test, starts Lucida, and uninstalls
 (`deploy\windows\test-installer.ps1`).
+
+## Several examiners
+
+Lucida keeps its own accounts, since the lab machine is offline. The first person to
+open a fresh installation creates the **administrator** account; the administrator then adds
+each examiner from the account menu (top right) > **Users**, and can reset a password, make
+someone an administrator, or disable an account (which signs it out at once). Every action is
+recorded in the audit log under the account's full name. Sessions last 12 hours; five wrong
+passwords in a row lock that user name for a minute.
+
+Heavy work (rendering a chain, analyses, format conversion, camera references, triage, the
+review agent and reports) goes through one shared job queue, so several examiners can start
+work at the same time without overloading the machine. **Jobs** in the top bar shows what is
+running and waiting for everyone, with each job's owner and place in line; the owner or an
+administrator can remove a job that has not started. The screens that started a job still wait
+for its result as before; scripts can instead queue work with `POST /api/jobs` and follow it
+with `GET /api/jobs/{id}`.
+
+Jobs run in two lanes. Jobs that run a learned model share the graphics card, one at a time by
+default (`gpu_jobs` in `workbench.ini`, or `FORENSIC_GPU_JOBS`); the rest run four at a time
+(`job_workers`, or `FORENSIC_JOB_WORKERS`). On a 128 GB machine with an RTX A4000 (16 GB),
+`job_workers = 6` and `gpu_jobs = 1` are a reasonable start; raise `gpu_jobs` to 2 only if
+the models in use fit twice in the card's memory. Within a lane the next job goes to the
+examiner with the fewest jobs running, then to whoever has waited longest for a turn, so one
+examiner's batch does not hold up the others. A job that was running when Lucida
+stopped is marked failed and must be started again; jobs still waiting resume.
+
+To let examiners use Lucida from their own PCs, set `host` in `workbench.ini` to the
+machine's address and add the name they type in the browser to `allowed_hosts`. Passwords then
+cross the lab network, so put Lucida behind a TLS reverse proxy (and set
+`FORENSIC_SECURE_COOKIE=1`) unless the network is trusted.
 
 ## Container
 
