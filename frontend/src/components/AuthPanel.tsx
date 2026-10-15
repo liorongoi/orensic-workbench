@@ -172,7 +172,7 @@ export function AuthPanel(props: Props) {
                 {busy === a.id ? "Running…" : latest[a.id] ? "Re-run" : "Run"}
               </button>
             </div>
-            {a.id === "camera.prnu" && (
+            {a.params.some((p) => p.name === "reference_id") && (
               <select
                 onClick={(e) => e.stopPropagation()}
                 className="ref-select"

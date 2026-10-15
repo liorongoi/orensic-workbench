@@ -11,3 +11,4 @@ frontend/dist/
 dist/
 import/
 build/
+!backend/forensic/data/

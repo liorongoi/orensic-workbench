@@ -70,6 +70,16 @@ def _checks():
 
     yield "C2PA reader", c2pa
 
+    def qt_database():
+        from . import qtables
+
+        st = qtables.stats(qtables.load())
+        if st["camera_models"] < 100:
+            raise RuntimeError(f"built-in database incomplete ({st['camera_models']} camera models)")
+        return f"{st['camera_models']} camera models, {st['tables']} table sets"
+
+    yield "quantisation-table database", qt_database
+
     def end_to_end():
         from PIL import Image
 

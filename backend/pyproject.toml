@@ -36,6 +36,7 @@ build-backend = "setuptools.build_meta"
 include = ["forensic*"]
 
 [tool.setuptools.package-data]
+"forensic" = ["data/*.json"]
 "forensic.validation" = ["cards/*.json"]
 "forensic.models" = ["manifest.json", "weights/*.onnx", "licences/*.txt"]
 
