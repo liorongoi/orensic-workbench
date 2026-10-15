@@ -8,6 +8,7 @@ import numpy as np
 from forensic import models
 from forensic.analysis import ANALYSES
 from forensic.filters import REGISTRY
+from forensic.filters.deblur import make_psf
 from forensic.graph import pixel_hash
 from forensic.validation import load_card
 
@@ -99,3 +100,49 @@ def test_smart_report_runs_clone_detection_on_any_image(wb, case, tmp_path):
     t = wb.smart_report(ingest(wb, case, p)["id"], EXAMINER)
     assert "tamper.copy_move" in {a["name"] for a in t["result"]["analyses"]}
     assert t["level"] == "red" and "clone.match" in {r["code"] for r in t["result"]["reasons"]}
+
+
+def _f(fid, x, **p):
+    f = REGISTRY[fid]
+    return f.fn(x, f.validate(p))
+
+
+def test_tv_deblur_beats_wiener_on_a_known_blur():
+    sharp = (_texture(120, 160, 4) > 0.5).astype(np.float32) * 0.8 + 0.1  # hard-edged, like text
+    psf = dict(psf="motion", length=9, angle=20)
+    k = make_psf(REGISTRY["deblur.tv"].validate(psf)).astype(np.float32)
+    blurred = cv2.filter2D(sharp, -1, k, borderType=cv2.BORDER_REFLECT)
+    blurred = np.clip(blurred + np.random.default_rng(1).normal(0, 0.01, blurred.shape), 0, 1).astype(np.float32)
+    err = lambda a: float(np.abs(a - sharp)[10:-10, 10:-10].mean())  # noqa: E731
+    tv, wi = _f("deblur.tv", blurred, **psf), _f("deblur.wiener", blurred, **psf)
+    assert err(tv) < 0.7 * err(wi) and err(tv) < 0.7 * err(blurred)
+
+
+def test_low_light_evens_out_uneven_lighting_better_than_levels():
+    img = _texture(120, 160, 5) * 0.8 + 0.1
+    h, w = img.shape[:2]
+    yy, xx = np.mgrid[0:h, 0:w]
+    light = np.maximum(1 / (1 + ((xx - 0.8 * w) ** 2 + (yy - 0.2 * h) ** 2) / (0.15 * w) ** 2), 1 / 30)[..., None]
+    dark = np.power(np.power(img, 2.2) * light, 1 / 2.2).astype(np.float32)
+    err = lambda a: float(np.abs(a - img).mean())  # noqa: E731
+    best_levels = min(err(_f("exposure.levels", dark, in_white=v)) for v in (0.2, 0.3, 0.5))
+    assert err(_f("exposure.low_light", dark)) < 0.8 * best_levels
+
+
+def test_range_expand_maps_16_235_to_full_range():
+    x = np.array([[[16, 16, 16], [235, 235, 235], [126, 126, 126]]], np.float32) / 255
+    out = _f("exposure.range_expand", x)
+    assert np.allclose(out[0, 0], 0, atol=1e-3) and np.allclose(out[0, 1], 1, atol=1e-3)
+    assert np.allclose(_f("exposure.range_expand", x, chroma=False), out, atol=2e-3)
+
+
+def test_video_denoise_beats_single_frame_and_keeps_every_frame():
+    clean = _texture(96, 128, 6)
+    rng = np.random.default_rng(2)
+    stack = np.stack([np.clip(np.roll(clean, i, axis=1) + rng.normal(0, 0.08, clean.shape), 0, 1)
+                      for i in range(5)]).astype(np.float32)
+    out = _f("stack.denoise_temporal", stack, frames=5)
+    assert out.shape == stack.shape
+    err = lambda a: float(np.abs(a - np.roll(clean, 2, axis=1))[:, 8:-8].mean())  # noqa: E731
+    single = _f("denoise.nlm", stack[2], strength=12, color_strength=12)
+    assert err(out[2]) < 0.8 * err(single) and err(single) < err(stack[2])

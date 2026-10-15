@@ -68,6 +68,7 @@ def candidates(workflow: str, multi_frame: bool, roi_pts: list | None) -> list[t
             ]
     elif workflow == "low_light":
         pre = [_node("stack.stabilise", motion="euclidean", roi=roi), _node("stack.integrate", method="mean")] if multi_frame else []
+        out.append(("Low-light enhancement (illumination map)", pre + [_node("exposure.low_light")]))
         for gamma in (1.6, 2.2):
             out.append((f"NLM denoise, gamma {gamma}", pre + [_node("denoise.nlm", strength=8.0, color_strength=8.0),
                                                             _node("exposure.levels", gamma=gamma)]))
