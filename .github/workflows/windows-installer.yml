@@ -1,0 +1,66 @@
+name: Windows installer
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", architecture: x64 }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Build the offline installer
+        shell: pwsh
+        run: deploy\windows\build-installer.ps1 -BuildPython python
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ForensicWorkbench-Windows-Setup
+          path: |
+            dist/*-Setup.exe
+            dist/*-Setup.exe.sha256
+          compression-level: 0
+          if-no-files-found: error
+
+  # Each install is tested on a fresh runner that never saw the build.
+  test:
+    needs: build
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        scope: [current-user, all-users]
+    steps:
+      - uses: actions/checkout@v4
+        with: { sparse-checkout: deploy/windows }
+      - uses: actions/download-artifact@v4
+        with: { name: ForensicWorkbench-Windows-Setup, path: dist }
+      - name: Install, self-test offline, run, uninstall
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist\*-Setup.exe).FullName
+          if ("${{ matrix.scope }}" -eq "all-users") {
+            deploy\windows\test-installer.ps1 -Installer $setup -AllUsers
+          } else {
+            deploy\windows\test-installer.ps1 -Installer $setup
+          }
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: ForensicWorkbench-Windows-Setup, path: dist }
+      - name: Attach the installer to the release
+        env: { GH_TOKEN: "${{ github.token }}", TAG: "${{ github.ref_name }}" }
+        run: |
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$TAG" -R "$GITHUB_REPOSITORY" --title "Forensic Workbench $TAG" --notes "Offline Windows installer."
+          gh release upload "$TAG" dist/* -R "$GITHUB_REPOSITORY" --clobber

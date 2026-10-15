@@ -1,0 +1,37 @@
+Forensic Workbench for Windows
+==============================
+
+This installer is fully offline. It installs everything the workbench needs and
+does not connect to the internet, during installation or afterwards:
+
+  - a private Python runtime and every Python library the workbench uses
+  - FFmpeg and FFprobe, for video decoding and DVR export conversion
+  - the bundled AI models (super-resolution and face detection), each pinned
+    by SHA-256 and re-checked before every use
+  - the workbench user interface, served to your browser from this computer
+
+Nothing else needs to be installed first, and it does not affect any other
+Python or FFmpeg on this computer.
+
+You will choose:
+  - the installation folder (programs)
+  - the case data folder (cases, evidence, audit log, reports). The case data
+    folder is never deleted when the workbench is uninstalled. When installed
+    for all users, only members of the local "Forensic Examiners" group can
+    open it; you are added, and an administrator adds the other examiners.
+  - the local port the workbench uses (default 8000)
+
+After installation, run the acceptance self-test (offered on the last page,
+and in the Start menu as "Forensic Workbench > Self-test"). It re-hashes every
+installed file, checks the models give bit-identical results on this CPU, and
+runs a small case end to end. Its log is saved in the case data folder under
+"logs"; keep it with your lab's validation records.
+
+To start, open "Forensic Workbench" from the Start menu or desktop. A window
+shows the workbench's address and log; your browser opens the workbench.
+Close that window to stop the workbench.
+
+Third-party software included: Python (PSF licence), FFmpeg (GPL; see the
+ffmpeg folder), the Microsoft Visual C++ runtime, and the Python libraries
+listed in licences\python-packages.txt. Model licences are in
+python\Lib\site-packages\forensic\models\licences.
