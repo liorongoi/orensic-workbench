@@ -129,8 +129,8 @@ def _evidence(srv: MCPServer) -> None:
         return _png(wb().source_frame(evidence_id, frame), max_side)
 
     @srv.tool(description="Identify a recorder export's container family (Dahua DAV, Hikvision, Xiongmai/XMEye, "
-              "HiSilicon HXVS, MPEG-PS/TS, raw H.264/H.265/MPEG-4/MPEG-2...) from its signatures, whether Lucida has "
-              "a native parser for it, and list the conversion methods.")
+              "HiSilicon HXVS, MPEG-PS/TS, AVI, pcap captures of RTSP streams, raw H.264/H.265/MPEG-4/MPEG-2...) "
+              "from its signatures, whether Lucida has a native parser for it, and list the conversion methods.")
     def identify_container(evidence_id: str) -> dict:
         w = wb()
         with open(w.evidence_path(evidence_id), "rb") as f:

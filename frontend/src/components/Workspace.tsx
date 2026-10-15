@@ -36,7 +36,7 @@ const TAB_LABEL: Record<Tab, string> = { enhance: "Enhance", authenticate: "Auth
 type ExtPick = { field: string; count: number };
 
 const PROPRIETARY = new Set([
-  "dahua_dav", "hikvision", "hxvs", "xmeye", "hikvision_old", "mpeg_ps",
+  "dahua_dav", "hikvision", "hxvs", "xmeye", "hikvision_old", "mpeg_ps", "pcap",
   "annexb_h264", "annexb_hevc", "annexb_mpeg4", "annexb_mpeg2",
 ]);
 type View = { kind: "chain" } | { kind: "map"; digest: string; label: string };
