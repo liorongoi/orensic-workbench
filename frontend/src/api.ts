@@ -82,6 +82,7 @@ export const api = {
     req<{
       case: Case;
       evidence: Evidence[];
+      removed_evidence: Evidence[];
       chains: Chain[];
       analyses: AnalysisRun[];
       camera_references: CameraReference[];
@@ -116,6 +117,9 @@ export const api = {
   },
   verifyEvidence: (id: string) =>
     req<{ ok: boolean; read_only: boolean; sha256: string }>("POST", `/api/evidence/${id}/verify`),
+  removeEvidence: (id: string, reason: string) => req<Evidence>("POST", `/api/evidence/${id}/remove`, { reason }),
+  restoreEvidence: (id: string) => req<Evidence>("POST", `/api/evidence/${id}/restore`),
+  removeChain: (id: string, reason = "") => req<Chain>("POST", `/api/chains/${id}/remove`, { reason }),
   frames: (id: string) => req<FrameInfo[]>("GET", `/api/evidence/${id}/frames`),
   createChain: (caseId: string, evidenceId: string, name: string, graph?: Partial<Graph>) =>
     req<Chain>("POST", `/api/cases/${caseId}/chains`, { evidence_id: evidenceId, name, graph }),

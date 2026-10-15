@@ -26,7 +26,7 @@ export function AccountMenu({ me, onSignedOut }: { me: User; onSignedOut: () => 
         {me.full_name} ▾
       </button>
       {open && (
-        <div className="menu">
+        <div className="account-menu">
           {me.role === "admin" && <button onClick={() => pick("users")}>Users</button>}
           <button onClick={() => pick("password")}>Change password</button>
           <button onClick={() => api.logout().finally(onSignedOut)}>Sign out</button>
