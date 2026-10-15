@@ -779,6 +779,10 @@ for.
   (Farid 2006; Kee, Johnson and Farid 2011). Commercial tools ship far larger databases (Amped
   quotes 14,000+ tables); no openly licensed collection of that size exists, which is why the lab
   layer exists.
+  *Measured* (see the validation README): 98 % of re-saved images were caught, but 25 % of
+  genuine originals held out from the database gave a false mismatch, because the database
+  lacked that camera's quality setting. That is why the finding is yellow, not red, and why
+  adding the lab's own reference images matters.
 
 ### 11.2 Video
 
@@ -957,6 +961,10 @@ faint bump or dip (a "dimple") there throughout the image. libjpeg and most soft
 On real camera originals dimples often survive re-saving by software (measured in the card), so
 presence shows the image passed through such an encoder, not that the file is the original. The
 local map is the main use: a pasted, painted or resampled area does not carry the dimple.
+*Measured*: on synthetic cases a dimple was found in 65-100 % of images depending on its
+strength, with no false detections; a missing-dimple area was found 45 % of the time with 10 %
+false alarms. Of 56 real camera originals only 11 % had a dimple, and 9 % still did after
+re-saving at quality 90, so absence means nothing and presence does not show an original.
 
 ### 12.8 Luminance gradient (LGA) — `forensic/analysis/gradient.py`
 
@@ -984,6 +992,12 @@ and Lukáš 2008):
    be decidable (else hatched). Isolated windows are dropped; the outlined area is the union of
    the failing windows. Only shown when the whole image matches (PCE ≥ 60).
 
+*Measured*: areas pasted from another camera were found 65 % of the time and areas copied from
+elsewhere in the same image 83 %, with no false outlines on untouched images. *Why this
+approach:* predicting the expected correlation from content, rather than using one fixed
+threshold, keeps dark, flat and saturated areas, where the fingerprint is always weak, from
+being outlined as tampered.
+
 ### 12.10 Fusion map — `forensic/analysis/fusion.py`
 
 Dempster-Shafer fusion of the local analyses (after Fontani, Bianchi, De Rosa, Piva and Barni
@@ -999,6 +1013,9 @@ them pixel by pixel. Areas of belief ≥ 0.55 and at least 1 % of the image are 
 analyses that support each. Only A-DJPG and dimples can pass that alone, and only with strong
 evidence. Amped's Fusion Map is labelled AI-based; this one is a fixed classical rule, so it is
 reproducible and every contribution is listed.
+*Measured*: 78-88 % of pasted areas were found depending on which traces they left; false
+outlines on 0 % of single-saved images, 5 % of double-saved ones and 0 % of re-saved camera
+originals with dimples.
 
 ---
 
