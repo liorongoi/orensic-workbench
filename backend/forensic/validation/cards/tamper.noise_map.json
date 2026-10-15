@@ -1,0 +1,41 @@
+{
+  "detector": "tamper.noise_map",
+  "name": "Noise level map",
+  "version": "1.0.0",
+  "validated_on": "2026-10-15",
+  "corpus": "six real photographs from the scikit-image sample data (astronaut, coffee, chelsea, rocket, motorcycle_left, motorcycle_right), each manipulated at seeded random places; 60 cases per condition",
+  "seeded": true,
+  "results": {
+    "detection": {
+      "task": "Does an area (square of 30% of the short side) have noise unlike the rest of the image?",
+      "positives": "60 images, each altered two ways (see true_positive_rate_by_condition)",
+      "negatives": "the same 60 images untouched, as given and re-saved at JPEG 90",
+      "detected_means": "an outlined area covers at least 30% of the altered square, at the default ratios (below 0.2x or above 8x)",
+      "true_positive_rate_by_condition": {
+        "smoothed (Gaussian blur, sigma 1.2 px)": 0.7,
+        "noisier (added noise, sigma 6 grey levels)": 0.1333
+      },
+      "false_positive_rate": 0.1667,
+      "false_positive_rate_after_jpeg90": 0.6667,
+      "median_ratio_when_found": {
+        "smoothed": 0.12,
+        "noisier": 14.55
+      }
+    }
+  },
+  "known_failure_modes": [
+    "Noise varies naturally with focus (out-of-focus backgrounds are smoother), texture and the camera's tone curve; 2-3x differences are common in authentic photographs.",
+    "JPEG compression removes noise in flat areas first, so after low-quality saving flat areas look 'clean' and can be outlined.",
+    "Small areas (under about three windows across) and areas that were given matching noise after editing are not found.",
+    "Added noise of a strength similar to the camera's own is not distinguishable."
+  ],
+  "software": {
+    "forensic_workbench": "0.3.0",
+    "numpy": "2.5.4",
+    "opencv": "5.0.0",
+    "pillow": "12.3.0",
+    "pywavelets": "1.8.0",
+    "python": "3.13.16"
+  },
+  "how_to_reproduce": "python -m forensic.validation run --only phase4 --pristine <folder with those six images>"
+}

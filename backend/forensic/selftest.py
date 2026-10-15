@@ -3,7 +3,7 @@
     python -m forensic.selftest            # exit code 0 when every check passes
 
 Checks the tools and models are present and unmodified, that learned models run
-deterministically on this CPU, and runs a small case end to end in a temporary
+deterministically on this machine (GPU or CPU), and runs a small case end to end in a temporary
 data folder: ingest, render, reproduce, analyse, measure, review and report.
 It makes no network connection.
 """
@@ -21,7 +21,7 @@ import numpy as np
 
 
 def _checks():
-    from . import __version__, models
+    from . import __version__, compute, models
     from .audit import Actor
     from .config import load_settings
 
@@ -50,8 +50,8 @@ def _checks():
         x = np.random.default_rng(0).random((1, 1, 48, 48)).astype(np.float32)
         a, b = models.run("sr.fsrcnn_x2", x), models.run("sr.fsrcnn_x2", x)
         if not np.array_equal(a, b) or a.shape != (1, 1, 96, 96):
-            raise RuntimeError("super-resolution output is not reproducible on this CPU")
-        return "FSRCNN x2 reproducible"
+            raise RuntimeError("super-resolution output is not reproducible on this machine")
+        return f"FSRCNN x2 reproducible on {models.device('sr.fsrcnn_x2')}; {compute.describe()}"
 
     yield "ONNX Runtime", sr_deterministic
 

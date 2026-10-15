@@ -21,8 +21,7 @@ RUN pip install --no-cache-dir . \
 COPY --from=ui /src/frontend/dist /app/frontend/dist
 ENV FORENSIC_DATA_DIR=/data \
     FORENSIC_IMPORT_DIR=/import \
-    FORENSIC_FRONTEND_DIST=/app/frontend/dist \
-    FORENSIC_DETERMINISTIC=1
+    FORENSIC_FRONTEND_DIST=/app/frontend/dist
 COPY deploy/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 VOLUME ["/data"]
 EXPOSE 8000
