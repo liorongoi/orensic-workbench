@@ -107,8 +107,6 @@ def run(open_browser: bool) -> int:
     net = configure()
     tls = net["tls"]
     browse_host = "127.0.0.1" if net["host"] in ("0.0.0.0", "") else net["host"]
-    if tls:
-        browse_host = "localhost"  # a name the certificate carries
     url = f"{'https' if tls else 'http'}://{browse_host}:{net['port']}"
     cafile = tls and (tls["authority"] or tls["cert"])
     if _health(url, cafile=cafile):

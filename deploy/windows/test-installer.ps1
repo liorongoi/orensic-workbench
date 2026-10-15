@@ -80,7 +80,8 @@ try {
         -RedirectStandardOutput $out -RedirectStandardError $err -WorkingDirectory $App
     $base = "http://127.0.0.1:$Port"
     if ($LabNetwork) {
-        $base = "https://localhost:$Port"
+        # 127.0.0.1, not localhost: the workbench listens on IPv4, and a refused ::1 attempt costs Windows 2 s.
+        $base = "https://127.0.0.1:$Port"
         # The checks below talk to the API; the certificate itself is verified with curl further down.
         $PSDefaultParameterValues["Invoke-RestMethod:SkipCertificateCheck"] = $true
         $PSDefaultParameterValues["Invoke-WebRequest:SkipCertificateCheck"] = $true
@@ -96,11 +97,11 @@ try {
     if ($LabNetwork) {
         $ca = "$Data\tls\workbench-ca.crt"
         if (-not (Test-Path $ca)) { throw "no local certificate authority in the case data folder" }
-        foreach ($name in "localhost", $env:COMPUTERNAME.ToLower()) {
+        foreach ($name in "127.0.0.1", "localhost", $env:COMPUTERNAME.ToLower()) {
             & "$env:SystemRoot\System32\curl.exe" --fail --silent --show-error --cacert $ca "https://${name}:$Port/api/health" | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "HTTPS to $name did not verify against the workbench authority" }
         }
-        Write-Host "HTTPS verified for localhost and $($env:COMPUTERNAME.ToLower())"
+        Write-Host "HTTPS verified for 127.0.0.1, localhost and $($env:COMPUTERNAME.ToLower())"
     }
     $page = Invoke-WebRequest "$base/" -UseBasicParsing
     if ($page.Content -notmatch 'id="root"') { throw "the UI page was not served" }
