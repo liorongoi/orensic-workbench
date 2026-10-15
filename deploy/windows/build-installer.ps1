@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Build the offline Windows installer for the Forensic Workbench.
+  Build the offline Windows installer for Lucida.
 
 .DESCRIPTION
   Run on a connected Windows x64 machine (or the "Windows installer" GitHub Actions workflow)
@@ -11,7 +11,7 @@
   It assembles a payload with a private embeddable Python, every Python dependency, FFmpeg,
   the Visual C++ runtime, the bundled AI models and the built UI, hashes every file into
   SHA256SUMS, runs the acceptance self-test against the payload, and compiles
-  dist\ForensicWorkbench-<version>-Setup.exe with Inno Setup. The resulting installer needs
+  dist\Lucida-<version>-Setup.exe with Inno Setup. The resulting installer needs
   no internet connection on the target machine.
 #>
 param(
@@ -54,7 +54,7 @@ function Get-Pinned($url, $dest, $sha) {
     return $actual
 }
 
-Step "Forensic Workbench ${Version}: checking the build tools"
+Step "Lucida ${Version}: checking the build tools"
 $pyVer = & $BuildPython -c "import sys, struct; print('%d.%d' % sys.version_info[:2], struct.calcsize('P') * 8)"
 Check "Python"
 if ($pyVer -ne "3.12 64") { throw "Build Python must be 64-bit 3.12 to match the bundled runtime (found $pyVer)" }
@@ -102,7 +102,7 @@ Step "Python dependencies (wheels for Windows x64, CPython 3.12)"
 $wheels = "$Work\wheels"
 if (Test-Path $wheels) { Remove-Item -Recurse -Force $wheels }
 & $BuildPython -m pip wheel --no-deps --wheel-dir $wheels "$Repo\backend"; Check "building the backend wheel"
-$backendWheel = (Get-ChildItem "$wheels\forensic_workbench-*.whl" | Select-Object -First 1).FullName
+$backendWheel = (Get-ChildItem "$wheels\lucida_forensic-*.whl" | Select-Object -First 1).FullName
 & $BuildPython -m pip install --no-cache-dir --disable-pip-version-check --no-warn-script-location `
     --only-binary=:all: --target $Site $backendWheel
 Check "installing the dependencies"
@@ -144,7 +144,7 @@ def licence(d):
         lic = ', '.join(c.split(' :: ')[-1] for c in (md.get_all('Classifier') or []) if c.startswith('License ::')) or lic[:60]
     return lic or 'see the package metadata'
 
-print('Python packages bundled with the Forensic Workbench (name, version, licence)')
+print('Python packages bundled with Lucida (name, version, licence)')
 print()
 for d in sorted(m.distributions(), key=lambda d: d.metadata['Name'].lower()):
     print('%-32s %-14s %s' % (d.metadata['Name'], d.version, licence(d)))
@@ -159,7 +159,7 @@ if ($LASTEXITCODE -ne 0) { Write-Warning "some third-party files did not compile
 Step "Build record and SHA256SUMS"
 $commit = (git -C $Repo rev-parse HEAD 2>$null)
 @"
-Forensic Workbench $Version for Windows x64
+Lucida $Version for Windows x64
 Built:    $((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')) on $env:COMPUTERNAME
 Commit:   $commit
 Python:   $PythonVersion embeddable, sha256 $pySha
@@ -204,8 +204,8 @@ try {
 Step "Compiling the installer"
 & $Iscc /Q "/DAppVersion=$Version" "/DPayloadDir=$Payload" "/DOutputDir=$OutDir" "$PSScriptRoot\installer.iss"
 Check "Inno Setup"
-$setup = "$OutDir\ForensicWorkbench-$Version-Setup.exe"
+$setup = "$OutDir\Lucida-$Version-Setup.exe"
 $hash = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLower()
-"$hash  ForensicWorkbench-$Version-Setup.exe" | Set-Content -Encoding ascii "$setup.sha256"
+"$hash  Lucida-$Version-Setup.exe" | Set-Content -Encoding ascii "$setup.sha256"
 $size = [math]::Round((Get-Item $setup).Length / 1MB, 1)
 Write-Host "`nInstaller: $setup ($size MB)`nSHA-256:   $hash" -ForegroundColor Green

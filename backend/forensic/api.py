@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, Field
 
-from . import __version__, formats, media
+from . import APP_NAME, __version__, formats, media
 from . import measure as measure_mod
 from .agents import WORKFLOWS, plan_enhancement, triage_case
 from .audit import Actor
@@ -22,7 +22,7 @@ from .filters import FilterError
 from .report import build_bundle, render_html, render_pdf
 from .workbench import NotFound, Workbench
 
-app = FastAPI(title="Forensic Workbench", version=__version__)
+app = FastAPI(title=APP_NAME, version=__version__)
 
 # Answer only requests addressed to this computer by name. Without this check a web page could
 # rebind its own hostname to 127.0.0.1 and use the API as if it were the examiner's browser.

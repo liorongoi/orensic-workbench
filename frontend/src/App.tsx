@@ -3,6 +3,7 @@ import { api, getExaminer, setExaminer, urls } from "./api";
 import { CaseList } from "./components/CaseList";
 import { Workspace } from "./components/Workspace";
 import type { AnalysisSchema, FilterSchema } from "./types";
+import logo from "./assets/lucida.svg";
 
 function readHash() {
   const m = location.hash.match(/^#\/case\/([\w-]+)/);
@@ -40,7 +41,10 @@ export default function App() {
             setName(draftName.trim());
           }}
         >
-          <h1>Forensic Workbench</h1>
+          <h1 className="signin-brand">
+            <img src={logo} alt="" width={40} height={40} />
+            <span className="wordmark">Lucida</span>
+          </h1>
           <p className="muted">Every action you take is recorded in the case audit log under this name.</p>
           <input autoFocus placeholder="Examiner name" value={draftName} onChange={(e) => setDraftName(e.target.value)} />
           <button className="primary">Continue</button>
@@ -52,7 +56,10 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <a href="#/" className="brand">Forensic Workbench</a>
+        <a href="#/" className="brand">
+          <img src={logo} alt="" width={22} height={22} />
+          <span className="wordmark">Lucida</span>
+        </a>
         {caseId && (
           <>
             <span className="crumb">/ {caseName}</span>

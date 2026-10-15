@@ -1,4 +1,4 @@
-; Inno Setup script for the Forensic Workbench Windows installer.
+; Inno Setup script for the Lucida Windows installer.
 ; Built by deploy/windows/build-installer.ps1, which assembles the payload folder and runs:
 ;   ISCC.exe /DAppVersion=0.3.0 /DPayloadDir=<payload> /DOutputDir=<dist> installer.iss
 ; The installer is fully offline: the payload carries Python, every dependency, FFmpeg,
@@ -14,7 +14,10 @@
   #define OutputDir "dist"
 #endif
 
-#define AppName "Forensic Workbench"
+#define AppName "Lucida"
+; The name before the rename to Lucida, so an upgrade can tidy its old shortcuts away.
+#define OldAppName "Forensic Workbench"
+#define AppIcon "{app}\lucida.ico"
 #define Python "{app}\python\python.exe"
 #define Launcher "{app}\launcher\workbench_launcher.py"
 
@@ -27,6 +30,8 @@ AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppName}
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
+; Use the Lucida Start menu folder even when upgrading an install made under the old name.
+UsePreviousGroup=no
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog commandline
@@ -35,9 +40,10 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 InfoBeforeFile=install-notes.txt
 OutputDir={#OutputDir}
-OutputBaseFilename=ForensicWorkbench-{#AppVersion}-Setup
+OutputBaseFilename=Lucida-{#AppVersion}-Setup
+SetupIconFile=lucida.ico
 UninstallDisplayName={#AppName} {#AppVersion}
-UninstallDisplayIcon={app}\python\python.exe
+UninstallDisplayIcon={#AppIcon}
 Compression=lzma2/max
 SolidCompression=yes
 LZMANumBlockThreads=4
@@ -58,12 +64,16 @@ Type: filesandordirs; Name: "{app}\python"
 Type: filesandordirs; Name: "{app}\frontend"
 Type: filesandordirs; Name: "{app}\ffmpeg"
 Type: filesandordirs; Name: "{app}\launcher"
+; Shortcuts left by an install made under the old name.
+Type: filesandordirs; Name: "{autoprograms}\{#OldAppName}"
+Type: files; Name: "{autodesktop}\{#OldAppName}.lnk"
 
 [Files]
 Source: "{#PayloadDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "lucida.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Dirs]
-; Case data stays when the workbench is uninstalled. A per-user install keeps the folder's
+; Case data stays when Lucida is uninstalled. A per-user install keeps the folder's
 ; inherited permissions, so only that user (and administrators) can reach it. An all-users
 ; install limits it to the local "Forensic Examiners" group (see RestrictDataDir below).
 Name: "{code:DataDir}"; Flags: uninsneveruninstall
@@ -76,17 +86,17 @@ Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "host"; String: "127
 Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "port"; String: "{code:Port}"
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; Comment: "Start the workbench and open it in the browser"
-Name: "{group}\Self-test"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" selftest --pause"; WorkingDir: "{app}"; Comment: "Check the installation and run the acceptance self-test"
+Name: "{group}\{#AppName}"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Start Lucida and open it in the browser"
+Name: "{group}\Self-test"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" selftest --pause"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Check the installation and run the acceptance self-test"
 Name: "{group}\Case data folder"; Filename: "{code:DataDir}"
 Name: "{group}\User guide"; Filename: "{app}\docs\README.md"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Start Lucida and open it in the browser"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\vcredist\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing the Microsoft Visual C++ runtime..."; Check: NeedsVCRedist; Flags: waituntilterminated
 Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" selftest --pause"; WorkingDir: "{app}"; Description: "Run the acceptance self-test now (recommended)"; Flags: postinstall skipifsilent
-Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; Description: "Start the {#AppName}"; Flags: postinstall nowait unchecked skipifsilent
+Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; Description: "Start {#AppName}"; Flags: postinstall nowait unchecked skipifsilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\launcher\__pycache__"
@@ -99,9 +109,9 @@ var
 function DefaultDataDir(): String;
 begin
   if IsAdminInstallMode then
-    Result := ExpandConstant('{commondocs}\Forensic Workbench')
+    Result := ExpandConstant('{commondocs}\Lucida')
   else
-    Result := ExpandConstant('{userdocs}\Forensic Workbench');
+    Result := ExpandConstant('{userdocs}\Lucida');
 end;
 
 function ParamOr(Name, Default: String): String;
@@ -121,17 +131,17 @@ end;
 procedure InitializeWizard;
 begin
   DataPage := CreateInputDirPage(wpSelectDir,
-    'Case data folder', 'Where should the workbench keep case data?',
+    'Case data folder', 'Where should Lucida keep case data?',
     'Cases, the write-once evidence store, derived outputs, the audit log and reports are kept in this folder. ' +
-    'Choose a drive with enough space for your evidence. It is never removed when the workbench is uninstalled.',
+    'Choose a drive with enough space for your evidence. It is never removed when Lucida is uninstalled.',
     False, '');
   DataPage.Add('');
   // /DATADIR= and /PORT= on the command line set these for a silent install.
   DataPage.Values[0] := ParamOr('DATADIR', GetPreviousData('DataDir', DefaultDataDir()));
 
   PortPage := CreateInputQueryPage(DataPage.ID,
-    'Local web address', 'Which port should the workbench use on this computer?',
-    'The workbench runs in your browser at http://127.0.0.1:<port>. It only accepts connections from this computer. ' +
+    'Local web address', 'Which port should Lucida use on this computer?',
+    'Lucida runs in your browser at http://127.0.0.1:<port>. It only accepts connections from this computer. ' +
     'Keep 8000 unless another program already uses it.');
   PortPage.Add('Port:', False);
   PortPage.Values[0] := ParamOr('PORT', GetPreviousData('Port', '8000'));
@@ -179,7 +189,7 @@ begin
     Space + 'Python runtime and all libraries' + NewLine +
     Space + 'FFmpeg and FFprobe' + NewLine +
     Space + 'AI models (super-resolution, face detection), hash-pinned' + NewLine +
-    Space + 'Workbench user interface' + NewLine;
+    Space + 'Lucida user interface' + NewLine;
   if MemoTasksInfo <> '' then
     Result := Result + NewLine + MemoTasksInfo;
 end;
@@ -207,7 +217,7 @@ begin
   // group (the installing account is added), plus Administrators and SYSTEM. Other accounts on
   // the computer cannot read or change evidence, the case database or the audit log.
   Sys := ExpandConstant('{sys}');
-  RunHidden(Sys + '\net.exe', 'localgroup "' + ExaminersGroup + '" /add /comment:"Can open Forensic Workbench case data"', False);
+  RunHidden(Sys + '\net.exe', 'localgroup "' + ExaminersGroup + '" /add /comment:"Can open Lucida case data"', False);
   RunHidden(Sys + '\net.exe', 'localgroup "' + ExaminersGroup + '" "' + GetUserNameString + '" /add', False);
   RunHidden(Sys + '\icacls.exe', '"' + DataDir('') + '" /inheritance:r /grant:r *S-1-5-32-544:(OI)(CI)F *S-1-5-18:(OI)(CI)F "' +
     ExaminersGroup + ':(OI)(CI)M" /T /C /Q', True);

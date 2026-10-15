@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Install the Forensic Workbench from an offline bundle (made by build-bundle.sh).
+# Install Lucida from an offline bundle (made by build-bundle.sh).
 #
-#   ./install.sh /opt/forensic-workbench
+#   ./install.sh /opt/lucida
 #
 # Needs: Python 3.11+ with venv, and FFmpeg (ffmpeg, ffprobe) from the OS's offline
 # package media. Makes no network connection: pip runs with --no-index.

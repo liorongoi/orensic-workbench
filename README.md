@@ -1,6 +1,8 @@
-# Forensic Workbench
+<img src="brand/lucida-icon.svg" width="64" height="64" alt="Lucida logo">
 
-A browser-based workbench for forensic image and video work: **Enhance** (clarify
+# Lucida
+
+Lucida is a browser-based workbench for forensic image and video work: **Enhance** (clarify
 footage and photos) and **Authenticate** (check whether an image is what it claims
 to be), on one audited processing core. This is Phase 0 (foundations), Phase 1
 (MVP), Phase 2 (depth) and Phase 3 (AI, deepfake checks, full parity) of the build plan *Forensic Image & Video Platform: Build Plan*.

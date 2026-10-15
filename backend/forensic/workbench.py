@@ -13,7 +13,7 @@ from typing import BinaryIO
 
 import numpy as np
 
-from . import __version__, formats, media, models, policy, prnu
+from . import APP_NAME, __version__, formats, media, models, policy, prnu
 from . import measure as measure_mod
 from .analysis import ANALYSES, AnalysisContext, get_analysis
 from .audit import Actor, AuditLog
@@ -43,6 +43,7 @@ class Workbench:
         import PIL
 
         return {
+            "application": APP_NAME,
             "app_version": __version__,
             "ffmpeg": media.ffmpeg_version(self.settings.ffmpeg),
             "opencv": cv2.__version__,
