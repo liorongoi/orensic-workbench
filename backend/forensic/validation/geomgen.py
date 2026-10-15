@@ -2,6 +2,7 @@
 
     python -m forensic.validation.geomgen geometry                 # seeded synthetic constraints
     python -m forensic.validation.geomgen generated --sample DIR   # DIR/real/*, DIR/fake/<generator>/*
+    python -m forensic.validation.geomgen generated --parquet SHARDS  # Community Forensics evaluation shards
 
 Geometry: constraint sets are drawn from one light (or vanishing point) with simulated click
 error; a manipulated set has one constraint whose direction is turned by a known angle, as an
@@ -182,45 +183,73 @@ def _auc(pos: list[float], neg: list[float]) -> float:
     return float(gt / (len(p) * len(n)))
 
 
-def eval_generated(sample: Path, limit_per_group: int = 10_000, log=print) -> dict:
+def _folder_samples(sample: Path):
+    """DIR/real/[<source>/]* and DIR/fake/<generator>/* -> (is_fake, group, format, loader)."""
+    for p in sorted((sample / "real").rglob("*")):
+        if p.suffix.lower() in EXTS:
+            src = p.parent.name if p.parent != sample / "real" else "real"
+            yield False, src, p.suffix.lower().lstrip("."), lambda p=p: _load(p)
+    for d in sorted((sample / "fake").iterdir()):
+        for p in sorted(d.rglob("*")) if d.is_dir() else []:
+            if p.suffix.lower() in EXTS:
+                yield True, d.name, p.suffix.lower().lstrip("."), lambda p=p: _load(p)
+
+
+def _parquet_samples(files: list[Path]):
+    """Community Forensics evaluation shards (columns label, model_name, real_source, format, image_data)."""
+    import pyarrow.parquet as pq
+
+    for f in files:
+        t = pq.read_table(f, columns=["label", "model_name", "real_source", "format", "image_data"]).to_pylist()
+        for r in t:
+            fake = int(r["label"]) == 1
+            data = r["image_data"]
+            if isinstance(data, dict):
+                data = data.get("bytes")
+            group = r["model_name"] if fake else (r["real_source"] or "real")
+            yield fake, str(group), str(r["format"] or "?").lower(), lambda d=data: _load(io.BytesIO(d))  # type: ignore[arg-type]
+
+
+def eval_generated(samples, log=print) -> dict:
     from ..analysis.generated import score
 
     conds = {"as given": lambda x: x, "jpeg 90": lambda x: _jpeg(x, 90), "jpeg 75": lambda x: _jpeg(x, 75),
              "half size": _half}
-    real = sorted(p for p in (sample / "real").rglob("*") if p.suffix.lower() in EXTS)[:limit_per_group]
-    gens = {d.name: sorted(p for p in d.rglob("*") if p.suffix.lower() in EXTS)[:limit_per_group]
-            for d in sorted((sample / "fake").iterdir()) if d.is_dir()}
-    s_real = {c: [] for c in conds}
-    s_fake = {c: {g: [] for g in gens} for c in conds}
-    for i, p in enumerate(real):
-        x = _load(p)
-        for c, f in conds.items():
-            s_real[c].append(score(f(x)))
-        if i % 50 == 0:
-            log(f"real {i}/{len(real)}")
-    for g, files in gens.items():
-        for p in files:
-            x = _load(p)
-            for c, f in conds.items():
-                s_fake[c][g].append(score(f(x)))
-        log(f"{g}: {len(files)}")
-    allfake = {c: [s for v in s_fake[c].values() for s in v] for c in conds}
+    rows = []  # (is_fake, group, format, {condition: score})
+    for i, (fake, group, fmt, load) in enumerate(samples):
+        try:
+            x = load()
+        except Exception as e:  # noqa: BLE001 - unreadable sample: skip and count
+            log(f"skipped {group}: {e}")
+            continue
+        rows.append((fake, group, fmt, {c: score(f(x)) for c, f in conds.items()}))
+        if i % 100 == 0:
+            log(f"{i} images")
     rate = lambda xs: round(float(np.mean(np.asarray(xs) >= 0.5)), 4) if len(xs) else None  # noqa: E731
+    pick = lambda fake, c, key=None, val=None: [r[3][c] for r in rows if r[0] == fake and (key is None or r[key] == val)]  # noqa: E731
     base = "as given"
+    gens = sorted({r[1] for r in rows if r[0]})
+    srcs = sorted({r[1] for r in rows if not r[0]})
+    fmts = sorted({r[2] for r in rows})
     return {
         "task": "Was the whole image made by a generative model (diffusion, GAN, other)?",
-        "positives": f"{len(allfake[base])} generated images from {len(gens)} generators unseen in training "
-        "(Community Forensics evaluation set sample)",
-        "negatives": f"{len(real)} real photographs from the same evaluation set sample",
+        "positives": f"{len(pick(True, base))} generated images from {len(gens)} generators unseen in training",
+        "negatives": f"{len(pick(False, base))} real images ({', '.join(srcs)})",
         "threshold": 0.5,
-        "true_positive_rate": rate(allfake[base]),
-        "false_positive_rate": rate(s_real[base]),
-        "auc": round(_auc(allfake[base], s_real[base]), 4),
-        "tpr_by_generator": {g: rate(v) for g, v in s_fake[base].items()},
-        "images_by_generator": {g: len(v) for g, v in s_fake[base].items()},
-        "tpr_by_condition": {c: rate(allfake[c]) for c in conds},
-        "fpr_by_condition": {c: rate(s_real[c]) for c in conds},
-        "auc_by_condition": {c: round(_auc(allfake[c], s_real[c]), 4) for c in conds},
+        "true_positive_rate": rate(pick(True, base)),
+        "false_positive_rate": rate(pick(False, base)),
+        "auc": round(_auc(pick(True, base), pick(False, base)), 4),
+        "tpr_by_generator": {g: rate(pick(True, base, 1, g)) for g in gens},
+        "images_by_generator": {g: len(pick(True, base, 1, g)) for g in gens},
+        "fpr_by_real_source": {s: rate(pick(False, base, 1, s)) for s in srcs},
+        "images_by_real_source": {s: len(pick(False, base, 1, s)) for s in srcs},
+        "by_stored_format": {f: {"tpr": rate(pick(True, base, 2, f)), "fpr": rate(pick(False, base, 2, f)),
+                                 "fake": len(pick(True, base, 2, f)), "real": len(pick(False, base, 2, f))} for f in fmts},
+        "tpr_by_condition": {c: rate(pick(True, c)) for c in conds},
+        "fpr_by_condition": {c: rate(pick(False, c)) for c in conds},
+        "auc_by_condition": {c: round(_auc(pick(True, c), pick(False, c)), 4) for c in conds},
+        "note": "Real images in the sample are mostly JPEG and generated ones mostly PNG; the 'jpeg 90' and 'jpeg 75' "
+        "conditions re-encode both alike, so they show accuracy without that format cue.",
     }
 
 
@@ -251,7 +280,8 @@ def main(argv=None):
     g = sub.add_parser("geometry")
     g.add_argument("--trials", type=int, default=60)
     d = sub.add_parser("generated")
-    d.add_argument("--sample", type=Path, required=True, help="folder with real/ and fake/<generator>/ images")
+    d.add_argument("--sample", type=Path, help="folder with real/[<source>/] and fake/<generator>/ images")
+    d.add_argument("--parquet", type=Path, nargs="*", help="Community Forensics evaluation shards instead of a folder")
     d.add_argument("--corpus", default="", help="description of the sample for the card")
     for p in (g, d):
         p.add_argument("--out", type=Path, default=CARD_DIR)
@@ -262,9 +292,11 @@ def main(argv=None):
                          GEOMETRY_MODES[det], "python -m forensic.validation.geomgen geometry", a.out))
             print(json.dumps(res, indent=2))
     else:
-        res = eval_generated(a.sample)
-        print(_write("synthetic.generated", {"detection": res}, a.corpus or str(a.sample), False, GENERATED_MODES,
-                     "python -m forensic.validation.geomgen generated --sample DIR", a.out))
+        if not a.sample and not a.parquet:
+            ap.error("give --sample DIR or --parquet FILES")
+        res = eval_generated(_parquet_samples(a.parquet) if a.parquet else _folder_samples(a.sample))
+        print(_write("synthetic.generated", {"detection": res}, a.corpus or str(a.sample or "parquet shards"), False,
+                     GENERATED_MODES, "python -m forensic.validation.geomgen generated --parquet SHARDS", a.out))
         print(json.dumps(res, indent=2))
 
 
