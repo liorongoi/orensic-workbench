@@ -57,6 +57,13 @@ Keep the console window open while you work; closing it stops Lucida. The Start 
 also has **Self-test** (checks the installation), **Case data folder** (opens the folder
 where cases are kept), and this **User manual** and the **Algorithm guide**.
 
+**Help inside Lucida.** Click **Help ▾** in the top bar and choose **User manual**, **Algorithm
+guide** or **Installation and settings**. The guide opens in a new browser tab, so your work stays
+as it was. The sign-in page has a **User manual** link too. The guides are built into Lucida, so
+they work offline and always match the installed version. On the Help page, click a guide on the
+left, type in **Find a section** to narrow its contents, and use the browser's find (Ctrl+F, or
+⌘F on a Mac) to search the text.
+
 **From a command line or Docker**, see [deployment.md](deployment.md). Then open
 `http://127.0.0.1:8000` in Chrome, Edge or Firefox.
 
@@ -88,7 +95,7 @@ The case list is the first page. When you open a case the screen has four parts:
 
 ```
 +----------------------------------------------------------------------------------+
-| ◆ Lucida / Case name                          Report ▾   Jobs 1 2   Your name ▾  |
+| ◆ Lucida / Case name                   Report ▾  Help ▾  Jobs 1 2   Your name ▾  |
 +--------------+-----------------------------------------------+-------------------+
 | Evidence   ‹ |  label · size · zoom   Crop  Fit  1:1  Orig.  |  Enhance |       › |
 | [Triage]     |                                               |  Authenticate |   |
@@ -103,8 +110,8 @@ The case list is the first page. When you open a case the screen has four parts:
 +--------------+-----------------------------------------------+-------------------+
 ```
 
-- **Top bar**: the case name, the **Report ▾** menu (see 12), the **Jobs** list (see 13.2) and
-  your account menu.
+- **Top bar**: the case name, the **Report ▾** menu (see 12), the **Help ▾** menu (this manual
+  and the other guides, see 2), the **Jobs** list (see 13.2) and your account menu.
 - **Left panel**: the evidence in the case, with buttons to add files and triage them all.
 - **Centre**: the viewer, with the frame strip underneath for video.
 - **Right panel**: four tabs. **Enhance** builds processing chains. **Authenticate** runs
@@ -464,7 +471,7 @@ and check every frame before release.
 ## 8. Enhancement recipes
 
 These are starting points. Adjust parameters while watching the preview, and compare with the
-original (hold **B**).
+original (hold **B**, or use **Swipe**, **Side by side** or **Flip**; see section 6).
 
 ### 8.1 Read a number plate from video
 
@@ -914,7 +921,7 @@ is in the [README](../README.md#connecting-an-agent). What an agent can and cann
 | Export PNG is greyed out | Save and render first; accept or remove agent proposals; justify any generative step. |
 | "This recorder export cannot be opened directly" | Make a working copy (5.3). |
 | Carved video plays at the wrong speed | Re-convert with the recorder's real frame rate, or use parse if it is offered. |
-| Parse says the codec was not recognised | Try remux, then carve. |
+| Parse fails (a "parser:" error, or the codec was not recognised) | The file may be damaged or a variant of the format. Try remux, then carve. |
 | Double encoding says the codec is not supported | It works on H.264 and MPEG-1/2/4 Part 2 streams, not on H.265. |
 | Face check finds no face | The detector misses small, turned or covered faces; mark them in its settings (**⚙**). |
 | PRNU: "the image is larger than the camera reference" | Build the reference from images at the camera's full resolution. |

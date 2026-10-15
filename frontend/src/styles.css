@@ -346,3 +346,37 @@ details.guide summary { cursor: pointer; font-style: normal; color: var(--muted)
 .result .verdict-line { white-space: normal; }
 .detector.red .detector-name b, .stage-head .light.red + b { color: var(--bad); }
 .removed-chains { margin: -2px 0 8px; }
+
+/* Help: the bundled guides */
+.signin-help { align-self: center; margin-top: 4px; }
+.help { flex: 1; display: grid; grid-template-columns: 280px 1fr; min-height: 0; }
+.help-nav { border-right: 1px solid var(--line); background: var(--panel); padding: 12px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.help-docs { display: flex; flex-direction: column; gap: 4px; }
+.help-docs button { justify-content: flex-start; }
+.help-docs button.active { border-color: var(--accent); color: var(--accent); }
+.help-toc { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; min-height: 0; }
+.help-toc li { margin: 1px 0; }
+.help-toc li.d3 { padding-left: 14px; font-size: 12px; }
+.help-toc a { color: var(--text); text-decoration: none; display: block; padding: 2px 4px; border-radius: 4px; }
+.help-toc li.d3 a { color: var(--muted); }
+.help-toc a:hover { background: var(--panel-2); color: var(--text); }
+.help-body { overflow: auto; min-height: 0; }
+.help-doc { max-width: 860px; margin: 0 auto; padding: 20px 32px 80px; font-size: 14px; line-height: 1.6; }
+.help-doc h1 { font-size: 26px; margin: 8px 0 16px; }
+.help-doc h2 { font-size: 20px; margin: 32px 0 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+.help-doc h3 { font-size: 16px; margin: 22px 0 8px; }
+.help-doc h4 { font-size: 14px; margin: 18px 0 6px; }
+.help-doc a { color: var(--accent); }
+.help-doc code { font-size: 12.5px; background: var(--panel-2); padding: 1px 4px; border-radius: 4px; }
+.help-doc pre { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; overflow: auto; }
+.help-doc pre code { background: none; padding: 0; }
+.help-doc table { border-collapse: collapse; margin: 10px 0; font-size: 13px; display: block; overflow-x: auto; }
+.help-doc th, .help-doc td { border: 1px solid var(--line); padding: 5px 8px; vertical-align: top; text-align: left; }
+.help-doc th { background: var(--panel-2); }
+.help-doc hr { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
+.help-doc blockquote { margin: 10px 0; padding: 4px 12px; border-left: 3px solid var(--line); color: var(--muted); }
+@media (max-width: 760px) {
+  .help { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .help-nav { border-right: none; border-bottom: 1px solid var(--line); max-height: 40vh; }
+  .help-doc { padding: 16px; }
+}
