@@ -25,7 +25,6 @@ cat > "$dest/run.sh" <<RUN
 #!/usr/bin/env bash
 export FORENSIC_DATA_DIR="\${FORENSIC_DATA_DIR:-$dest/data}"
 export FORENSIC_FRONTEND_DIST="$dest/frontend/dist"
-export FORENSIC_DETERMINISTIC=1
 exec "$dest/venv/bin/uvicorn" forensic.api:app --host 127.0.0.1 --port "\${PORT:-8000}"
 RUN
 chmod +x "$dest/run.sh"

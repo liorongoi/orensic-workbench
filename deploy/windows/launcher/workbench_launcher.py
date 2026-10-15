@@ -44,7 +44,6 @@ def configure() -> dict:
         "FORENSIC_FRONTEND_DIST": str(APP / "frontend" / "dist"),
         "FORENSIC_FFMPEG": str(APP / "ffmpeg" / "ffmpeg.exe"),
         "FORENSIC_FFPROBE": str(APP / "ffmpeg" / "ffprobe.exe"),
-        "FORENSIC_DETERMINISTIC": "1",
     }
     if cfg.get("c2pa_trust_anchors"):
         env["FORENSIC_C2PA_TRUST_ANCHORS"] = cfg["c2pa_trust_anchors"]
@@ -53,6 +52,11 @@ def configure() -> dict:
         env["FORENSIC_JOB_WORKERS"] = cfg["job_workers"]
     if cfg.get("gpu_jobs"):
         env["FORENSIC_GPU_JOBS"] = cfg["gpu_jobs"]
+    # Compute settings (see forensic/compute.py); unset means use every core, a share of RAM and the GPU.
+    for key, var in (("threads", "FORENSIC_THREADS"), ("cache_mb", "FORENSIC_CACHE_MB"),
+                     ("frame_cache_mb", "FORENSIC_FRAME_CACHE_MB"), ("ai_device", "FORENSIC_AI_DEVICE")):
+        if cfg.get(key):
+            env[var] = cfg[key]
     for k, v in env.items():
         os.environ.setdefault(k, v)
     # Validation tools call ffmpeg by name; make sure they find the bundled one first.

@@ -13,7 +13,10 @@ dependencies = [
     "reportlab>=4.1",
     "mcp>=2.0",
     "PyWavelets>=1.6",
-    "onnxruntime>=1.17",
+    # DirectML runs the learned models on any DirectX 12 GPU on Windows, with no CUDA install;
+    # it falls back to the CPU on machines without one.
+    "onnxruntime>=1.17; sys_platform != 'win32'",
+    "onnxruntime-directml>=1.20; sys_platform == 'win32'",
     "c2pa-python>=0.38",
     "cryptography>=42",
 ]

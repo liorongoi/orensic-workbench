@@ -12,25 +12,23 @@ outputs) is a later extension of the same document.
 from __future__ import annotations
 
 import hashlib
-import os
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-import cv2
 import numpy as np
 
+from . import compute
 from .db import canonical_json
 from .filters import FilterError, get_filter
 
 GRAPH_SCHEMA = 1
 
-if os.environ.get("FORENSIC_DETERMINISTIC", "1") == "1":
-    # Single-threaded OpenCV removes any dependence on thread scheduling.
-    cv2.setNumThreads(1)
-    cv2.ocl.setUseOpenCL(False)
+# OpenCV splits its work into row blocks, so the result does not depend on the thread
+# count (tests/test_compute.py checks every filter); OpenCL stays off.
+compute.configure_opencv()
 
 
 def normalise(graph: dict) -> dict:
@@ -123,15 +121,17 @@ class RunResult:
         return self.data.ndim == 4
 
 
-SourceLoader = Callable[[dict], np.ndarray]
+SourceLoader = Callable[..., np.ndarray]  # (source, use_cache=True) -> pixels
 
 
 class _Cache:
-    """Small LRU of intermediate results keyed by the hash of the chain prefix."""
+    """LRU of intermediate results keyed by the hash of the chain prefix, bounded in bytes."""
 
-    def __init__(self, max_items: int = 24):
+    def __init__(self, max_items: int = 256, max_bytes: int | None = None):
         self.max_items = max_items
+        self.max_bytes = compute.cache_budget() if max_bytes is None else max_bytes
         self._d: OrderedDict[str, np.ndarray] = OrderedDict()
+        self._bytes = 0
         self._lock = threading.Lock()
 
     def get(self, key):
@@ -142,19 +142,23 @@ class _Cache:
             return v
 
     def put(self, key, value):
-        if value.nbytes > 512 * 1024 * 1024:
+        if self.max_items <= 0 or value.nbytes > self.max_bytes // 2:
             return
         with self._lock:
+            old = self._d.pop(key, None)
+            if old is not None:
+                self._bytes -= old.nbytes
             self._d[key] = value
-            self._d.move_to_end(key)
-            while len(self._d) > self.max_items:
-                self._d.popitem(last=False)
+            self._bytes += value.nbytes
+            while self._d and (len(self._d) > self.max_items or self._bytes > self.max_bytes):
+                _, v = self._d.popitem(last=False)
+                self._bytes -= v.nbytes
 
 
 class Engine:
-    def __init__(self, load_source: SourceLoader, cache_items: int = 24):
+    def __init__(self, load_source: SourceLoader, cache_items: int = 256):
         self.load_source = load_source
-        self.cache = _Cache(cache_items)
+        self.cache = _Cache(cache_items, None if cache_items else 0)
 
     def run(self, graph: dict, upto: str | None = None, use_cache: bool = True) -> RunResult:
         """Execute the chain. `upto` stops after the node with that id (for previews)."""
@@ -163,7 +167,7 @@ class Engine:
         key = graph_hash(prefix)
         data = self.cache.get(key) if use_cache else None
         if data is None:
-            data = self.load_source(g["source"])
+            data = self.load_source(g["source"], use_cache=use_cache)
             data.setflags(write=False)
             if use_cache:
                 self.cache.put(key, data)
@@ -204,7 +208,7 @@ class Engine:
                 )
             out = f.fn(data, params)
         elif data.ndim == 4:
-            out = np.stack([f.fn(frame, params) for frame in data])
+            out = np.stack(compute.pmap(lambda frame: f.fn(frame, params), data))
         else:
             out = f.fn(data, params)
         out = np.asarray(out, dtype=np.float32)

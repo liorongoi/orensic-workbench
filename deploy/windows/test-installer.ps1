@@ -49,7 +49,7 @@ if ($AllUsers -and -not ($acl | Where-Object { $_.IdentityReference -match "\\Fo
 }
 if ($AllUsers) { net localgroup "Forensic Examiners" | Out-Host }
 $programs = if ($AllUsers) { "$env:ProgramData\Microsoft\Windows\Start Menu\Programs" } else { "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" }
-foreach ($l in "Lucida.lnk", "Self-test.lnk", "Case data folder.lnk") {
+foreach ($l in "Lucida.lnk", "Self-test.lnk", "Case data folder.lnk", "User manual.lnk", "Algorithm guide.lnk") {
     if (-not (Test-Path "$programs\Lucida\$l")) { throw "Start menu shortcut missing: $l" }
 }
 Get-Content "$App\BUILDINFO.txt"
@@ -98,7 +98,8 @@ try {
         $ca = "$Data\tls\workbench-ca.crt"
         if (-not (Test-Path $ca)) { throw "no local certificate authority in the case data folder" }
         foreach ($name in "127.0.0.1", "localhost", $env:COMPUTERNAME.ToLower()) {
-            & "$env:SystemRoot\System32\curl.exe" --fail --silent --show-error --cacert $ca "https://${name}:$Port/api/health" | Out-Null
+            # --ssl-no-revoke: an offline authority publishes no revocation list for Windows to check.
+            & "$env:SystemRoot\System32\curl.exe" --fail --silent --show-error --ssl-no-revoke --cacert $ca "https://${name}:$Port/api/health" | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "HTTPS to $name did not verify against the workbench authority" }
         }
         Write-Host "HTTPS verified for 127.0.0.1, localhost and $($env:COMPUTERNAME.ToLower())"

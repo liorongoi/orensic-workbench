@@ -91,7 +91,8 @@ Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "network"; String: "
 Name: "{group}\{#AppName}"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Start Lucida and open it in the browser"
 Name: "{group}\Self-test"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" selftest --pause"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Check the installation and run the acceptance self-test"
 Name: "{group}\Case data folder"; Filename: "{code:DataDir}"
-Name: "{group}\User guide"; Filename: "{app}\docs\README.md"
+Name: "{group}\User manual"; Filename: "{app}\docs\user-manual.md"
+Name: "{group}\Algorithm guide"; Filename: "{app}\docs\algorithms.md"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Start Lucida and open it in the browser"; Tasks: desktopicon
 

@@ -2,7 +2,8 @@
 
 Both invert a known blur described by a point-spread function (PSF): linear
 motion, out-of-focus disk or Gaussian. All arithmetic is NumPy FFT in float64,
-which is deterministic, so a re-run reproduces the result bit for bit.
+which is deterministic, so a re-run reproduces the result bit for bit. The colour
+channels are independent and run in parallel.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import math
 
 import numpy as np
 
+from .. import compute
 from .base import FilterError, Param, register
 
 PSF_PARAMS = [
@@ -98,9 +100,7 @@ def wiener(img, p):
     h, w = padded.shape[:2]
     H = _otf(psf, (h, w))
     G = np.conj(H) / (np.abs(H) ** 2 + p["nsr"])
-    out = np.empty_like(padded)
-    for c in range(3):
-        out[..., c] = np.fft.irfft2(np.fft.rfft2(padded[..., c]) * G, s=(h, w))
+    out = np.dstack(compute.pmap(lambda c: np.fft.irfft2(np.fft.rfft2(padded[..., c]) * G, s=(h, w)), range(3)))
     return np.clip(out[m:-m, m:-m], 0, 1).astype(np.float32)
 
 
@@ -137,9 +137,9 @@ def richardson_lucy(img, p):
     h, w = padded.shape[:2]
     H = _otf(psf, (h, w))
     Hc = np.conj(H)
-    out = np.empty_like(padded)
-    for c in range(3):
-        g = padded[..., c]
+
+    def channel(c):
+        g = np.ascontiguousarray(padded[..., c])
         u = g.copy()
         for _ in range(p["iterations"]):
             blurred = np.fft.irfft2(np.fft.rfft2(u) * H, s=(h, w))
@@ -148,7 +148,9 @@ def richardson_lucy(img, p):
             if p["tv"] > 0:
                 corr = corr / np.maximum(1.0 - p["tv"] * _tv_term(u), 1e-3)
             u = np.clip(u * corr, 0, 2)
-        out[..., c] = u
+        return u
+
+    out = np.dstack(compute.pmap(channel, range(3)))
     return np.clip(out[m:-m, m:-m] - 1e-4, 0, 1).astype(np.float32)
 
 
@@ -182,3 +184,55 @@ def estimate_motion_blur(gray: np.ndarray, max_length: int = 60) -> dict:
     strength = -best[0] / (np.std(cep) + 1e-12)
     return {"length": best[1], "angle": best[2], "strength": round(float(strength), 2),
             "note": "Cepstral estimate; a strength below about 4 means no clear linear motion blur was found."}
+
+
+@register(
+    "deblur.tv",
+    name="Deblur (total-variation deconvolution)",
+    version="1.0.0",
+    category="Deblur",
+    description="Inverts a known blur (motion, defocus or Gaussian) while keeping the result piecewise smooth: it "
+    "looks for the sharpest image that, blurred, matches the evidence, and penalises noise and ripples. Gives "
+    "much less ringing around edges and less noise than Wiener or Richardson-Lucy at the same sharpness, which "
+    "suits plates and text. Raise the regularisation if the result looks flat or cartoon-like only where there "
+    "is noise; lower it for more detail. Only recovers detail that the blur attenuated.",
+    reference="Y. Wang, J. Yang, W. Yin and Y. Zhang, 'A New Alternating Minimization Algorithm for Total Variation "
+    "Image Reconstruction', SIAM J. Imaging Sciences 1(3), 2008; L. I. Rudin, S. Osher and E. Fatemi, 'Nonlinear "
+    "total variation based noise removal algorithms', Physica D 60, 1992.",
+    params=PSF_PARAMS + [
+        Param("regularisation", "float", 0.002, "Regularisation", 1e-5, 0.1, 0.0005,
+              help="Higher suppresses more noise and ringing; 0.001 to 0.005 suits most CCTV stills"),
+        Param("iterations", "int", 3, "Iterations per stage", 1, 20, 1,
+              help="Solved in 9 stages of increasing strictness; more iterations refine each stage"),
+    ],
+)
+def tv_deconv(img, p):
+    """FTVd: half-quadratic splitting for isotropic TV, with every sub-problem solved exactly by FFT."""
+    psf = make_psf(p)
+    m = max(psf.shape)
+    padded = _pad(img.astype(np.float64), m)
+    h, w = padded.shape[:2]
+    K = _otf(psf, (h, w))
+    Dx = _otf(np.array([[0.0, 0.0, 0.0], [0.0, -1.0, 1.0], [0.0, 0.0, 0.0]]), (h, w))
+    Dy = _otf(np.array([[0.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 1.0, 0.0]]), (h, w))
+    K2, D2 = np.abs(K) ** 2, np.abs(Dx) ** 2 + np.abs(Dy) ** 2
+    mu = 1.0 / p["regularisation"]
+
+    def channel(c):
+        f = padded[..., c]
+        KtF = np.conj(K) * np.fft.rfft2(f)
+        x = f.copy()
+        for beta in 2.0 ** np.arange(0, 9):  # continuation: 1, 2, ... 256
+            for _ in range(p["iterations"]):
+                X = np.fft.rfft2(x)
+                gx = np.fft.irfft2(Dx * X, s=(h, w))
+                gy = np.fft.irfft2(Dy * X, s=(h, w))
+                mag = np.sqrt(gx * gx + gy * gy)
+                shrink = np.maximum(mag - 1.0 / beta, 0.0) / np.maximum(mag, 1e-12)
+                wx, wy = gx * shrink, gy * shrink
+                num = np.conj(Dx) * np.fft.rfft2(wx) + np.conj(Dy) * np.fft.rfft2(wy) + (mu / beta) * KtF
+                x = np.fft.irfft2(num / (D2 + (mu / beta) * K2), s=(h, w))
+        return x
+
+    out = np.dstack(compute.pmap(channel, range(3)))
+    return np.clip(out[m:-m, m:-m], 0, 1).astype(np.float32)

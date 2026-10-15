@@ -87,6 +87,34 @@
       "limits": "Learned from natural photographs: predicts plausible detail, which was not necessarily recorded. Trained on bicubic down-sampling, so it fits CCTV compression and blur poorly."
     },
     {
+      "id": "sr.realesrgan_x4plus",
+      "file": "realesrgan_x4plus.onnx",
+      "sha256": "57743a829368064ecb40d10fcca048ad00e2c94f92bbc64e2ce0cf577e5c6f8c",
+      "task": "Single-image super resolution of colour images, 4x, robust to blur, noise and JPEG compression",
+      "architecture": "RRDBNet (ESRGAN generator, 23 residual-in-residual dense blocks, 16.7M parameters) trained adversarially",
+      "source": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth (SHA-256 4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1), converted to ONNX with tools/convert_realesrgan.py; weights unchanged",
+      "limits": "Trained with an adversarial loss to produce sharp, natural-looking texture: it invents detail, including plausible but wrong characters, faces and texture. Its output is an investigative aid only and must never be read as recorded detail.",
+      "kind": "enhancement",
+      "reference": "X. Wang, L. Xie, C. Dong and Y. Shan, 'Real-ESRGAN: Training Real-World Blind Super-Resolution with Pure Synthetic Data', ICCV Workshops 2021.",
+      "licence": "BSD-3-Clause",
+      "training_data": "DIV2K, Flickr2K and OutdoorSceneTraining photographs, degraded on the fly with a synthetic second-order model of real cameras: blur, resizing, sensor noise and JPEG compression (per the paper).",
+      "generative": true
+    },
+    {
+      "id": "sr.realesrgan_compact_x4",
+      "file": "realesrgan_compact_x4.onnx",
+      "sha256": "f41eee104a9a6f93feb4916442dbc08415cd6b0a07c200612c038fc7f19c6bb7",
+      "task": "Single-image super resolution of colour images, 4x (small, fast model)",
+      "architecture": "SRVGGNetCompact (32 plain 3x3 convolutions with PReLU, sub-pixel output; 1.2M parameters) trained adversarially",
+      "source": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth (SHA-256 8dc7edb9ac80ccdc30c3a5dca6616509367f05fbc184ad95b731f05bece96292), converted to ONNX with tools/convert_realesrgan.py; weights unchanged",
+      "limits": "As for sr.realesrgan_x4plus, with less capacity: fewer invented textures but weaker on heavy compression.",
+      "kind": "enhancement",
+      "reference": "X. Wang, L. Xie, C. Dong and Y. Shan, 'Real-ESRGAN: Training Real-World Blind Super-Resolution with Pure Synthetic Data', ICCV Workshops 2021.",
+      "licence": "BSD-3-Clause",
+      "training_data": "DIV2K, Flickr2K and OutdoorSceneTraining photographs, degraded on the fly with a synthetic second-order model of real cameras: blur, resizing, sensor noise and JPEG compression (per the paper).",
+      "generative": true
+    },
+    {
       "id": "face.yunet",
       "file": "face_detection_yunet_2026may.onnx",
       "sha256": "ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0",

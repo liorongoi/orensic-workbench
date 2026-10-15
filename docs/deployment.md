@@ -27,12 +27,16 @@ At the end it offers the acceptance self-test: it re-hashes every installed file
 installer's `SHA256SUMS`, then runs `forensic.selftest`, and saves its output under
 `<case data>\logs`. Start Lucida from **Start > Lucida**: a console window
 shows the address and log, and the browser opens Lucida; closing the window stops it.
-The Start menu also has **Self-test** and **Case data folder**.
+The Start menu also has **Self-test**, **Case data folder**, **User manual** and **Algorithm guide**.
 
 Settings live in `<install folder>\workbench.ini` (`data_dir`, `import_dir`, `host`, `port`, and
 optionally `c2pa_trust_anchors`, `allowed_hosts`, the extra names browsers may use to reach it,
 `job_workers` and `gpu_jobs`, and `network`, `tls_cert` and `tls_key`; see
-[Several examiners](#several-examiners)). Running a newer installer upgrades in place and keeps
+[Several examiners](#several-examiners)). Compute settings are
+optional too: `threads` (default every core), `cache_mb` (RAM for intermediate results, default a
+quarter of RAM up to 32 GB), `frame_cache_mb` (decoded video frames, default an eighth up to 16 GB)
+and `ai_device` (`auto`, `gpu` or `cpu`; auto uses the GPU through DirectML when it reproduces results
+bit for bit). Running a newer installer upgrades in place and keeps
 these settings and the case data. Silent installation for managed rollouts:
 
 ```
@@ -153,7 +157,7 @@ python -m forensic.selftest
 ```
 
 Checks FFmpeg, re-hashes every model, checks ONNX Runtime gives bit-identical output on this
-CPU, loads the face detector and the C2PA reader, then runs a small case end to end
+machine and names the device (GPU or CPU) the models run on, loads the face detector and the C2PA reader, then runs a small case end to end
 (ingest, render, reproduce, triage, measure, review, PDF report) in a temporary folder. Run
 it after every installation or upgrade and keep its output with the lab's validation records.
 
