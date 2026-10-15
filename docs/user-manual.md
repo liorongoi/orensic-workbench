@@ -267,8 +267,10 @@ On the **Enhance** tab:
   variation without losing the version you have.
 - **🗑** removes the open chain. Optionally type a reason, then click **Remove**. The chain is
   hidden, not deleted: it stays in the case record and the removal is logged. Results already
-  rendered from it remain in the audit log. There is no restore for a removed chain in this
-  version, so duplicate it first if you may want it back.
+  rendered from it remain in the audit log.
+- To bring a chain back, click **Show removed chains (n)** below the chain picker, then
+  **Restore** next to it. Hover a removed chain to see who removed it and why. The restored
+  chain opens, and the restore is logged.
 
 You can keep several chains on the same evidence, for example to compare two approaches.
 

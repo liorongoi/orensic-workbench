@@ -106,7 +106,8 @@ Removing an evidence item or a chain from a case is a logged hide, not a deletio
 gets a `removed` record (who, when, an optional reason of up to 500 characters), the audit
 log gets an `evidence.remove` or `chain.remove` entry, working copies and chains of a removed
 item are hidden with it, and the stored original is untouched. **Restore** clears the record
-and logs `evidence.restore`. Only a human examiner can do either. A real delete was rejected
+and logs `evidence.restore` or `chain.restore` (a chain of a removed item comes back only with
+its item). Only a human examiner can do either. A real delete was rejected
 because the case record must still show everything that was received, including what was
 later set aside and why; the report lists removed items in its evidence section.
 
