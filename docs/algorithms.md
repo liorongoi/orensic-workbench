@@ -192,6 +192,37 @@ proprietary DVR formats, it is open source, and its exact version is recorded in
 report so a decode can be repeated. Commercial SDKs from DVR vendors were not used: they
 are closed, platform-specific, and their output cannot be independently checked.
 
+### 3.3 Macroblocks, QP and motion vectors (`forensic/codecview.py`)
+
+The **▦ MB** view shows how the encoder coded each 16×16 macroblock of a frame. Nothing is
+estimated: everything is what FFmpeg's own decoder reports while decoding the original.
+
+- **Block class and QP.** FFmpeg is run with `-debug mb_type+qp`, which prints one line per
+  macroblock row for every decoded frame: each cell is the block's quantiser followed by a
+  type symbol (`libavcodec/mpegutils.c`). The symbols are grouped into intra (`I`, `i`, `A`,
+  PCM), forward (`>`, and `G` global motion compensation), backward (`<`), bi (`X`), direct
+  (`D`) and skip (`S`, `d`, `g`). A line is taken as a row only when it has exactly one cell per
+  macroblock column, so other decoder log lines are ignored. Field-coded pictures report half
+  the rows and are stretched over the frame. Frames are counted from the first decoded frame,
+  so frame n is the same frame as everywhere else in Lucida. Because the decoder has to print
+  every frame from the start, the frames from n onward are decoded in a window of 24 and kept
+  in a cache of 2000 frames, so stepping forward is quick.
+- **QP heat map.** The quantiser is mapped onto a fixed scale per codec (0-51 for H.264, 1-31
+  for the MPEG family and H.263) with the Turbo colour map, so the same colour means the same
+  QP on every frame and every file of that codec.
+- **Motion vectors.** FFmpeg's `codecview` filter, with `+export_mvs`, draws forward and
+  backward vectors separately on a black frame. Lucida uses those drawings as masks and
+  colours them yellow (forward) and cyan (backward) over the real frame.
+
+**Why the decoder's own data.** The point of the view is to show what the recording actually
+contains: which regions were refreshed with new detail (intra, low QP) and which were copied
+or predicted from other frames. Re-estimating motion with optical flow would show plausible
+motion, not what the encoder coded. Parsing the bitstream with a separate tool (for example
+a stream analyser) would duplicate a decoder that is already bundled, already recorded in
+every report, and already used for the pixels themselves. The cost is that only codecs whose
+FFmpeg decoder exports this information are covered: H.264, MPEG-1/2, MPEG-4 Part 2 and H.263,
+but not H.265 or Motion JPEG. The view is read-only and changes no chain.
+
 ---
 
 ## 4. The processing chain engine

@@ -212,8 +212,9 @@ timestamps. Lost RTP packets are counted and the frames around them may show dam
 
 1. Read the identification line (for example "Identified as Dahua DAV · carries H264 video").
 2. Choose a method:
-   - **parse** (offered when Lucida has its own parser for the format, and then chosen by
-     default) reads the vendor file record by record. Every compressed frame stays
+   - **parse** (offered when Lucida has its own parser for the format, and chosen by default
+     unless the file is an AVI or transport stream that already plays) reads the vendor file
+     record by record. Every compressed frame stays
      byte-identical and keeps the recorder's own timing: per-frame times, the recorder clock and
      the frame rate it wrote. Gaps (missing frames) and timestamps that go backwards are listed.
      For Dahua files holding several cameras, the first channel is extracted and the others are
@@ -273,6 +274,7 @@ Removing evidence is a human action: an AI agent cannot remove or restore eviden
   Hold **B** at any time to peek at the original. If the chain changed the image size, the
   original is scaled onto the result so both line up (after a crop it is scaled to the same
   height). The pixel bar reads the original's own pixel when the cursor is over it.
+- **▦ MB** (or key **M**, video only): how the encoder coded each block of the frame (see 6.3).
 - **⛶ Crop** (or key **C**): draw a crop box on the image (see 7.5).
 - **? shortcuts** at the bottom right lists the keyboard shortcuts when you hover it.
 
@@ -311,7 +313,8 @@ viewer picks what to draw:
 Hover a block to read its position, class and QP in the status bar. **Flip**, **Swipe** and
 **Side by side** compare the overlay with the plain frame. Use it to pick the frames worth
 enhancing or averaging (intra blocks and a low QP carry the most real detail) and to see which
-regions were only copied from another frame. Read-only: nothing is recorded in the audit trail.
+regions were only copied from another frame. It only reads the video and changes no chain.
+How the data is obtained is in the algorithm guide, section 3.3.
 
 ---
 
@@ -950,6 +953,7 @@ is in the [README](../README.md#connecting-an-agent). What an agent can and cann
 | A multi-frame filter says it needs a frame range | Set **[ In** and **Out ]** on a video (7.6). |
 | Export PNG is greyed out | Save and render first; accept or remove agent proposals; justify any generative step. |
 | "This recorder export cannot be opened directly" | Make a working copy (5.3). |
+| A recorder file is refused as a closed format | Export a standard MP4 or AVI from the vendor's software, as the message says (5.3). |
 | Carved video plays at the wrong speed | Re-convert with the recorder's real frame rate, or use parse if it is offered. |
 | Parse fails (a "parser:" error, or the codec was not recognised) | The file may be damaged or a variant of the format. Try remux, then carve. |
 | ▦ MB is missing for a video | Macroblocks are read from the decoder for H.264 and MPEG-1/2/4 Part 2 and H.263, not H.265 or Motion JPEG. |
