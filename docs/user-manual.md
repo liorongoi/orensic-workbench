@@ -37,7 +37,7 @@ Five rules shape how the workbench behaves. Knowing them explains most of what y
    read-only, and never opened for writing again. Everything you do produces new results
    linked to the original.
 2. **Everything is recorded.** Every action is written to the case's audit log under your
-   examiner name, in a hash-chained log that shows if anyone edits it.
+   account's full name, in a hash-chained log that shows if anyone edits it.
 3. **The preview is not evidence.** What you see while editing is a live preview. A result
    becomes evidence only when you **Render** it: the saved chain is run from the original and
    its output hash is recorded.
@@ -60,10 +60,25 @@ where cases are kept), and this **User manual** and the **Algorithm guide**.
 **From a command line or Docker**, see [deployment.md](deployment.md). Then open
 `http://127.0.0.1:8000` in Chrome, Edge or Firefox.
 
-**Your examiner name.** The first time you open the workbench in a browser it asks for your
-name. Every action is recorded under it. To change it, click **change** next to your name at
-the top right. The name is remembered by that browser, so each examiner should use their own
-Windows account (and therefore their own browser profile).
+**First run: the administrator account.** The first time anyone opens a fresh installation,
+the workbench asks for the **administrator** account: a user name (2 to 32 lower-case letters,
+digits, dots, dashes or underscores), your full name (it appears in the audit log and reports),
+and a password of at least 8 characters, typed twice. Click the button and you are signed in.
+The administrator then adds the other examiners (see 13.1).
+
+**Signing in.** After that, the workbench opens on a sign-in page. Type your user name and
+password. A session lasts 12 hours; after that, or after **Sign out**, you sign in again. Five
+wrong passwords in a row lock that user name for one minute.
+
+**Your account.** Your full name is shown at the top right. Every action you take is recorded in
+the audit log under that name; the workbench takes it from the signed-in account, so nobody can
+act under another examiner's name. Click your name for **Change password** and **Sign out**
+(and **Users**, if you are an administrator).
+
+**Where you can sign in.** As installed, the workbench answers only on the workbench machine
+itself (address `127.0.0.1`), so every examiner signs in at that computer. Opening it to other
+PCs on the lab network is an administrator setting described in
+[deployment.md](deployment.md#several-examiners).
 
 ---
 
@@ -73,7 +88,7 @@ The case list is the first page. When you open a case the screen has four parts:
 
 ```
 +----------------------------------------------------------------------------------+
-| Forensic Workbench / Case name                        Report ▾      Your name    |
+| Forensic Workbench / Case name                Report ▾   Jobs 1 2   Your name ▾  |
 +--------------+-----------------------------------------------+-------------------+
 | Evidence   ‹ |  label · size · zoom   Crop  Fit  1:1  Orig.  |  Enhance |       › |
 | [Triage]     |                                               |  Authenticate |   |
@@ -88,7 +103,8 @@ The case list is the first page. When you open a case the screen has four parts:
 +--------------+-----------------------------------------------+-------------------+
 ```
 
-- **Top bar**: the case name, the **Report ▾** menu (see 12) and your examiner name.
+- **Top bar**: the case name, the **Report ▾** menu (see 12), the **Jobs** list (see 13.2) and
+  your account menu.
 - **Left panel**: the evidence in the case, with buttons to add files and triage them all.
 - **Centre**: the viewer, with the frame strip underneath for video.
 - **Right panel**: four tabs. **Enhance** builds processing chains. **Authenticate** runs
@@ -652,18 +668,80 @@ case.
 
 ## 13. Working with several examiners
 
-In this version the workbench is designed for one machine with examiners taking turns, or several
-examiners on the same machine under their own Windows accounts:
+Several examiners can use the workbench at the same time, each signed in to their own account.
+Heavy work goes through one shared job queue, so the machine is never asked to do more at once
+than it can, and everyone can see what is running.
 
-- When installed **for all users**, case data is shared by the members of the local **Forensic
-  Examiners** Windows group (see [deployment.md](deployment.md)).
-- Each examiner's actions are recorded under the examiner name set in their browser.
-- Long operations (rendering a long range, multi-frame super resolution, PRNU with scale search,
-  face checks on long videos, the review, the PDF report) run one at a time per request; the button
-  shows a busy state until they finish.
+### 13.1 Accounts (administrators)
 
-A shared job queue, with a view of everyone's running and waiting jobs, is being added. This section
-will be updated when it is available.
+Click your name at the top right, then **Users**. The list shows every account with its full
+name, user name and role.
+
+- **Add an examiner**: at the bottom, type a user name, the examiner's full name and a first
+  password (8 or more characters), choose **Examiner** or **Administrator**, and click **Add**.
+  Give the examiner the password; they can change it with **Change password**. Two accounts
+  cannot share a full name, because the audit log must tell them apart.
+- **Change a role**: pick **Examiner** or **Administrator** in the account's row. Administrators
+  can manage accounts; otherwise both roles work the same way. There must always be at least one
+  active administrator, and you cannot change your own role.
+- **Reset a password**: click **Reset password** and type the new one. The account's open
+  sessions end, so the examiner must sign in again with the new password.
+- **Disable an account**: click **Disable**. The account is signed out at once and can no longer
+  sign in. Its past actions stay in the audit log under its name. **Enable** brings it back.
+  Accounts are disabled rather than deleted so that the log always names a known person.
+
+Creating accounts and changes to them are written to the audit log.
+
+### 13.2 The job queue
+
+These operations are queued: rendering and verifying a chain, every analysis, converting a
+recorder export, the Smart Report, Triage, building a camera reference, the independent review,
+and the reports (HTML, PDF and JSON bundle). When you start one, the button shows that it is busy until the job
+has run, as before; if others are using the machine it may wait its turn first.
+
+Click **Jobs** in the top bar to see the queue. The button shows two counts: jobs running and
+jobs waiting. The list shows, for every examiner:
+
+- a dot for the job's state (running, waiting, done, failed or cancelled);
+- what it is (for example "Render chain", "Analysis") and what it works on, with a link to its
+  case. A **GPU** badge marks jobs that run a learned model on the graphics card;
+- who started it;
+- for a waiting job its place in line (**#1** is next), for a running job how long it has run,
+  and for a finished job how long it took. A failed job shows its error.
+
+The header shows how many CPU and GPU places are in use (for example "CPU 3/4 · GPU 1/1") and
+how many jobs are waiting. Tick **Mine** to see only your own jobs. Below the active jobs,
+**Recent** lists the latest finished ones. Your own jobs are highlighted.
+
+**Cancelling**: click **✕** on a waiting job to take it out of the queue. You can cancel your
+own jobs; an administrator can cancel anyone's. A job that has already started runs to the end.
+
+**Taking turns**: when a place frees up, the next job goes to the examiner with the fewest jobs
+running, then to whoever has waited longest for a turn. If you start twenty analyses, a
+colleague's single render runs as soon as the next place frees up instead of waiting behind
+all of yours. One examiner can have up to 50
+jobs waiting at a time.
+
+**If the workbench is restarted**, jobs that were running are marked failed (start them again)
+and jobs that were waiting run when it is back.
+
+### 13.3 Settings for the administrator
+
+How many jobs run at once is set in `workbench.ini` in the installation folder:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `job_workers` | 4 | Jobs without a learned model (most filters and analyses) that run at the same time. |
+| `gpu_jobs` | 1 | Jobs that run a learned model on the graphics card at the same time. |
+
+On a 128 GB machine with an RTX A4000 (16 GB), `job_workers = 6` and `gpu_jobs = 1` are a
+reasonable start. Raise `gpu_jobs` to 2 only if the models in use fit twice in the card's
+memory. Restart the workbench after changing them. The same values can be set with the
+environment variables `FORENSIC_JOB_WORKERS` and `FORENSIC_GPU_JOBS`.
+
+Case data is shared by everyone who signs in. When installed **for all users**, the case data
+folder is shared by the members of the local **Forensic Examiners** Windows group (see
+[deployment.md](deployment.md)).
 
 ---
 
@@ -678,6 +756,8 @@ is in the [README](../README.md#connecting-an-agent). What an agent can and cann
 - It cannot accept its own proposals, cannot remove, disable or reorder your steps, and cannot write
   the justification for a generative step.
 - Every agent action is logged with the agent's name and model.
+- In this version agents run their work directly, not through the shared job queue, so their jobs
+  do not appear under **Jobs** and do not wait their turn.
 
 ---
 
@@ -696,6 +776,11 @@ is in the [README](../README.md#connecting-an-agent). What an agent can and cann
 | PRNU: "the image is larger than the camera reference" | Build the reference from images at the camera's full resolution. |
 | The browser shows "Invalid host header" | You are reaching the workbench by a name other than 127.0.0.1 or localhost; an administrator adds it to `allowed_hosts` in `workbench.ini`. |
 | The preview says "Updating preview..." for a long time | Heavy steps on full frames are slow. Crop first, or switch heavy steps off while adjusting earlier ones. |
+| "too many wrong passwords; wait a minute and try again" | Wait one minute. If the password is forgotten, an administrator resets it (13.1). |
+| "this account is disabled" | Ask an administrator to enable it (13.1). |
+| A button stays busy for a long time | Your job may be waiting its turn. Open **Jobs** to see its place in line. |
+| "you already have 50 jobs waiting" | Cancel some under **Jobs**, or wait for them to run. |
+| A job failed with "the workbench was restarted while this job ran" | Start it again. |
 | Verify says "Did not reproduce" | Report it: it means the software or a model file changed. Run **Self-test** and the reviewer. |
 
 After any installation or upgrade, run **Start > Forensic Workbench > Self-test** and keep its output

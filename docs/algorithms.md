@@ -31,7 +31,7 @@ Contents
 18. [Recorder (DVR) exports](#18-recorder-dvr-exports)
 19. [Built-in agents: triage, planner, reviewer](#19-built-in-agents-triage-planner-reviewer)
 20. [How detector accuracy is measured](#20-how-detector-accuracy-is-measured)
-21. [Performance and determinism](#21-performance-and-determinism)
+21. [Performance, determinism and the job queue](#21-performance-determinism-and-the-job-queue)
 22. [References](#22-references)
 
 ---
@@ -1065,7 +1065,7 @@ Dresden, VISION) and on the lab's own material before relying on a detector in c
 
 ---
 
-## 21. Performance and determinism
+## 21. Performance, determinism and the job queue
 
 On this version every algorithm runs on the CPU and, by design, on **one thread**:
 
@@ -1079,10 +1079,73 @@ workstation most cores sit idle, and the slowest operations (non-local means on 
 Richardson-Lucy with many iterations, multi-frame super resolution over long ranges, PRNU with
 scale search, face checks on long videos) can take seconds to minutes. The GPU is not used.
 
-Work under way in parallel will change this, and this section and the affected algorithm sections
-will be updated when it lands: faster implementations and use of the workstation's GPU and cores
-where results can still be reproduced, and a job queue so several examiners can run long jobs at
-the same time and see their progress.
+Work under way in parallel will make the individual algorithms faster, using the workstation's
+GPU and cores where results can still be reproduced; this section and the affected algorithm
+sections will be updated when it lands.
+
+### 21.1 Several examiners: the job queue (`forensic/jobs.py`)
+
+**What it does.** Every heavy operation started from the interface (render and verify a chain,
+each analysis, recorder conversion, Smart Report, triage, camera reference, the review, the
+reports) becomes a job in a queue kept in the case database. Jobs run in two lanes:
+
+- the **GPU lane** takes jobs that run a learned model (an AI filter in the chain, an AI
+  analysis, or a review or report that will re-run one). It runs **one job at a time** by default
+  (`gpu_jobs` in `workbench.ini`, or `FORENSIC_GPU_JOBS`);
+- the **CPU lane** takes everything else, **four jobs at a time** by default (`job_workers`, or
+  `FORENSIC_JOB_WORKERS`).
+
+When a place in a lane frees up, the next job goes to the examiner with the **fewest jobs
+running** in that lane, then to the examiner whose last job **started longest ago**, then to the
+oldest request. Each examiner may have at most 50 jobs waiting. Waiting jobs can be cancelled by
+their owner or an administrator; running jobs are not interrupted, because a half-finished
+render or analysis would leave nothing useful. A job that was running when the workbench stopped
+is marked failed on restart, and waiting jobs resume.
+
+**Why two lanes.** The models share one graphics card (an RTX A4000 has 16 GB). Two models
+loading at once can exhaust its memory and fail, or thrash, so model jobs are serialised by
+default; an administrator can allow two if the models fit twice. Model-free work does not touch
+the card, so it should not wait behind a slow model job, and a separate lane lets it continue. (In
+this version the models themselves still run on the CPU, as described above; the lane is in
+place for when they move to the card, and limiting them to one at a time already bounds their
+memory use.)
+
+**Why four CPU jobs.** Each algorithm runs single-threaded for reproducibility (above), so
+throughput comes from running several jobs side by side. Four leaves cores and memory for the
+interactive previews of everyone using the machine; on a 128 GB workstation six is a reasonable
+setting. More jobs than that mostly compete for memory bandwidth on large frames.
+
+**Why examiners take turns.** A plain first-come, first-served queue lets one examiner's batch
+(for example triage of a 200-item case) hold up every other examiner's single render. Fair
+queuing by running-job count, then by time since last turn, gives each examiner a share of the
+machine regardless of how much they queued. It is the round-robin idea used by operating-system
+and cluster schedulers, reduced to what a single lab machine needs.
+
+**Why it does not change results.** Scheduling decides only when a job runs. Each job reads the
+original, runs single-threaded and records its output hash exactly as before, so a result is
+identical however busy the machine was. What a job does is logged under the account that
+started it.
+
+**Alternatives considered.**
+
+| Alternative | Why not |
+|---|---|
+| No queue, run each request at once (the previous version) | Several examiners could overload the machine and its one GPU, and nobody could see what was running. |
+| First come, first served | One large batch blocks everyone else. |
+| Celery or RQ with Redis | An extra service to install, secure and keep running on an offline machine, for one computer's workload. |
+| Strict priorities (for example urgent cases first) | Needs someone to set and police priorities; can starve low-priority work. Can be added later on the same queue table. |
+
+### 21.2 Accounts (`forensic/accounts.py`)
+
+The workbench keeps its own accounts because the lab machine is offline and cannot reach a
+directory service. Passwords are stored as **scrypt** hashes (N = 2^14, r = 8, p = 1, about 50 ms
+per sign-in) with a random salt; scrypt was chosen over plain salted SHA-256 because it is
+deliberately slow and memory-hard, which makes guessing a stolen password file expensive, and
+over bcrypt or Argon2 because it is in Python's standard library and adds no dependency. Sessions
+last 12 hours in an HttpOnly, SameSite=Strict cookie; five wrong passwords lock a user name for a
+minute. The actor recorded in the audit log is taken from the signed-in account, never from
+anything the browser sends, so the log's "who" is as trustworthy as the sign-in. Accounts are
+disabled, not deleted, so every name in the log stays tied to a known person.
 
 ---
 
