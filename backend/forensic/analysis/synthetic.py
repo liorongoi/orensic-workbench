@@ -373,7 +373,8 @@ def camera_traces(ctx: AnalysisContext, p: dict) -> AnalysisResult:
 
 
 def _detectors() -> list[dict]:
-    return [m for m in models.manifest() if m["kind"] == "detector"]
+    # the bundled detector has its own analysis (synthetic.generated); this slot runs the lab's own
+    return [m for m in models.manifest() if m["kind"] == "detector" and not m.get("bundled")]
 
 
 def _prepare(img: np.ndarray, spec: dict) -> list[tuple[np.ndarray, tuple[int, int, int, int]]]:
@@ -431,8 +432,8 @@ def _activate(raw: np.ndarray, spec: dict) -> float:
     category="Synthetic media",
     description="Runs a learned AI-generated-image detector that the lab has installed, licensed and validated "
     "(an ONNX model with a model card: training data, training date, version and measured accuracy). The score "
-    "and the model's identity and weights hash are recorded. No detector ships with the workbench: published "
-    "ones carry non-commercial licences or have not been validated on current generators.",
+    "and the model's identity and weights hash are recorded. The bundled generated-image detector has its own "
+    "entry; this one runs a detector the lab adds, for example one trained on newer generators.",
     reference="Method depends on the installed model; its card's reference is printed with the result (for example "
     "U. Ojha, Y. Li and Y. J. Lee, 'Towards Universal Fake Image Detectors that Generalize Across Generative "
     "Models', CVPR 2023; D. Cozzolino et al., 'Raising the Bar of AI-generated Image Detection with CLIP', CVPR "

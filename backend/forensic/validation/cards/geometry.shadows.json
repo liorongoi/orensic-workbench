@@ -1,0 +1,47 @@
+{
+  "detector": "geometry.shadows",
+  "name": "Shadow consistency",
+  "version": "1.0.0",
+  "validated_on": "2026-10-15",
+  "corpus": "seeded synthetic constraint sets (forensic.validation.geomgen)",
+  "seeded": true,
+  "results": {
+    "detection": {
+      "task": "Is one constraint inconsistent with the others (as an object pasted in under another light or perspective)?",
+      "positives": "120 sets of 3, 5 or 8 constraints per angle, one turned by the stated angle",
+      "negatives": "120 consistent sets with simulated click error (sigma 1 and 2 px)",
+      "tolerance_deg": 2.0,
+      "click_error_px": 2.0,
+      "true_positive_rate": 0.8417,
+      "false_positive_rate": 0.0,
+      "tpr_by_turn_angle": {
+        "5 deg": 0.0417,
+        "10 deg": 0.4833,
+        "20 deg": 0.8417,
+        "45 deg": 0.925
+      },
+      "tpr_at_20_deg_by_constraints": {
+        "3 constraints": 0.5789,
+        "5 constraints": 0.9375,
+        "8 constraints": 0.98
+      },
+      "fpr_by_click_error": {
+        "click error sigma 1 px": 0.0,
+        "click error sigma 2 px": 0.0
+      }
+    }
+  },
+  "known_failure_modes": [
+    "Detects a conflict only when the turned constraint leaves the others' feasible region: a pasted object lit from a similar direction (small angle) passes, and with few constraints the region is wide (see tpr_by_turn_angle).",
+    "Wrongly paired shadow and object points, extended or diffuse lights, and shadows on non-planar ground produce false conflicts; synthetic constraints cannot measure how often examiners mis-pair points."
+  ],
+  "software": {
+    "forensic_workbench": "0.3.0",
+    "numpy": "2.5.3",
+    "opencv": "5.0.0",
+    "pillow": "12.3.0",
+    "onnxruntime": "1.29.0",
+    "python": "3.13.16"
+  },
+  "how_to_reproduce": "python -m forensic.validation.geomgen geometry"
+}

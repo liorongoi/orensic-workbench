@@ -51,7 +51,7 @@ function cardLine(a: AnalysisSchema): string | null {
     | { true_positive_rate?: number; false_positive_rate?: number }
     | undefined;
   if (!r || r.true_positive_rate === undefined) return null;
-  return `Validated ${c.validated_on}: detects ${Math.round((r.true_positive_rate ?? 0) * 100)} %, false alarms ${((r.false_positive_rate ?? 0) * 100).toFixed(1)} % (synthetic corpus; see card)`;
+  return `Validated ${c.validated_on}: detects ${Math.round((r.true_positive_rate ?? 0) * 100)} %, false alarms ${((r.false_positive_rate ?? 0) * 100).toFixed(1)} % (${c.seeded === false ? "held-out real data" : "synthetic corpus"}; see card)`;
 }
 
 function TriageBox({ evidence, triage, onTriage }: { evidence: Evidence; triage: Triage | null; onTriage: (t: Triage) => void }) {

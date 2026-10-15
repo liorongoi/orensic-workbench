@@ -560,7 +560,8 @@ export function Workspace({ caseId, filters, analyses }: Props) {
     }
   } else if (tab === "authenticate") {
     for (const [k, pts] of Object.entries(mpoints)) {
-      if (k.startsWith("auth:") && pts.length) overlays.push({ points: pts, color: "#ffcf3f", mode: "rect", label: k.split(":")[2] });
+      // geometric checks are drawn as the clicked pairs (shadow to object, object to reflection, line points)
+      if (k.startsWith("auth:") && pts.length) overlays.push({ points: pts, color: "#ffcf3f", mode: k.startsWith("auth:geometry.") ? "segments" : "rect", label: k.split(":")[2] });
     }
   } else if (tab === "enhance" && mpoints.plan_roi?.length) {
     overlays.push({ points: mpoints.plan_roi, color: "#3fe08a", mode: "rect", label: "planner region" });

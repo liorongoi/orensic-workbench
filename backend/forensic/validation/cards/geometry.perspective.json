@@ -1,0 +1,47 @@
+{
+  "detector": "geometry.perspective",
+  "name": "Perspective consistency",
+  "version": "1.0.0",
+  "validated_on": "2026-10-15",
+  "corpus": "seeded synthetic constraint sets (forensic.validation.geomgen)",
+  "seeded": true,
+  "results": {
+    "detection": {
+      "task": "Is one constraint inconsistent with the others (as an object pasted in under another light or perspective)?",
+      "positives": "120 sets of 3, 5 or 8 constraints per angle, one turned by the stated angle",
+      "negatives": "120 consistent sets with simulated click error (sigma 1 and 2 px)",
+      "tolerance_deg": 2.0,
+      "click_error_px": 2.0,
+      "true_positive_rate": 0.8833,
+      "false_positive_rate": 0.0,
+      "tpr_by_turn_angle": {
+        "5 deg": 0.0417,
+        "10 deg": 0.5583,
+        "20 deg": 0.8833,
+        "45 deg": 0.9417
+      },
+      "tpr_at_20_deg_by_constraints": {
+        "3 constraints": 0.7317,
+        "5 constraints": 0.9062,
+        "8 constraints": 1.0
+      },
+      "fpr_by_click_error": {
+        "click error sigma 1 px": 0.0,
+        "click error sigma 2 px": 0.0
+      }
+    }
+  },
+  "known_failure_modes": [
+    "Lens distortion bends straight lines and can create false conflicts; use lens-corrected images.",
+    "Lines that are only nearly parallel in the scene, or that belong to different directions, produce false conflicts."
+  ],
+  "software": {
+    "forensic_workbench": "0.3.0",
+    "numpy": "2.5.3",
+    "opencv": "5.0.0",
+    "pillow": "12.3.0",
+    "onnxruntime": "1.29.0",
+    "python": "3.13.16"
+  },
+  "how_to_reproduce": "python -m forensic.validation.geomgen geometry"
+}
