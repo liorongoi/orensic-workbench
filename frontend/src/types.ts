@@ -356,3 +356,28 @@ export interface JobOverview {
   active: Job[];
   recent: Job[];
 }
+
+export type CodecLayer = "type" | "qp" | "none";
+
+export interface CodecSettings {
+  layer: CodecLayer;
+  mv: boolean;
+  grid: boolean;
+}
+
+/** How the encoder coded one video frame, per 16×16 macroblock. */
+export interface CodecInfo {
+  frame: number;
+  codec: string;
+  type: string;
+  mb_size: number;
+  cols: number;
+  rows: number;
+  counts: Record<string, number>;
+  share: Record<string, number>;
+  qp: { min: number; max: number; mean: number; scale: [number, number] };
+  /** One letter per macroblock: i intra, f forward, b backward, B bi, d direct, s skip, o other. */
+  kinds: string[];
+  qp_grid: number[][];
+  legend: { id: string; label: string; color: string }[];
+}

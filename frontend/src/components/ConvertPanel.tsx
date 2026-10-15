@@ -12,7 +12,12 @@ interface Props {
 export function ConvertPanel({ evidence, methods, onConverted }: Props) {
   const ident = evidence.probe.identified;
   const [method, setMethod] = useState(
-    ident?.parser ? "parse" : evidence.media_type === "container" && !ident?.family ? "carve" : "remux",
+    // Standard containers that already play keep remux as the default; parse is still offered for their timing check.
+    ident?.parser && (evidence.media_type === "container" || !["avi", "mpeg_ts"].includes(ident.family ?? ""))
+      ? "parse"
+      : evidence.media_type === "container" && !ident?.family
+        ? "carve"
+        : "remux",
   );
   const [fps, setFps] = useState(25);
   const [busy, setBusy] = useState(false);

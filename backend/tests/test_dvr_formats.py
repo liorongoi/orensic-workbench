@@ -32,7 +32,7 @@ def _framemd5(data_or_path, tmp_path, fmt=None):
         src = tmp_path / f"es.{fmt}"
         src.write_bytes(data_or_path)
     out = subprocess.run(["ffmpeg", "-v", "error", *(["-f", fmt] if fmt and isinstance(data_or_path, bytes) else []),
-                          "-i", str(src), "-map", "0:v:0", "-f", "framemd5", "-"], capture_output=True, check=True).stdout
+                          "-i", str(src), "-map", "0:v:0", "-fps_mode", "passthrough", "-f", "framemd5", "-"], capture_output=True, check=True).stdout
     return [line.split(b",")[-1].strip() for line in out.splitlines() if line and not line.startswith(b"#")]
 
 
@@ -337,3 +337,249 @@ def test_parse_refused_without_parser(wb, tmp_path):
     assert formats.sniff(p.read_bytes())["family"] == "hikvision_old" and not formats.sniff(p.read_bytes())["parser"]
     with pytest.raises(Exception, match="no dedicated parser"):
         formats.convert(p, tmp_path / "out", "parse", wb.settings)
+
+
+# AVI with vendor FourCCs ---------------------------------------------------------------------------------------
+
+
+def _chunk(cid: bytes, body: bytes) -> bytes:
+    return cid + struct.pack("<I", len(body)) + body + (b"\x00" if len(body) & 1 else b"")
+
+
+def _list(kind: bytes, body: bytes) -> bytes:
+    return b"LIST" + struct.pack("<I", len(body) + 4) + kind + body
+
+
+def build_avi(frames, fourcc=b"HKVI", rate=(25, 1), prefix=b"", drop_at=None):
+    """A DVR-style AVI: valid RIFF structure, a FourCC no decoder knows, optional per-frame vendor header,
+    and an empty chunk (a dropped frame) at `drop_at`."""
+    scale, r = rate[1], rate[0]
+    avih = struct.pack("<IIIIIIIIII", int(1e6 * scale / r), 0, 0, 0x10, len(frames), 0, 2, 0, 160, 120) + b"\x00" * 16
+    strh = b"vids" + fourcc + struct.pack("<IHHIIIIIIIIhhhh", 0, 0, 0, 0, scale, r, 0, len(frames), 0, 0, 0, 0, 0, 160, 120)
+    strf = struct.pack("<IiiHH", 40, 160, 120, 1, 24) + fourcc + struct.pack("<IiiII", 160 * 120 * 3, 0, 0, 0, 0)
+    auds = b"auds" + b"\x00" * 4 + struct.pack("<IHHIIIIIIIIhhhh", 0, 0, 0, 0, 1, 8000, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    hdrl = _list(b"hdrl", _chunk(b"avih", avih) + _list(b"strl", _chunk(b"strh", strh) + _chunk(b"strf", strf))
+                 + _list(b"strl", _chunk(b"strh", auds) + _chunk(b"strf", struct.pack("<HHIIHH", 6, 1, 8000, 8000, 1, 8))))
+    movi = bytearray()
+    idx = bytearray()
+    for i, f in enumerate(frames):
+        if i == drop_at:
+            movi += _chunk(b"00dc", b"")
+        off = len(movi) + 4
+        movi += _chunk(b"00dc", prefix + f)
+        idx += b"00dc" + struct.pack("<III", 0x10 if _is_key(f) else 0, off, len(prefix + f))
+        if i % 5 == 0:
+            movi += _chunk(b"01wb", b"\xd5" * 320)
+    body = b"AVI " + hdrl + _chunk(b"JUNK", b"\x00" * 30) + _list(b"movi", bytes(movi)) + _chunk(b"idx1", bytes(idx))
+    return b"RIFF" + struct.pack("<I", len(body)) + body
+
+
+def test_avi_vendor_fourcc(wb, case, h264, tmp_path):
+    es, aus = h264
+    p = tmp_path / "CH01.avi"
+    p.write_bytes(build_avi(aus, prefix=b"HKVI" + bytes(range(12)), drop_at=12))
+    with pytest.raises(media.MediaError):
+        media.probe(p, wb.settings)  # FFmpeg cannot decode it as stored
+    ev, conv = _convert(wb, case, p, "parse")
+    assert ev["media_type"] == "container" and ev["probe"]["identified"]["family"] == "avi"
+    rec = conv["conversion"]
+    assert conv["probe"]["codec"] == "h264" and conv["probe"]["frame_count"] == N
+    assert rec["parser_stats"]["fourcc_handler"] == "HKVI" and rec["parser_stats"]["frames_with_vendor_prefix"] == N
+    assert rec["parser_stats"]["dropped_frame_chunks"] == 1 and rec["timing"]["gaps"] == [{"frame": 12, "gap_ms": 80.0}]
+    assert rec["timing"]["recorder_frame_rate"] == 25.0
+    assert _framemd5(wb.evidence_path(conv["id"]), tmp_path) == _framemd5(es, tmp_path, "h264")
+
+
+def test_avi_geovision_mpeg4(wb, case, tmp_path):
+    m4v = _encode(tmp_path / "a.m4v", "mpeg4", "m4v", "-q:v", "4", "-g", "10")
+    aus = [m4v[a:b] for a, b in dvr.access_units(m4v, "mpeg4")]
+    assert len(aus) == N
+    p = tmp_path / "geo.avi"
+    p.write_bytes(build_avi(aus, fourcc=b"GMP4", rate=(30000, 1001)))
+    parsed = dvr.parse_avi(p.read_bytes())
+    assert parsed.codec == "mpeg4" and parsed.frame_rate == 29.97003 and parsed.stats["fourcc_handler"] == "GMP4"
+    _, conv = _convert(wb, case, p, "parse")
+    assert conv["probe"]["codec"] == "mpeg4" and conv["probe"]["frame_count"] == N
+    assert _framemd5(wb.evidence_path(conv["id"]), tmp_path) == _framemd5(m4v, tmp_path, "m4v")
+
+
+# Transport streams with vendor stream types ------------------------------------------------------------------------
+
+
+def _patch_pmt_stream_type(ts: bytes, new_type: int) -> bytes:
+    out = bytearray(ts)
+    for i in range(0, len(out), 188):
+        pkt = out[i:i + 188]
+        pid = ((pkt[1] & 0x1F) << 8) | pkt[2]
+        if pid == 0x1000 and pkt[1] & 0x40:
+            p = 4 + 1 + pkt[4]
+            sec = p
+            slen = ((pkt[sec + 1] & 0x0F) << 8) | pkt[sec + 2]
+            pil = ((pkt[sec + 10] & 0x0F) << 8) | pkt[sec + 11]
+            out[i + sec + 12 + pil] = new_type
+            crc = dvr._crc32_mpeg(bytes(out[i + sec:i + sec + 3 + slen - 4]))
+            out[i + sec + 3 + slen - 4:i + sec + 3 + slen] = struct.pack(">I", crc)
+    return bytes(out)
+
+
+def test_ts_private_stream_type_and_lost_packets(wb, case, h264, tmp_path):
+    es, _ = h264
+    ts = _encode(tmp_path / "a.ts", "libx264", "mpegts", "-g", "10", "-bf", "0", "-pix_fmt", "yuv420p")
+    vendor = _patch_pmt_stream_type(ts, 0x80)  # as some recorders declare H.264
+    p = tmp_path / "ch2.ts"
+    p.write_bytes(vendor)
+    ev, conv = _convert(wb, case, p, "parse")
+    rec = conv["conversion"]
+    assert ev["probe"]["identified"]["family"] == "mpeg_ts"
+    assert conv["probe"]["frame_count"] == N and rec["parser_stats"]["declared_stream_type"] == "0x80"
+    assert rec["parser_stats"]["lost_packets"] == 0 and rec["timing"]["measured_frame_rate"] == 25.0
+    assert _framemd5(wb.evidence_path(conv["id"]), tmp_path) == _framemd5(es, tmp_path, "h264")
+    # A capture with packets missing: the loss is counted and reported.
+    pkts = [vendor[i:i + 188] for i in range(0, len(vendor), 188)]
+    vid = [k for k, q in enumerate(pkts) if ((q[1] & 0x1F) << 8 | q[2]) == 0x100]
+    del pkts[vid[40]]
+    parsed = dvr.parse_ts(b"".join(pkts))
+    assert parsed.stats["lost_packets"] == 1 and any("missing" in n for n in parsed.notes)
+
+
+def test_m2ts_192_byte_packets(h264, tmp_path):
+    ts = _encode(tmp_path / "a.ts", "libx264", "mpegts", "-g", "10", "-bf", "0", "-pix_fmt", "yuv420p")
+    m2ts = b"".join(struct.pack(">I", k * 1000) + ts[i:i + 188] for k, i in enumerate(range(0, len(ts), 188)))
+    assert formats.sniff(m2ts[:65536])["family"] == "mpeg_ts"
+    parsed = dvr.parse_ts(m2ts)
+    assert parsed.stats["packet_size"] == 192 and len(parsed.frames) == N
+
+
+# Network captures (RTSP / RTP) -------------------------------------------------------------------------------------
+
+
+def _rtp_packets(aus, codec, ssrc=0x1234ABCD, pt=96, mtu=400, seq0=65530):
+    """RFC 6184 / 7798 packetization: parameter sets aggregated, large NAL units fragmented."""
+    pkts = []
+    seq = seq0
+    for i, au in enumerate(aus):
+        ts = (4_000_000_000 + i * 3600) & 0xFFFFFFFF  # wraps during the clip
+        nals = [n for n in re.split(rb"\x00\x00\x00\x01|\x00\x00\x01", au) if n]
+        params = [n for n in nals if (n[0] & 0x1F if codec == "h264" else (n[0] >> 1) & 0x3F) in (7, 8, 32, 33, 34)]
+        rest = [n for n in nals if n not in params]
+        payloads = []
+        if params:
+            if codec == "h264":
+                payloads.append(bytes([0x78]) + b"".join(struct.pack(">H", len(n)) + n for n in params))
+            else:
+                payloads.append(bytes([48 << 1, 1]) + b"".join(struct.pack(">H", len(n)) + n for n in params))
+        for n in rest:
+            if len(n) <= mtu:
+                payloads.append(n)
+                continue
+            hdr = 1 if codec == "h264" else 2
+            body = n[hdr:]
+            chunks = [body[k:k + mtu] for k in range(0, len(body), mtu)]
+            for k, c in enumerate(chunks):
+                s, e = (0x80 if k == 0 else 0), (0x40 if k == len(chunks) - 1 else 0)
+                if codec == "h264":
+                    payloads.append(bytes([(n[0] & 0xE0) | 28, s | e | (n[0] & 0x1F)]) + c)
+                else:
+                    t = (n[0] >> 1) & 0x3F
+                    payloads.append(bytes([(n[0] & 0x81) | (49 << 1), n[1], s | e | t]) + c)
+        for k, pl in enumerate(payloads):
+            marker = 0x80 if k == len(payloads) - 1 else 0
+            pkts.append((i, struct.pack(">BBHII", 0x80, marker | pt, seq & 0xFFFF, ts, ssrc) + pl))
+            seq += 1
+    return pkts
+
+
+def _udp_frame(payload, sport=5004, dport=50000):
+    udp = struct.pack(">HHHH", sport, dport, 8 + len(payload), 0) + payload
+    ip = struct.pack(">BBHHHBBH4s4s", 0x45, 0, 20 + len(udp), 0, 0x4000, 64, 17, 0, bytes([10, 0, 0, 2]), bytes([10, 0, 0, 1]))
+    return b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\x08\x00" + ip + udp
+
+
+def _tcp_frame(payload, seq, sport=554, dport=50001):
+    tcp = struct.pack(">HHIIBBHHH", sport, dport, seq, 0, 0x50, 0x18, 65535, 0, 0) + payload
+    ip = struct.pack(">BBHHHBBH4s4s", 0x45, 0, 20 + len(tcp), 0, 0x4000, 64, 6, 0, bytes([10, 0, 0, 2]), bytes([10, 0, 0, 1]))
+    return b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\x81\x00\x00\x05\x08\x00" + ip + tcp  # with a VLAN tag
+
+
+T0 = 1_773_480_410.25  # 2026-03-14 09:26:50.25 UTC
+
+
+def build_pcap(frames_with_times):
+    out = bytearray(struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 1))
+    for t, frame in frames_with_times:
+        out += struct.pack("<IIII", int(t), int(round((t % 1) * 1e6)), len(frame), len(frame)) + frame
+    return bytes(out)
+
+
+def build_pcapng(frames_with_times):
+    def block(btype, body):
+        body += b"\x00" * (-len(body) % 4)
+        return struct.pack("<II", btype, len(body) + 12) + body + struct.pack("<I", len(body) + 12)
+
+    out = bytearray(block(0x0A0D0D0A, struct.pack("<IHHq", 0x1A2B3C4D, 1, 0, -1)))
+    out += block(1, struct.pack("<HHI", 1, 0, 65535) + struct.pack("<HHB", 9, 1, 9) + b"\x00" * 3 + b"\x00" * 4)  # ns clock
+    for t, frame in frames_with_times:
+        ns = int(round(t * 1e9))
+        out += block(6, struct.pack("<IIIII", 0, ns >> 32, ns & 0xFFFFFFFF, len(frame), len(frame)) + frame)
+    return bytes(out)
+
+
+@pytest.mark.parametrize("which", ["h264", "hevc"])
+def test_pcap_rtp_udp(wb, case, h264, hevc, tmp_path, which):
+    es, aus = h264 if which == "h264" else hevc
+    pkts = _rtp_packets(aus, which)
+    noise = struct.pack(">BBHII", 0x80, 0x80 | 8, 1, 0, 0x55) + b"\xd5" * 160  # an audio RTP stream
+    frames = []
+    for k, (i, pkt) in enumerate(pkts):
+        frames.append((T0 + i * 0.04 + k * 1e-5, _udp_frame(pkt)))
+        if k % 7 == 0:
+            frames.append((T0 + i * 0.04, _udp_frame(noise, 5006, 50002)))
+    frames.insert(5, frames.pop(8))  # out-of-order arrival
+    p = tmp_path / "camera.pcap"
+    p.write_bytes(build_pcap(frames))
+    ident = formats.sniff(p.read_bytes()[:65536])
+    assert ident["family"] == "pcap" and ident["parser"]
+    ev, conv = _convert(wb, case, p, "parse")
+    rec = conv["conversion"]
+    assert ev["media_type"] == "container" and conv["probe"]["codec"] == which and conv["probe"]["frame_count"] == N
+    assert rec["parser_stats"]["rtp_streams"] == 2 and rec["parser_stats"]["lost_rtp_packets"] == 0
+    assert rec["timing"]["median_frame_interval_ms"] == 40.0 and rec["timing"]["recorder_clock_start"].startswith("2026-03-14T09:26:50.25")
+    assert _framemd5(wb.evidence_path(conv["id"]), tmp_path) == _framemd5(es, tmp_path, which)
+
+
+def test_pcapng_rtsp_interleaved_tcp_with_loss(h264):
+    _, aus = h264
+    pkts = _rtp_packets(aus, "h264", pt=97)
+    sdp = b"RTSP/1.0 200 OK\r\nContent-Type: application/sdp\r\n\r\nm=video 0 RTP/AVP 97\r\na=rtpmap:97 H264/90000\r\n"
+    stream = bytearray(sdp)
+    for k, (_, pkt) in enumerate(pkts):
+        if k == 30:
+            continue  # one RTP packet lost before the capture point
+        stream += b"$\x00" + struct.pack(">H", len(pkt)) + pkt
+    segs = [bytes(stream[k:k + 1400]) for k in range(0, len(stream), 1400)]
+    frames = [(T0 + k * 0.01, _tcp_frame(seg, 1000 + 1400 * k)) for k, seg in enumerate(segs)]
+    frames.insert(3, frames[2])  # a TCP retransmission
+    parsed = dvr.parse_pcap(build_pcapng(frames))
+    assert parsed.codec == "h264" and parsed.stats["sdp_rtpmap"] == {"97": "H264"}
+    assert parsed.stats["lost_rtp_packets"] == 1 and any("missing" in n for n in parsed.notes)
+    assert N - 1 <= len(parsed.frames) <= N
+    assert parsed.clock_start.isoformat().startswith("2026-03-14T09:26:50.25")
+
+
+def test_pcap_ps_over_rtp(tmp_path):
+    ps = _encode(tmp_path / "a.vob", "libx264", "vob", "-g", "10", "-bf", "0", "-pix_fmt", "yuv420p")
+    pkts, seq = [], 0
+    for k in range(0, len(ps), 1200):
+        pkts.append(struct.pack(">BBHII", 0x80, 96, seq, k * 10, 0xBEEF) + ps[k:k + 1200])
+        seq += 1
+    parsed = dvr.parse_pcap(build_pcap([(T0 + i * 0.001, _udp_frame(q)) for i, q in enumerate(pkts)]))
+    assert parsed.codec == "h264" and len(parsed.frames) == N
+    times, timing = dvr.settle_timing(parsed, 25)
+    assert timing["measured_frame_rate"] == 25.0 and "MPEG-PS" in timing["source"]
+
+
+def test_closed_format_hint(wb, case, tmp_path):
+    p = tmp_path / "export.g64"
+    p.write_bytes(b"\x01\x02GENETEC" + bytes(range(256)) * 20)
+    with pytest.raises(media.MediaError, match="Genetec Security Desk"):
+        ingest(wb, case, p)

@@ -1,0 +1,54 @@
+{
+  "detector": "tamper.jpeg_dimples",
+  "name": "JPEG dimples",
+  "version": "1.0.0",
+  "validated_on": "2026-10-15",
+  "corpus": "synthetic photo-like scenes generated from fixed seeds (forensic.validation.run.scene)",
+  "seeded": true,
+  "results": {
+    "detection": {
+      "task": "Does the JPEG carry a camera encoder's dimple? Where is it missing?",
+      "positives": "40 images through an emulated dimple-making encoder (constant DCT bias before quantisation, quality 75/85/95), at three bias strengths",
+      "negatives": "the same 40 images saved once by libjpeg, and decoded and saved twice by libjpeg",
+      "threshold": 13.0,
+      "true_positive_rate_by_bias": {
+        "0.25": 0.65,
+        "0.5": 0.925,
+        "1.0": 1.0
+      },
+      "true_positive_rate": 0.925,
+      "false_positive_rate": 0.0,
+      "false_positive_rate_double_saved": 0.0,
+      "localisation": {
+        "cases": "40 emulated camera originals (bias 0.5) with 30% x 30% pasted from a libjpeg-saved photo, re-saved at 90 or 95",
+        "detected_means": "the local warning is raised and at least 30% of the pasted area is marked as lacking the dimple",
+        "true_positive_rate": 0.45,
+        "false_positive_rate": 0.1
+      },
+      "real_camera_originals": {
+        "images": 56,
+        "camera_models": 48,
+        "with_dimple": 0.1071,
+        "with_dimple_after_libjpeg_resave_q90": 0.0893,
+        "with_dimple_after_libjpeg_resave_q75": 0.0893,
+        "note": "No ground truth: shows how common dimples are among these cameras and that re-saving does not reliably remove them.",
+        "source": "the first JPEG of each camera folder in the digicam corpus (drewnoakes/digicam_corpus, CC0, commit 6385e5e)"
+      }
+    }
+  },
+  "known_failure_modes": [
+    "Many cameras make no dimple; absence alone shows nothing.",
+    "On real cameras the dimple often survives re-saving by software, so presence does not show the file is the camera original (see real_camera_originals).",
+    "Synthetic positives come from an emulated encoder; real dimple strengths vary by camera model.",
+    "Flat, saturated and very dark areas carry no dimple and are hatched in the map."
+  ],
+  "software": {
+    "forensic_workbench": "0.3.0",
+    "numpy": "2.5.3",
+    "opencv": "5.0.0",
+    "pillow": "12.3.0",
+    "pywavelets": "1.8.0",
+    "python": "3.13.16"
+  },
+  "how_to_reproduce": "python -m forensic.validation run --camera-originals <folder>"
+}

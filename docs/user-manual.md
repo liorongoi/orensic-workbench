@@ -194,14 +194,27 @@ Formats Lucida recognises:
 | HiSilicon IP cameras (HXVS / HXVT) | `.264`, `.265` on SD cards | Lucida's own parser |
 | MPEG program stream (exacqVision and many others) | `.ps`, `.mpg`, `.vob` | Lucida's own parser, or FFmpeg |
 | Older Hikvision (4HKH header) | `.264`, `.mp4` | carve |
-| MPEG transport stream, AVI, MP4/MOV, ASF, Matroska | | FFmpeg |
+| AVI with a vendor FourCC or per-frame vendor headers (Hikvision HKVI, Geovision GMP4, Mace and other DVRs) | `.avi` | Lucida's own parser (FFmpeg reads the standard ones) |
+| MPEG transport stream, including vendor stream types and captures with lost packets; M2TS | `.ts`, `.m2ts`, `.mts` | FFmpeg, or Lucida's own parser for the loss and timing check |
+| Network capture of a camera's or recorder's RTSP stream (Wireshark, tcpdump) | `.pcap`, `.pcapng` | Lucida's own parser: H.264, H.265 or MPEG-PS over RTP, by UDP or inside the RTSP connection |
+| MP4/MOV, ASF, Matroska | | FFmpeg |
 | Raw H.264, H.265, MPEG-4 Part 2 and MPEG-2 video streams | `.264`, `.h264`, `.265`, `.m4v`, `.m2v` | FFmpeg, or carve |
 | Anything else holding H.264, H.265, MPEG-4 Part 2, MPEG-2 or JPEG frames | | carve |
 
+Some formats are closed or encrypted and have no public description: Avigilon `.avk`, Genetec
+`.g64` / `.g64x`, Samsung/Hanwha `.sec`, Dedicated Micros `.nvf`, Verint `.vxg` and self-playing
+`.exe` exports. Lucida refuses them with a message saying how to export a standard file from the
+vendor's software instead.
+
+For a network capture, the working copy's clock comes from the capture computer, so it includes
+network delay and that computer's clock error; the frame spacing comes from the camera's RTP
+timestamps. Lost RTP packets are counted and the frames around them may show damage.
+
 1. Read the identification line (for example "Identified as Dahua DAV · carries H264 video").
 2. Choose a method:
-   - **parse** (offered when Lucida has its own parser for the format, and then chosen by
-     default) reads the vendor file record by record. Every compressed frame stays
+   - **parse** (offered when Lucida has its own parser for the format, and chosen by default
+     unless the file is an AVI or transport stream that already plays) reads the vendor file
+     record by record. Every compressed frame stays
      byte-identical and keeps the recorder's own timing: per-frame times, the recorder clock and
      the frame rate it wrote. Gaps (missing frames) and timestamps that go backwards are listed.
      For Dahua files holding several cameras, the first channel is extracted and the others are
@@ -261,6 +274,7 @@ Removing evidence is a human action: an AI agent cannot remove or restore eviden
   Hold **B** at any time to peek at the original. If the chain changed the image size, the
   original is scaled onto the result so both line up (after a crop it is scaled to the same
   height). The pixel bar reads the original's own pixel when the cursor is over it.
+- **▦ MB** (or key **M**, video only): how the encoder coded each block of the frame (see 6.3).
 - **⛶ Crop** (or key **C**): draw a crop box on the image (see 7.5).
 - **? shortcuts** at the bottom right lists the keyboard shortcuts when you hover it.
 
@@ -282,6 +296,25 @@ For video, the frame strip under the viewer shows:
 
 Frames are selected by their position in the decoded stream, so frame 1234 is always the same
 frame.
+
+### 6.3 Video: macroblocks, QP and motion vectors
+
+For H.264, MPEG-1/2, MPEG-4 Part 2 and H.263 video, **▦ MB** in the viewer toolbar (or **M**)
+shows how the encoder coded the current frame, block by block (16×16 pixels). A bar under the
+viewer picks what to draw:
+
+- **Type** colours each block: red intra (coded from scratch), blue forward (predicted from an
+  earlier frame), green backward (from a later frame), purple bi (from both), yellow direct,
+  grey skip (copied without new detail). The bar shows each class's share of the frame.
+- **QP** is a heat map of the quantiser: blue is a low QP (more detail kept), red a high one.
+- **MV** draws the motion vectors: yellow forward, cyan backward.
+- **Grid** draws the macroblock grid.
+
+Hover a block to read its position, class and QP in the status bar. **Flip**, **Swipe** and
+**Side by side** compare the overlay with the plain frame. Use it to pick the frames worth
+enhancing or averaging (intra blocks and a low QP carry the most real detail) and to see which
+regions were only copied from another frame. It only reads the video and changes no chain.
+How the data is obtained is in the algorithm guide, section 3.3.
 
 ---
 
@@ -602,6 +635,7 @@ viewer. Each result shows:
 | Analysis | Use it to | Read it |
 |---|---|---|
 | File structure and metadata | See EXIF, GPS, XMP, JPEG markers, quantisation tables, thumbnail; for video the container, frame types and GOP. | Warnings are inconsistencies to explain (editor software, date mismatch, thumbnail not matching, trailing data). Metadata is easy to edit, so it can support but never prove authenticity. |
+| Quantisation tables vs camera database | List the cameras and programs known to write exactly this JPEG's tables, and check them against the camera named in EXIF. | A match narrows the source, never proves it. A mismatch with the EXIF camera suggests re-saving, unless the camera used a quality the database lacks (the number of table sets held for it is shown). Add your own reference images with `python -m forensic.qtables add <folder> --source "<name>"`. |
 | Content credentials and AI provenance | Validate C2PA Content Credentials and find declarations of AI generation. | A declaration of AI generation is strong evidence. No credentials is normal and means nothing. |
 | Error Level Analysis (ELA) | Quick look for areas compressed differently. | Edges and texture are bright in authentic images too. Compare like with like. Confirm with other analyses. |
 | JPEG Ghost | Find a region saved earlier at a lower quality. | A compact dark region at a quality where the rest is bright. |
@@ -609,6 +643,10 @@ viewer. Each result shows:
 | Non-aligned JPEG grid (NA-DJPG) | Detect cropping between saves, or a region from another JPEG. | A secondary grid over the whole image suggests cropping; in one region, a pasted region. Brick, fences and text can mimic a grid. |
 | Clone (copy-move) detection | Find an area copied from one part of the image to another, to hide or duplicate something. | Each copy is outlined (strong colour one side, light colour the other) with lines joining matching points, and its rotation, scale and shift are listed. Repeated patterns (tiles, windows, fences, text, symmetric objects) match naturally: judge each match against the scene. No match does not show the image is unedited. Part of the Smart Report for still images. |
 | Noise level map | Find areas whose fine-grain sensor noise is clearly stronger or weaker than elsewhere at the same brightness (pasted, smoothed or retouched areas). | Dark means less noise, bright yellow more; hatched areas cannot be measured. A compact area with different noise whose outline follows an object is worth a closer look; gradual changes across the frame are natural. A visual aid: its outlines are information, not warnings, and it is not part of the Smart Report. |
+| JPEG dimples | Find the faint mark many camera encoders leave in every 8x8 block, and areas that lack it. | A dimple (strength 13 or more) shows the image passed through a camera encoder that makes them; it often survives re-saving, so it does not prove the file is the original. Absence alone means nothing. Bright areas in the map lack the dimple the rest carries (pasted or retouched); hatched areas are too flat to tell. |
+| Luminance gradient (LGA) | See which way brightness changes everywhere (colour = direction, brightness = strength). | Compare surfaces that should be lit alike; a pasted object often shades in a direction that does not fit. Visual aid only. |
+| PRNU tampering map | For an image from a camera with a reference in the case, find areas without that camera's sensor fingerprint. | Only meaningful when the whole image matches (PCE above 60, shown). Outlined areas lack the fingerprint (pasted, cloned or painted); hatched areas are too dark, flat or saturated to decide. Needs a camera reference (9.4). |
+| Fusion map | One map that weighs A-DJPG, NA-DJPG, dimples and noise together. | Bright = belief of alteration; outlined areas list the analyses behind them. Each input counts only when its conditions hold; open the inputs' own maps before relying on an outline. A fixed rule, not a learned model. |
 | Camera identification (PRNU) | Test if the image came from a specific camera. | PCE above 60 is consistent with the reference camera. Needs a camera reference (9.4). |
 | Camera-pipeline traces | Look for demosaicing traces (camera capture) and resampling (resized or rotated). | Traces present are consistent with a camera at this resolution. Their absence means little after JPEG or resizing. |
 | Generated-image detector (GAN and diffusion) | Screen an image for being made entirely by an AI generator (Stable Diffusion, FLUX, DALL-E, Midjourney, GANs). Bundled; runs on the GPU when available. | Score 0.5 or more: consistent with generated; 0.2 to 0.8 is uncertain. Screening, never proof: newer generators can be missed, compression moves scores, and a generated object pasted into a real photo is usually not detected. |
@@ -924,8 +962,10 @@ is in the [README](../README.md#connecting-an-agent). What an agent can and cann
 | A multi-frame filter says it needs a frame range | Set **[ In** and **Out ]** on a video (7.6). |
 | Export PNG is greyed out | Save and render first; accept or remove agent proposals; justify any generative step. |
 | "This recorder export cannot be opened directly" | Make a working copy (5.3). |
+| A recorder file is refused as a closed format | Export a standard MP4 or AVI from the vendor's software, as the message says (5.3). |
 | Carved video plays at the wrong speed | Re-convert with the recorder's real frame rate, or use parse if it is offered. |
 | Parse fails (a "parser:" error, or the codec was not recognised) | The file may be damaged or a variant of the format. Try remux, then carve. |
+| ▦ MB is missing for a video | Macroblocks are read from the decoder for H.264 and MPEG-1/2/4 Part 2 and H.263, not H.265 or Motion JPEG. |
 | Double encoding says the codec is not supported | It works on H.264 and MPEG-1/2/4 Part 2 streams, not on H.265. |
 | Face check finds no face | The detector misses small, turned or covered faces; mark them in its settings (**⚙**). |
 | PRNU: "the image is larger than the camera reference" | Build the reference from images at the camera's full resolution. |

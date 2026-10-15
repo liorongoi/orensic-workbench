@@ -128,9 +128,24 @@ def _evidence(srv: MCPServer) -> None:
     def extract_frame(evidence_id: str, frame: int = 0, max_side: int = 1024) -> Image:
         return _png(wb().source_frame(evidence_id, frame), max_side)
 
+    @srv.tool(description="How the encoder coded one video frame: share of intra, forward, backward, bi-predicted, "
+              "direct and skipped macroblocks, and QP min/mean/max (lower QP keeps more detail). Use it to pick the "
+              "best frames to enhance or average. H.264, MPEG-1/2/4 and H.263 only.")
+    def frame_macroblocks(evidence_id: str, frame: int = 0) -> dict:
+        info = wb().codec_info(evidence_id, frame)
+        return {k: info[k] for k in ("frame", "codec", "type", "cols", "rows", "counts", "share", "qp")}
+
+    @srv.tool(description="One video frame with its macroblock classes (layer 'type': red intra, blue forward, "
+              "green backward, purple bi, yellow direct, grey skip) or a QP heat map (layer 'qp': blue low, red high) "
+              "drawn over it, optionally with motion-vector arrows (yellow forward, cyan backward) and the 16x16 grid.")
+    def view_macroblocks(evidence_id: str, frame: int = 0, layer: str = "type", motion_vectors: bool = False,
+                         grid: bool = False, max_side: int = 1024) -> Image:
+        img = wb().codec_view(evidence_id, frame, layer=layer, mv=motion_vectors, grid=grid)
+        return _png(media.u8_to_float(img), max_side)
+
     @srv.tool(description="Identify a recorder export's container family (Dahua DAV, Hikvision, Xiongmai/XMEye, "
-              "HiSilicon HXVS, MPEG-PS/TS, raw H.264/H.265/MPEG-4/MPEG-2...) from its signatures, whether Lucida has "
-              "a native parser for it, and list the conversion methods.")
+              "HiSilicon HXVS, MPEG-PS/TS, AVI, pcap captures of RTSP streams, raw H.264/H.265/MPEG-4/MPEG-2...) "
+              "from its signatures, whether Lucida has a native parser for it, and list the conversion methods.")
     def identify_container(evidence_id: str) -> dict:
         w = wb()
         with open(w.evidence_path(evidence_id), "rb") as f:

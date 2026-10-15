@@ -521,6 +521,19 @@ def frame_png(evidence_id: str, n: int):
     return Response(_fast_png(img), media_type="image/png", headers={"Cache-Control": "max-age=3600"})
 
 
+# The PNG route comes first: "{n}" would otherwise also match "12.png".
+@app.get("/api/evidence/{evidence_id}/codec/{n}.png")
+def codec_png(evidence_id: str, n: int, layer: str = "type", mv: bool = False, grid: bool = False):
+    img = wb().codec_view(evidence_id, n, layer=layer, mv=mv, grid=grid)
+    ok, buf = cv2.imencode(".png", cv2.cvtColor(img, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_PNG_COMPRESSION, 1])
+    return Response(buf.tobytes(), media_type="image/png", headers={"Cache-Control": "max-age=3600"})
+
+
+@app.get("/api/evidence/{evidence_id}/codec/{n}")
+def codec_info(evidence_id: str, n: int):
+    return wb().codec_info(evidence_id, n)
+
+
 @app.get("/api/evidence/{evidence_id}/original")
 def original(evidence_id: str):
     w = wb()

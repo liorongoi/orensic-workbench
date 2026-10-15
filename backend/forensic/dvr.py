@@ -379,30 +379,37 @@ def parse_ps(data: bytes, frame_rate: float = 25.0) -> Parsed:
         elif sid in (0xBD, 0xBF):
             private += 1  # Hikvision and others put vendor metadata in private streams
         pos = body_end
-    es = bytes(es)
+    missing = frames_from_es(out, bytes(es), pes_pts, "program stream")
+    out.stats = {"records_skipped_bytes": skipped, "resyncs": resyncs, "audio_packets": audio,
+                 "private_stream_packets": private, "video_stream_id": hex(video_id or 0),
+                 "frames_without_own_timestamp": missing}
+    return out
+
+
+def frames_from_es(out: Parsed, es: bytes, pes_pts: list[tuple[int, int, int]], what: str, clock_hz: int = 90000) -> int:
+    """Split a joined elementary stream into pictures and time them from (ES offset, length, timestamp)
+    records: a timestamp belongs to the first picture that begins in its packet (ISO/IEC 13818-1
+    2.4.3.7, and the same rule for RTP). Returns how many pictures had no timestamp of their own."""
     from .formats import guess_codec
 
-    out.codec = guess_codec(es)
+    out.codec = out.codec or guess_codec(es)
     if not es or out.codec is None:
-        raise ParseError("program stream holds no recognisable video")
-    # A PTS belongs to the first access unit that begins in its PES packet (ISO/IEC 13818-1 2.4.3.7).
+        raise ParseError(f"{what} holds no recognisable video")
     units = access_units(es, out.codec)
     starts = [a for a, _ in units]
     times: dict[int, float] = {}
     base = pes_pts[0][2] if pes_pts else 0
     for off, length, pts in pes_pts:
         i = bisect.bisect_left(starts, off)
-        if i < len(starts) and starts[i] < off + length and i not in times:
-            times[i] = (pts - base) / 90.0
+        if i < len(starts) and starts[i] < off + max(length, 1) and i not in times:
+            times[i] = (pts - base) * 1000.0 / clock_hz
     for i, (a, b) in enumerate(units):
         out.add(times.get(i), es[a:b], is_key(out.codec, es[a:b]))
-    out.stats = {"records_skipped_bytes": skipped, "resyncs": resyncs, "audio_packets": audio,
-                 "private_stream_packets": private, "video_stream_id": hex(video_id or 0),
-                 "frames_without_own_timestamp": len(units) - len(times)}
-    if len(units) > len(times):
-        out.notes.append(f"{len(units) - len(times)} frames carry no timestamp of their own; their times are "
+    missing = len(units) - len(times)
+    if missing:
+        out.notes.append(f"{missing} frames carry no timestamp of their own; their times are "
                          "interpolated between the neighbouring timestamps")
-    return out
+    return missing
 
 
 def access_units(es: bytes, codec: str) -> list[tuple[int, int]]:
@@ -456,7 +463,245 @@ def is_key(codec: str, frame: bytes) -> bool:
     return True
 
 
-PARSERS = {"dahua_dav": parse_dhav, "xmeye": parse_xm, "hxvs": parse_hxvs, "hikvision": parse_ps, "mpeg_ps": parse_ps}
+# AVI with vendor FourCCs (Geovision, Hikvision, Mace and other DVRs) ----------------------------------------
+
+AVI_CHUNK = re.compile(rb"[0-9]{2}(?:dc|db|wb|tx|pc)|ix[0-9]{2}|LIST|JUNK|idx1|RIFF")
+
+
+def parse_avi(data: bytes, frame_rate: float = 25.0) -> Parsed:
+    """Read the video chunks of an AVI (RIFF, OpenDML RIFF-AVIX parts included) whatever its FourCC.
+
+    The frame rate comes from the video stream header (dwRate / dwScale); a zero-length chunk is a
+    frame the recorder dropped, so it advances the clock and shows as a gap. Vendor bytes before the
+    first start code of a frame (some DVRs prefix each frame with a private header) are removed and
+    counted.
+    """
+    if data[:4] != b"RIFF" or data[8:12] != b"AVI ":
+        raise ParseError("not a RIFF AVI file")
+    out = Parsed(codec=None, timing_source="frame rate in the AVI stream header; one chunk per frame")
+    vids_index = None
+    handler = compression = b""
+    rate = None
+    stream_no = -1
+    # Header: walk hdrl for strh/strf of the first video stream.
+    hdrl = data.find(b"hdrl", 12)
+    movi = data.find(b"movi", 12)
+    if movi < 0:
+        raise ParseError("no movi list")
+    p = hdrl + 4 if 0 <= hdrl < movi else movi
+    while p + 8 <= movi:
+        cid, size = data[p:p + 4], struct.unpack_from("<I", data, p + 4)[0]
+        if cid == b"LIST":
+            p += 12
+            continue
+        body = data[p + 8:p + 8 + size]
+        if cid == b"strh" and len(body) >= 28:
+            stream_no += 1
+            if body[:4] == b"vids" and vids_index is None:
+                vids_index = stream_no
+                handler = body[4:8]
+                scale, r = struct.unpack_from("<II", body, 20)
+                if scale and r:
+                    rate = r / scale
+        elif cid == b"strf" and vids_index == stream_no and len(body) >= 20 and out.width is None:
+            out.width, h = struct.unpack_from("<ii", body, 4)
+            out.height = abs(h)
+            compression = body[16:20]
+        elif cid == b"avih" and len(body) >= 4 and rate is None:
+            usec = struct.unpack_from("<I", body, 0)[0]
+            if usec:
+                rate = 1e6 / usec
+        p += 8 + size + (size & 1)
+    if vids_index is None:
+        raise ParseError("no video stream header")
+    out.frame_rate = round(rate, 6) if rate else None
+    step = 1000.0 / (rate or frame_rate)
+    tag = b"%02d" % vids_index
+    pos = movi + 4
+    n = 0
+    skipped = resyncs = dropped = audio = prefixed = 0
+    stripped = 0
+    while pos + 8 <= len(data):
+        cid = data[pos:pos + 4]
+        if not AVI_CHUNK.fullmatch(cid):
+            m = AVI_CHUNK.search(data, pos + 1)
+            if not m:
+                skipped += len(data) - pos
+                break
+            skipped += m.start() - pos
+            resyncs += 1
+            pos = m.start()
+            continue
+        size = struct.unpack_from("<I", data, pos + 4)[0]
+        if cid == b"RIFF":  # OpenDML continuation: RIFF size AVIX LIST size movi
+            pos += 12
+            continue
+        if cid == b"LIST":
+            pos += 12  # descend into movi / rec lists
+            continue
+        if pos + 8 + size > len(data):
+            break
+        if cid[:2] == tag and cid[2:] in (b"dc", b"db"):
+            if size == 0:
+                dropped += 1
+            else:
+                frame = data[pos + 8:pos + 8 + size]
+                sc = frame.find(b"\x00\x00\x01")
+                if sc > 0 and not frame.startswith(b"\xff\xd8"):
+                    cut = sc - 1 if frame[sc - 1] == 0 else sc
+                    if cut:
+                        stripped += cut
+                        prefixed += 1
+                        frame = frame[cut:]
+                out.add(n * step, frame, False)
+            n += 1
+        elif cid[2:] == b"wb":
+            audio += 1
+        pos += 8 + size + (size & 1)
+    if not out.frames:
+        raise ParseError("no video chunks found")
+    out.codec = codec_from_payload(out.frames)
+    if out.codec:
+        out.keys = [is_key(out.codec, d) for _, d in out.frames]
+    out.stats = {"fourcc_handler": handler.decode("latin-1"), "fourcc_compression": compression.decode("latin-1"),
+                 "video_stream": vids_index, "records_skipped_bytes": skipped, "resyncs": resyncs,
+                 "dropped_frame_chunks": dropped, "audio_chunks": audio, "frames_with_vendor_prefix": prefixed,
+                 "vendor_prefix_bytes_removed": stripped}
+    if dropped:
+        out.notes.append(f"{dropped} empty video chunks (frames the recorder dropped) are kept as gaps")
+    if prefixed:
+        out.notes.append(f"{prefixed} frames carried a vendor header before the video data; it was removed")
+    return out
+
+
+# MPEG transport stream, including vendor stream types and damaged captures -----------------------------------------
+
+VIDEO_STREAM_TYPES = {0x01: "mpeg2video", 0x02: "mpeg2video", 0x10: "mpeg4", 0x1B: "h264", 0x24: "hevc"}
+
+
+def _ts_packet_size(data: bytes) -> tuple[int, int]:
+    """(packet size, offset of the sync byte in it): 188 (TS), 192 (M2TS / Blu-ray timecode) or 204 (with RS)."""
+    for size, off in ((188, 0), (192, 4), (204, 0)):
+        start = data.find(b"\x47", off)
+        while 0 <= start < 2000:
+            if all(start + k * size < len(data) and data[start + k * size] == 0x47 for k in range(8)):
+                return size, start
+            start = data.find(b"\x47", start + 1)
+    raise ParseError("no transport stream packet sync found")
+
+
+def parse_ts(data: bytes, frame_rate: float = 25.0) -> Parsed:
+    """Demultiplex the video PID of a transport stream, including streams whose PMT marks the video with a
+    vendor or private stream type (which FFmpeg will not decode) and captures with lost packets."""
+    out = Parsed(codec=None, timing_source="PES decoding timestamps (90 kHz) written by the recorder")
+    size, pos = _ts_packet_size(data)
+    pmt_pids: set[int] = set()
+    declared: dict[int, int] = {}
+    pes: dict[int, list] = {}  # pid -> [bytearray es, [(offset, len, ts)], cur_offset]
+    cc_last: dict[int, int] = {}
+    lost = resyncs = 0
+    while pos + 188 <= len(data):
+        if data[pos] != 0x47:
+            nxt = data.find(b"\x47", pos + 1)
+            if nxt < 0:
+                break
+            resyncs += 1
+            pos = nxt
+            continue
+        pkt = data[pos:pos + 188]
+        pos += size
+        pusi = pkt[1] & 0x40
+        pid = ((pkt[1] & 0x1F) << 8) | pkt[2]
+        afc = (pkt[3] >> 4) & 3
+        cc = pkt[3] & 0x0F
+        if pkt[1] & 0x80 or pid == 0x1FFF:
+            continue
+        p = 4
+        if afc & 2:
+            p += 1 + pkt[4]
+        if not afc & 1 or p >= 188:
+            continue
+        if afc & 1 and pid in cc_last and cc != (cc_last[pid] + 1) & 0x0F and cc != cc_last[pid]:
+            lost += (cc - cc_last[pid] - 1) & 0x0F
+        cc_last[pid] = cc
+        payload = pkt[p:]
+        if pid == 0 and pusi:
+            sec = payload[1 + payload[0]:]
+            n = (((sec[1] & 0x0F) << 8) | sec[2]) - 9
+            for k in range(0, max(n, 0), 4):
+                prog, ppid = struct.unpack_from(">HH", sec, 8 + k)
+                if prog:
+                    pmt_pids.add(ppid & 0x1FFF)
+            continue
+        if pid in pmt_pids and pusi:
+            sec = payload[1 + payload[0]:]
+            slen = ((sec[1] & 0x0F) << 8) | sec[2]
+            pil = ((sec[10] & 0x0F) << 8) | sec[11]
+            q = 12 + pil
+            while q + 5 <= 3 + slen - 4:
+                st, epid, eil = sec[q], ((sec[q + 1] & 0x1F) << 8) | sec[q + 2], ((sec[q + 3] & 0x0F) << 8) | sec[q + 4]
+                declared[epid] = st
+                q += 5 + eil
+            continue
+        if pid in pmt_pids or pid < 0x20:
+            continue
+        st = pes.setdefault(pid, [bytearray(), [], 0])
+        if pusi and payload[:3] == b"\x00\x00\x01":
+            sid = payload[3]
+            if not (0xE0 <= sid <= 0xEF or sid in (0xBD, 0xFD)):
+                st[2] = -1  # not a video PES on this PID
+                continue
+            flags, hl = payload[7], payload[8]
+            ts = None
+            if flags & 0x40:  # DTS
+                ts = _pes_pts(payload, 14)
+            elif flags & 0x80:
+                ts = _pes_pts(payload, 9)
+            body = payload[9 + hl:]
+            if ts is not None:
+                st[1].append((len(st[0]), len(body), ts))
+            st[0] += body
+            st[2] = 1
+        elif st[2] == 1:
+            st[0] += payload
+    from .formats import guess_codec
+
+    chosen = None
+    for pid, (es, _, _) in sorted(pes.items(), key=lambda kv: -len(kv[1][0])):
+        if guess_codec(bytes(es[:1 << 20])):
+            chosen = pid
+            break
+    if chosen is None:
+        raise ParseError("no video found in the transport stream")
+    es, stamps, _ = pes[chosen]
+    # Unwrap 33-bit timestamps.
+    unwrapped, wraps, last = [], 0, None
+    for off, ln, t in stamps:
+        if last is not None and t + wraps * (1 << 33) < last - (1 << 32):
+            wraps += 1
+        last = t + wraps * (1 << 33)
+        unwrapped.append((off, ln, last))
+    missing = frames_from_es(out, bytes(es), unwrapped, "transport stream")
+    stype = declared.get(chosen)
+    out.stats = {"packet_size": size, "video_pid": chosen, "declared_stream_type": hex(stype) if stype is not None else None,
+                 "lost_packets": lost, "resyncs": resyncs, "frames_without_own_timestamp": missing,
+                 "other_pids": sorted(p for p in pes if p != chosen)}
+    if stype is not None and stype not in VIDEO_STREAM_TYPES:
+        out.notes.append(f"the stream declares type {stype:#x} for its video (a vendor or private type that standard "
+                         f"players do not decode); the payload is {out.codec}")
+    if lost:
+        out.notes.append(f"{lost} transport packets are missing (continuity counter gaps); frames around them may be damaged")
+    return out
+
+
+def parse_pcap(data: bytes, frame_rate: float = 25.0) -> Parsed:
+    from .dvr_net import parse_pcap as parse
+
+    return parse(data, frame_rate)
+
+
+PARSERS = {"dahua_dav": parse_dhav, "xmeye": parse_xm, "hxvs": parse_hxvs, "hikvision": parse_ps, "mpeg_ps": parse_ps,
+           "avi": parse_avi, "mpeg_ts": parse_ts, "pcap": parse_pcap}
 
 
 # Timing ---------------------------------------------------------------------------------------------------

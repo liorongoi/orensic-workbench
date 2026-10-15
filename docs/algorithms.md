@@ -192,6 +192,37 @@ proprietary DVR formats, it is open source, and its exact version is recorded in
 report so a decode can be repeated. Commercial SDKs from DVR vendors were not used: they
 are closed, platform-specific, and their output cannot be independently checked.
 
+### 3.3 Macroblocks, QP and motion vectors (`forensic/codecview.py`)
+
+The **▦ MB** view shows how the encoder coded each 16×16 macroblock of a frame. Nothing is
+estimated: everything is what FFmpeg's own decoder reports while decoding the original.
+
+- **Block class and QP.** FFmpeg is run with `-debug mb_type+qp`, which prints one line per
+  macroblock row for every decoded frame: each cell is the block's quantiser followed by a
+  type symbol (`libavcodec/mpegutils.c`). The symbols are grouped into intra (`I`, `i`, `A`,
+  PCM), forward (`>`, and `G` global motion compensation), backward (`<`), bi (`X`), direct
+  (`D`) and skip (`S`, `d`, `g`). A line is taken as a row only when it has exactly one cell per
+  macroblock column, so other decoder log lines are ignored. Field-coded pictures report half
+  the rows and are stretched over the frame. Frames are counted from the first decoded frame,
+  so frame n is the same frame as everywhere else in Lucida. Because the decoder has to print
+  every frame from the start, the frames from n onward are decoded in a window of 24 and kept
+  in a cache of 2000 frames, so stepping forward is quick.
+- **QP heat map.** The quantiser is mapped onto a fixed scale per codec (0-51 for H.264, 1-31
+  for the MPEG family and H.263) with the Turbo colour map, so the same colour means the same
+  QP on every frame and every file of that codec.
+- **Motion vectors.** FFmpeg's `codecview` filter, with `+export_mvs`, draws forward and
+  backward vectors separately on a black frame. Lucida uses those drawings as masks and
+  colours them yellow (forward) and cyan (backward) over the real frame.
+
+**Why the decoder's own data.** The point of the view is to show what the recording actually
+contains: which regions were refreshed with new detail (intra, low QP) and which were copied
+or predicted from other frames. Re-estimating motion with optical flow would show plausible
+motion, not what the encoder coded. Parsing the bitstream with a separate tool (for example
+a stream analyser) would duplicate a decoder that is already bundled, already recorded in
+every report, and already used for the pixels themselves. The cost is that only codecs whose
+FFmpeg decoder exports this information are covered: H.264, MPEG-1/2, MPEG-4 Part 2 and H.263,
+but not H.265 or Motion JPEG. The view is read-only and changes no chain.
+
 ---
 
 ## 4. The processing chain engine
@@ -729,8 +760,25 @@ app reminds the examiner to check every frame before release.
 
 *Why rule-based checks:* each warning is a specific, checkable inconsistency that an
 examiner can explain in a sentence, which is what SWGDE's image authentication guideline asks
-for. *Not yet included:* a database of quantisation tables per camera model (as in some
-commercial tools' "JPEG signature" feature), which needs a licensed or lab-built database.
+for.
+
+- **Quantisation tables vs camera database** (`forensic/analysis/qtdb.py`, `forensic/qtables.py`):
+  the file's luminance and chrominance tables (the ones the frame's components actually use) are
+  looked up, exactly, in an offline database with three layers. *Built in*: tables recorded from
+  camera originals in two freely licensed collections, the digicam corpus (CC0, every quality
+  setting of each camera) and the metadata-extractor sample images ("free to use however you
+  wish"); `tools/build_qtable_db.py` rebuilds it from pinned commits, reading only file headers
+  and keeping only the tables and the EXIF Make, Model and Software fields (282 camera models,
+  405 table sets). *Generated*: libjpeg at qualities 1-100, with and without chroma tables.
+  *Lab*: `python -m forensic.qtables add <folder> --source "<name>"` records the tables of a
+  lab's own reference images into the data folder, so the database grows with casework.
+  The result lists every camera model and program known to write exactly these tables, the
+  nearest camera tables when none match, and, when EXIF names a camera the database knows,
+  whether the tables are among that camera's. A mismatch raises `qt.model_mismatch` (yellow in
+  triage): consistent with re-saving, unless the camera used a quality setting the database lacks
+  (Farid 2006; Kee, Johnson and Farid 2011). Commercial tools ship far larger databases (Amped
+  quotes 14,000+ tables); no openly licensed collection of that size exists, which is why the lab
+  layer exists.
 
 ### 11.2 Video
 
@@ -885,7 +933,74 @@ deterministic and closed-form. *Alternatives:* Mahdian and Saic (2009) segment b
 and are the classic reference for the idea; learned noise residuals (Noiseprint) are far more
 sensitive but carry non-commercial terms.
 
-### 12.7 Geometric consistency: shadows, reflections, perspective — `forensic/analysis/geometry.py`
+### 12.7 JPEG dimples — `forensic/analysis/dimples.py`
+
+Agarwal and Farid (2017) found that many cameras' fixed-point DCT rounds with a small constant
+bias; summed over the 64 frequencies, the bias lands on one pixel of every 8×8 block, leaving a
+faint bump or dip (a "dimple") there throughout the image. libjpeg and most software leave none.
+
+1. **Residual**: luma read straight from the file's YCbCr, minus its 3×3 mean.
+2. **Grid table**: the residual averaged at each of the 64 positions in the 8×8 grid over all
+   blocks. JPEG blocking raises whole rows and columns (block borders), so an additive row +
+   column model is removed by median polish.
+3. **Score**: the largest remaining cell as a robust z against the other 63 (spread floored at
+   0.02 grey levels). A dimple at **z ≥ 13**. Its position shows the grid offset, so a crop off the
+   8×8 grid keeps its dimple at a shifted position.
+4. **Map** (only when the image has a dimple): per block, the dimple cell minus the block's other
+   cells, averaged over the textured blocks of 64-pixel windows and divided by the image-wide
+   value. Blocks quantised to little more than their DC (fewer than 3 non-zero low-frequency AC
+   coefficients around them) are skipped and hatched: with nothing to quantise they carry no
+   dimple in authentic images either. Blocks below a quarter of the image's strength, in a
+   connected group of at least 3 % of the image, lack the dimple; a lacking area of 4-40 % raises
+   `dimples.local` (yellow in triage, given its false-alarm rate in the card).
+
+On real camera originals dimples often survive re-saving by software (measured in the card), so
+presence shows the image passed through such an encoder, not that the file is the original. The
+local map is the main use: a pasted, painted or resampled area does not carry the dimple.
+
+### 12.8 Luminance gradient (LGA) — `forensic/analysis/gradient.py`
+
+Sobel gradient of the luma after light Gaussian smoothing (1.5 px by default). Hue is the
+direction of increasing brightness (red right, round the wheel anticlockwise), brightness the
+strength scaled to the image's 99th percentile; a legend wheel is drawn in the corner. Shading
+in a real scene follows the light, so a pasted or repainted object often shows directions that
+do not fit (Krawetz 2007; Johnson and Farid 2005). A visual aid with no automatic decision and so
+no detector card, like ELA's raw map.
+
+### 12.9 PRNU tampering map — `forensic/prnu.py` (`tamper_map`), `forensic/analysis/camera.py`
+
+For an image from a camera whose reference fingerprint K is in the case (Chen, Fridrich, Goljan
+and Lukáš 2008):
+
+1. Register the image to K with the PRNU match (rotation, crop offset).
+2. In 128-px windows (16 px apart) measure the normalised correlation ρ between the noise
+   residual W and I·K.
+3. **Predict** ρ for each window from its content (brightness, brightness², texture, texture ×
+   brightness, saturation) by least squares on the image's own windows, refitting six times
+   without windows far below the fit, so tampered windows do not shape the predictor.
+4. **No-fingerprint spread** σ0: the same windows against K shifted by half a frame.
+5. A window is **missing the fingerprint** when ρ is more than 3 prediction errors below its
+   prediction and within 3 σ0 of zero, and only where the prediction is high enough for that to
+   be decidable (else hatched). Isolated windows are dropped; the outlined area is the union of
+   the failing windows. Only shown when the whole image matches (PCE ≥ 60).
+
+### 12.10 Fusion map — `forensic/analysis/fusion.py`
+
+Dempster-Shafer fusion of the local analyses (after Fontani, Bianchi, De Rosa, Piva and Barni
+2013). Each source gives a per-pixel strength of tamper evidence s in [0, 1]: A-DJPG (how much
+less double-compressed a block looks than the image's typical block, a robust z of its
+log-likelihood ratio from 2 to 6), NA-DJPG (local grid score), dimples (1 − local strength) and
+noise (|log ratio to the expected noise| beyond 2×). Each counts only when its condition holds
+(A-DJPG: the file is double compressed; NA-DJPG: no secondary grid over the whole image;
+dimples: the image has one), and none speaks in flat blocks, where all of them err. Its belief
+assignment is r·s for "tampered", r·(1 − s)/2 for "authentic", the rest uncommitted, with fixed
+reliabilities r (A-DJPG 0.6, dimples 0.6, NA-DJPG 0.45, noise 0.3); Dempster's rule combines
+them pixel by pixel. Areas of belief ≥ 0.55 and at least 1 % of the image are outlined, with the
+analyses that support each. Only A-DJPG and dimples can pass that alone, and only with strong
+evidence. Amped's Fusion Map is labelled AI-based; this one is a fixed classical rule, so it is
+reproducible and every contribution is listed.
+
+### 12.11 Geometric consistency: shadows, reflections, perspective — `forensic/analysis/geometry.py`
 
 Three checks of the scene's geometry, after Kee, O'Brien and Farid (shadows, ACM TOG 2013) and
 O'Brien and Farid (reflections, ACM TOG 2012). The examiner clicks pairs of points:
@@ -1247,6 +1362,27 @@ from a public open-source demuxer:
   payloads are joined, split into pictures, and each PTS is given to the first picture that
   begins in its PES packet. Pictures without a PTS are placed evenly between their neighbours
   and counted.
+- *MPEG transport stream* (ISO/IEC 13818-1): 188-, 192- (M2TS) or 204-byte packets found by
+  sync-byte spacing; PAT and PMT read for the declared stream types; PES reassembled per PID;
+  the video PID is the largest one whose payload is recognisably H.264, H.265, MPEG-4 or MPEG-2,
+  whatever type the PMT declares (recorders use private types such as 0x06 or 0x80). Frames are
+  timed by DTS where present, else PTS. Continuity-counter gaps are counted as lost packets.
+- *AVI* (Microsoft RIFF AVI and OpenDML): the first video stream's `strh` gives the frame rate
+  (dwRate / dwScale), `strf` the size and FourCC; `NNdc`/`NNdb` chunks of that stream are the
+  frames, whatever the FourCC. An empty chunk is a dropped frame and advances the clock, so it
+  shows as a gap. Vendor bytes before a frame's first start code are cut and counted.
+- *Network captures* (`forensic/dvr_net.py`): pcap (µs and ns) and pcapng (section, interface
+  with `if_tsresol`, enhanced and simple packet blocks); Ethernet with VLAN tags, Linux cooked
+  v1/v2, raw IP and loopback; IPv4 and IPv6. RTP is taken from UDP and from RTSP connections
+  (TCP reassembled by sequence number, then `$`-framed interleaved packets, RFC 2326 10.12).
+  RTSP's SDP (`a=rtpmap`) names the payload types where the capture has it; otherwise each RTP
+  stream is depacketized as H.264 (RFC 6184: single NAL, STAP-A, FU-A) and H.265 (RFC 7798:
+  single NAL, AP, FU) and kept when the result is a valid stream, or read as MPEG-PS when its
+  payload starts with a pack header (Hikvision, GB/T 28181). The video stream is the largest
+  one that qualifies. Packets are ordered by extended sequence number, duplicates dropped and
+  gaps counted as lost; each RTP timestamp (90 kHz, unwrapped) times one picture. The wall
+  clock is the capture time of the first packet, so it includes network delay and the capture
+  computer's clock error, and the record says so.
 
 The frames are written into MPEG transport stream by Lucida's own writer (PAT, PMT, one PES per
 frame with its PTS on a 90 kHz clock, PCR 100 ms ahead), so the bytes are deterministic and
@@ -1273,7 +1409,12 @@ builds files in each vendor layout around real encoded streams (H.264, H.265, MP
 Motion JPEG) and checks that the working copy decodes to exactly the same pictures (FFmpeg
 per-frame MD5) at the timing written into the container, including gaps, a clock that steps
 back, a corrupted record, a second camera channel and interleaved audio. The constructed Dahua
-file is also read by FFmpeg's own `dhav` demuxer with the same pictures and times.
+file is also read by FFmpeg's own `dhav` demuxer with the same pictures and times. The
+constructed AVI is read by FFmpeg's AVI demuxer when its FourCC is one FFmpeg knows, and the
+constructed pcap and pcapng captures are read by Scapy with the same packet times and RTP
+fields. The AVI, transport stream and capture tests add dropped frames, an unknown FourCC with
+per-frame vendor headers, a private stream type, M2TS packets, lost and reordered packets, RTP
+sequence and timestamp wrap, a TCP retransmission and a second RTP stream.
 
 Either way the output is a new evidence item recording the original's hash, the method, the
 exact command (with local paths removed) and the FFmpeg version, so a second examiner can repeat
@@ -1296,8 +1437,9 @@ findings until an examiner accepts it.
 
 ### 19.1 Triage (Smart Report)
 
-`forensic/triage.py` (rules version 1.2.0). A fixed battery per media type: images get file
-metadata, provenance, clone detection, and A-DJPG and NA-DJPG (the last two only for JPEGs); videos get metadata, provenance, frame
+`forensic/triage.py` (rules version 1.3.0). A fixed battery per media type: images get file
+metadata, provenance, clone detection, and, for JPEGs only, the quantisation-table lookup,
+A-DJPG, NA-DJPG and JPEG dimples; videos get metadata, provenance, frame
 integrity and double encoding (when the codec is supported). A fixed, versioned table maps each
 warning code to **red** (a local or structural inconsistency: a region inconsistent with the
 compression history, two near-identical areas (possible copy-move), a thumbnail mismatch, an
@@ -1492,6 +1634,13 @@ Textbooks
 - H. Farid, *Photo Forensics*, MIT Press, 2016.
 
 Papers (in the order they appear)
+
+- H. Farid, Digital image ballistics from JPEG quantization, Dartmouth TR2006-583, 2006.
+- E. Kee, M. K. Johnson and H. Farid, Digital image authentication from JPEG headers, IEEE TIFS 6(3), 2011.
+- S. Agarwal and H. Farid, Photo forensics from JPEG dimples, IEEE WIFS, 2017.
+- M. K. Johnson and H. Farid, Exposing digital forgeries by detecting inconsistencies in lighting, ACM MM&Sec, 2005.
+- M. Chen, J. Fridrich, M. Goljan and J. Lukáš, Determining image origin and integrity using sensor noise, IEEE TIFS 3(1), 2008.
+- M. Fontani, T. Bianchi, A. De Rosa, A. Piva and M. Barni, A framework for decision fusion in image forensics based on Dempster-Shafer theory of evidence, IEEE TIFS 8(4), 2013.
 
 - F. N. Fritsch and R. E. Carlson, Monotone piecewise cubic interpolation, SIAM J. Numer. Anal. 17(2), 1980.
 - K. Zuiderveld, Contrast limited adaptive histogram equalization, Graphics Gems IV, 1994.

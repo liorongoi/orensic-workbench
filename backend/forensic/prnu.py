@@ -181,3 +181,69 @@ def match(img: np.ndarray, K: np.ndarray, rotations: bool = True, crop_search: b
     best = dict(best)
     best["hypotheses"] = len(tried)
     return {"best": best, "tried": tried}
+
+
+def _window_sums(a: np.ndarray, win: int, gy: np.ndarray, gx: np.ndarray) -> np.ndarray:
+    s = cv2.boxFilter(a, cv2.CV_64F, (win, win), anchor=(0, 0), normalize=True, borderType=cv2.BORDER_CONSTANT)
+    return s[np.ix_(gy, gx)]
+
+
+def _window_corr(W: np.ndarray, S: np.ndarray, win: int, gy: np.ndarray, gx: np.ndarray) -> np.ndarray:
+    mw, ms = _window_sums(W, win, gy, gx), _window_sums(S, win, gy, gx)
+    cov = _window_sums(W * S, win, gy, gx) - mw * ms
+    vw = np.maximum(_window_sums(W * W, win, gy, gx) - mw * mw, 1e-12)
+    vs = np.maximum(_window_sums(S * S, win, gy, gx) - ms * ms, 1e-12)
+    return cov / np.sqrt(vw * vs)
+
+
+def tamper_map(img: np.ndarray, K: np.ndarray, window: int = 128, step: int = 16) -> dict:
+    """Where in an image from the reference camera is its sensor fingerprint missing?
+
+    After Chen, Fridrich, Goljan and Lukas (2008): the image is first registered to the
+    fingerprint (rotation and crop, from `match`). In every window the normalised correlation
+    rho between the image's noise residual W and the expected PRNU term I*K is measured. How
+    strong rho should be depends on the content (dark, saturated and textured areas carry
+    less fingerprint), so a predictor of rho from window brightness, texture and saturation
+    is fitted by least squares on the image's own windows, iteratively ignoring windows far
+    below it. The spread of rho with no fingerprint (sigma0) is measured by correlating with
+    the fingerprint shifted to an unrelated position. A window is flagged when its rho is
+    below 3 standard deviations of the prediction and within 3 sigma0 of zero, and only where
+    the prediction is high enough for that to be decidable.
+    """
+    m = match(img, K, rotations=True, crop_search=True)
+    best = m["best"]
+    rot, (dx, dy) = best["rotation_deg"] // 90, best["offset_xy"]
+    imr = np.rot90(img, rot)
+    h, w = imr.shape[:2]
+    if min(h, w) < 2 * window:
+        raise ValueError(f"the image is too small for {window}-pixel windows")
+    Kc = K[dy : dy + h, dx : dx + w].astype(np.float64)
+    I = luma(_to255(imr))
+    W = noise_residual(imr)
+    gy, gx = np.arange(0, h - window + 1, step), np.arange(0, w - window + 1, step)
+    rho = _window_corr(W, I * Kc, window, gy, gx)
+    # Null: the same windows against the fingerprint shifted half a frame (unrelated sensor positions).
+    Ks = np.roll(Kc, (h // 2, w // 2), axis=(0, 1))
+    rho0 = _window_corr(W, I * Ks, window, gy, gx)
+    sigma0 = float(np.median(np.abs(rho0 - np.median(rho0)))) * 1.4826 + 1e-9
+    # Features for the predictor (Chen et al. 2008): brightness, texture, saturation and their products.
+    mean_i = _window_sums(I, window, gy, gx) / 255.0
+    hp = np.abs(I - cv2.blur(I, (3, 3), borderType=cv2.BORDER_REFLECT))
+    tex = 1.0 / (1.0 + _window_sums(hp, window, gy, gx))
+    sat = _window_sums((I >= 250).astype(np.float64), window, gy, gx)
+    X = np.stack([np.ones_like(mean_i), mean_i, mean_i ** 2, tex, mean_i * tex, sat], -1).reshape(-1, 6)
+    y = rho.ravel()
+    use = np.ones_like(y, bool)
+    for _ in range(6):
+        coef, *_ = np.linalg.lstsq(X[use], y[use], rcond=None)
+        pred = X @ coef
+        res = y[use] - pred[use]
+        sigma1 = float(np.median(np.abs(res - np.median(res)))) * 1.4826 + 1e-9
+        use = y > pred - 2.5 * sigma1
+    pred = pred.reshape(rho.shape)
+    measurable = pred >= 3 * sigma0 + 3 * sigma1
+    tampered = measurable & (rho < pred - 3 * sigma1) & (rho < 3 * sigma0)
+    missing = np.where(measurable, np.clip(1 - rho / np.maximum(pred, 1e-9), 0, 1), 0.0)
+    return {"match": best, "rotation": rot, "offset_xy": [dx, dy], "shape": (h, w), "step": step, "window": window,
+            "rho": rho, "predicted": pred, "sigma0": sigma0, "sigma1": sigma1, "measurable": measurable,
+            "tampered": tampered, "missing": missing}
