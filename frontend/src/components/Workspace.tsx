@@ -19,7 +19,7 @@ import type {
 import { AuditPanel } from "./AuditPanel";
 import { AuthPanel } from "./AuthPanel";
 import { ChainEditor } from "./ChainEditor";
-import { ConvertPanel } from "./ConvertPanel";
+import { ConvertPanel, RecorderTimingPanel } from "./ConvertPanel";
 import { FrameStrip } from "./FrameStrip";
 import { MEASURE_FIELDS, MeasurePanel, type PointFields } from "./MeasurePanel";
 import { PlannerPanel } from "./PlannerPanel";
@@ -35,7 +35,10 @@ type Tab = "enhance" | "authenticate" | "measure" | "audit";
 const TAB_LABEL: Record<Tab, string> = { enhance: "Enhance", authenticate: "Authenticate", measure: "Measure", audit: "Audit & review" };
 type ExtPick = { field: string; count: number };
 
-const PROPRIETARY = new Set(["dahua_dav", "hikvision", "mpeg_ps", "annexb_h264", "annexb_hevc"]);
+const PROPRIETARY = new Set([
+  "dahua_dav", "hikvision", "hxvs", "xmeye", "hikvision_old", "mpeg_ps",
+  "annexb_h264", "annexb_hevc", "annexb_mpeg4", "annexb_mpeg2",
+]);
 type View = { kind: "chain" } | { kind: "map"; digest: string; label: string };
 
 const sameGraph = (a: Graph, b: Graph) => JSON.stringify(a) === JSON.stringify(b);
@@ -718,6 +721,7 @@ export function Workspace({ caseId, filters, analyses }: Props) {
               }}
             />
           )}
+          {ev?.conversion?.timing && <RecorderTimingPanel key={`t-${ev.id}`} evidence={ev} />}
           {removed.length > 0 && (
             <div className="removed">
               <button className="link small" onClick={() => setShowRemoved((v) => !v)}>

@@ -69,7 +69,7 @@ validation run that fails if detector accuracy drops below the published floor).
 
 | Plan item | Where | How |
 |---|---|---|
-| DVR vendor formats | `forensic/formats.py` | Recorder exports are identified by signature (Dahua DAV, Hikvision, MPEG-PS/TS, raw H.264/H.265 and others). "Make working copy" either stream-copies into MPEG-TS with FFmpeg (no re-encode, recorder timestamps kept) or carves the H.264/H.265 elementary stream out of an unknown container with synthetic timestamps at a stated frame rate. The copy is new evidence linked to the original, with the method recorded. |
+| DVR vendor formats | `forensic/formats.py`, `forensic/dvr.py` | Recorder exports are identified by signature (Dahua DAV, Hikvision, Xiongmai/XMEye, HiSilicon HXVS, MPEG-PS/TS, raw H.264/H.265/MPEG-4/MPEG-2 and others). "Make working copy" either reads the vendor container with Lucida's own parser (Dahua, Hikvision, XMEye, HiSilicon, MPEG-PS) and keeps the recorder's per-frame timing, clock, gaps and anomalies, or stream-copies into MPEG-TS with FFmpeg, or carves the H.264/H.265/MPEG-4/MPEG-2/Motion JPEG stream out of an unknown container with synthetic timestamps at a stated frame rate. Nothing is re-encoded. The copy is new evidence linked to the original, with the method recorded. |
 | Deblur | `forensic/filters/deblur.py` | Wiener and Richardson-Lucy (optional total-variation regularisation) for motion, defocus and Gaussian blur. "Estimate blur" suggests a motion length and angle from the cepstrum. |
 | Multi-frame super resolution | `forensic/filters/multiframe.py` | Registers frames to a reference (ECC), then iterative back-projection with robust median fusion (Irani-Peleg / Farsiu), 2-4x. |
 | Measurement | `forensic/measure.py` | Height by single-view metrology (Criminisi): vanishing point and ground horizon from traced lines plus one reference height. Distance and speed through a ground-plane homography from surveyed points; speed uses the frames' own timestamps. Every result carries a seeded Monte Carlo 95 % interval from clicking and survey uncertainty, and can be taken on an enhanced result. |
@@ -146,6 +146,7 @@ backend/
     policy.py       rules for generative (AI) steps
     selftest.py     installation acceptance test
     formats.py      recorder export identification, remux and carving
+    dvr.py          native parsers for vendor recorder containers
     measure.py      height, distance and speed with uncertainty
     prnu.py         sensor fingerprint estimation and matching
     triage.py       Smart Report rules

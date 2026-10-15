@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import BinaryIO
 
@@ -157,15 +158,17 @@ class Workbench:
         src = Path(row["stored_path"])
         if method == "carve" and not codec:
             codec = formats.guess_codec(src.read_bytes())
-        ext = formats.output_extension(method, codec)
         with tempfile.TemporaryDirectory(dir=self.settings.data_dir) as tmp:
-            dest = Path(tmp) / f"converted.{ext}"
-            record = formats.convert(src, dest, method, self.settings, frame_rate=frame_rate, codec=codec)
+            record = formats.convert(src, Path(tmp) / "converted", method, self.settings, frame_rate=frame_rate, codec=codec)
+            dest = Path(record.pop("output_path"))
+            ext = dest.suffix.lstrip(".")
             record["source_sha256"] = row["sha256"]
             info = media.probe(dest, self.settings)
             if method == "carve":
                 info["frame_rate"] = f"{frame_rate:g}"
                 info["timestamps"] = "synthetic"
+            elif method == "parse":
+                info["timestamps"] = "recorder"
             with open(dest, "rb") as f:
                 stored = self.store.ingest(f, f"converted.{ext}")
         name = f"{Path(row['filename']).stem} ({method}).{ext}"
@@ -259,6 +262,17 @@ class Workbench:
             for f in table:
                 f["time"] = round(f["n"] / conv["frame_rate"], 6)
                 f["synthetic_time"] = True
+        elif conv and conv.get("method") == "parse":
+            # Times are the recorder's own, measured from the first frame; add its wall clock when known.
+            t0 = next((f["time"] for f in table if f["time"] is not None), 0.0)
+            start = conv.get("timing", {}).get("recorder_clock_start")
+            clock = datetime.fromisoformat(start) if start else None
+            for f in table:
+                if f["time"] is None:
+                    continue
+                f["time"] = round(f["time"] - t0, 6)
+                if clock:
+                    f["recorder_time"] = (clock + timedelta(seconds=f["time"])).isoformat(timespec="milliseconds")
         return table
 
     def source_frame(self, evidence_id: str, n: int = 0) -> np.ndarray:

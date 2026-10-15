@@ -89,7 +89,7 @@ export interface Probe {
   duration?: number;
   field_order?: string;
   timestamps?: string;
-  identified?: { family: string | null; label: string | null; elementary_codec: string | null };
+  identified?: { family: string | null; label: string | null; elementary_codec: string | null; parser?: boolean };
 }
 
 export interface Conversion {
@@ -100,7 +100,26 @@ export interface Conversion {
   command?: string;
   codec?: string;
   frame_rate?: number;
-  carve?: { nal_units_kept: number; nal_units_dropped: number; nal_units_trimmed: number };
+  carve?: { nal_units_kept?: number; nal_units_dropped?: number; nal_units_trimmed?: number; jpeg_frames_kept?: number };
+  parser?: string;
+  notes?: string[];
+  timing?: RecorderTiming;
+}
+
+/** Timing read from a vendor container by Lucida's own parser. */
+export interface RecorderTiming {
+  source: string;
+  frames: number;
+  key_frames: number;
+  duration_s: number;
+  median_frame_interval_ms: number;
+  measured_frame_rate: number | null;
+  recorder_frame_rate: number | null;
+  gaps: { frame: number; gap_ms: number }[];
+  gap_count: number;
+  timestamp_anomaly_count: number;
+  recorder_clock_start?: string;
+  recorder_clock_end?: string;
 }
 
 export interface Evidence {
@@ -194,6 +213,7 @@ export interface FrameInfo {
   time: number | null;
   size: number | null;
   synthetic_time?: boolean;
+  recorder_time?: string;
 }
 
 export interface CameraReference {
