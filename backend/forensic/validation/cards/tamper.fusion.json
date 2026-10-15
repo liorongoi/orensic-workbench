@@ -14,9 +14,9 @@
       "true_positive_rate_by_condition": {
         "one trace: uncompressed area pasted into a JPEG saved before (A-DJPG only)": 0.875,
         "two traces: the pasted area is also smoothed (A-DJPG and noise)": 0.775,
-        "two traces: pasted into a camera original with dimples (A-DJPG and dimples)": 0.725
+        "two traces: pasted into a camera original with dimples (A-DJPG and dimples)": 0.875
       },
-      "true_positive_rate": 0.7917,
+      "true_positive_rate": 0.8417,
       "false_positive_rate_by_history": {
         "single save": 0.0,
         "double save": 0.05,

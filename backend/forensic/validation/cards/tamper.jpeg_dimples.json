@@ -22,8 +22,8 @@
       "localisation": {
         "cases": "40 emulated camera originals (bias 0.5) with 30% x 30% pasted from a libjpeg-saved photo, re-saved at 90 or 95",
         "detected_means": "the local warning is raised and at least 30% of the pasted area is marked as lacking the dimple",
-        "true_positive_rate": 0.65,
-        "false_positive_rate": 0.475
+        "true_positive_rate": 0.45,
+        "false_positive_rate": 0.1
       },
       "real_camera_originals": {
         "images": 56,
@@ -31,7 +31,8 @@
         "with_dimple": 0.1071,
         "with_dimple_after_libjpeg_resave_q90": 0.0893,
         "with_dimple_after_libjpeg_resave_q75": 0.0893,
-        "note": "No ground truth: shows how common dimples are among these cameras and that re-saving does not reliably remove them."
+        "note": "No ground truth: shows how common dimples are among these cameras and that re-saving does not reliably remove them.",
+        "source": "the first JPEG of each camera folder in the digicam corpus (drewnoakes/digicam_corpus, CC0, commit 6385e5e)"
       }
     }
   },

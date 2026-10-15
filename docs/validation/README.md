@@ -53,3 +53,17 @@ The noise map is a visual aid first: natural noise varies with focus, texture an
 prompts to look, and it is not part of the Smart Report battery. Copy-move detection is.
 
 Full results, conditions and known failure modes are in the detector cards (`backend/forensic/validation/cards/`), which the app shows next to each detector and prints in reports.
+
+## JPEG dimples, PRNU tampering map, fusion map and quantisation tables
+
+Generated 2026-10-15 by `python -m forensic.validation run --only phase5 --camera-originals <folder>` (40 seeded synthetic cases per test; the real-camera line uses the first JPEG of each camera folder in the CC0 digicam corpus).
+
+Dimples: TPR by bias {'0.25': 0.65, '0.5': 0.925, '1.0': 1.0}; FPR 0.0 (0.0 double saved); missing-dimple area found 0.45 (FPR 0.1).
+
+PRNU map: {'pasted from another camera': 0.65, 'copied from elsewhere in the same image': 0.825}; FPR 0.0.
+
+Fusion: {'one trace: uncompressed area pasted into a JPEG saved before (A-DJPG only)': 0.875, 'two traces: the pasted area is also smoothed (A-DJPG and noise)': 0.775, 'two traces: pasted into a camera original with dimples (A-DJPG and dimples)': 0.875}; FPR {'single save': 0.0, 'double save': 0.05, 'camera original with dimples, re-saved': 0.0}.
+
+Quantisation tables: re-save caught 0.9787; false mismatch on held-out originals 0.2538.
+
+Dimples on 56 real camera originals: 0.1071 have one; 0.0893 still do after re-saving at 90.
