@@ -36,9 +36,16 @@ foreach ($f in "python\python.exe", "ffmpeg\ffmpeg.exe", "ffmpeg\ffprobe.exe", "
     if (-not (Test-Path "$App\$f")) { throw "missing after install: $f" }
 }
 if (-not (Test-Path "$Data\import")) { throw "case data folder was not created" }
-$usersAce = (Get-Acl $Data).Access | Where-Object { $_.IdentityReference -eq "BUILTIN\Users" -and -not $_.IsInherited }
-if ($AllUsers -and -not $usersAce) { throw "an all-users install should share the case data folder with local users" }
-if (-not $AllUsers -and $usersAce) { throw "a per-user install must not grant other local users access to the case data folder" }
+$acl = (Get-Acl $Data).Access
+# A per-user install keeps whatever the parent folder grants; an all-users install drops inheritance.
+if ($acl | Where-Object { $_.IdentityReference -match "\\Users$|Authenticated Users|Everyone" -and ($AllUsers -or -not $_.IsInherited) }) {
+    $acl | Format-Table IdentityReference, FileSystemRights, IsInherited | Out-Host
+    throw "other local users can reach the case data folder"
+}
+if ($AllUsers -and -not ($acl | Where-Object { $_.IdentityReference -match "\\Forensic Examiners$" -and -not $_.IsInherited })) {
+    throw "an all-users install should share the case data folder with the Forensic Examiners group"
+}
+if ($AllUsers) { net localgroup "Forensic Examiners" | Out-Host }
 $programs = if ($AllUsers) { "$env:ProgramData\Microsoft\Windows\Start Menu\Programs" } else { "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" }
 foreach ($l in "Forensic Workbench.lnk", "Self-test.lnk", "Case data folder.lnk") {
     if (-not (Test-Path "$programs\Forensic Workbench\$l")) { throw "Start menu shortcut missing: $l" }

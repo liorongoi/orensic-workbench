@@ -16,7 +16,10 @@ for:
 
 - the installation folder;
 - the case data folder (cases, write-once evidence store, derived outputs, audit log, logs).
-  It is kept when the workbench is uninstalled or upgraded;
+  It is kept when the workbench is uninstalled or upgraded. For one user it stays private to that
+  account. For all users, only members of the local **Forensic Examiners** group (the account
+  that ran the installer is added), administrators and SYSTEM can open it; add each examiner with
+  `net localgroup "Forensic Examiners" <account> /add`, and they sign out and in again;
 - the local port (default 8000; the workbench listens on 127.0.0.1 only).
 
 At the end it offers the acceptance self-test: it re-hashes every installed file against the

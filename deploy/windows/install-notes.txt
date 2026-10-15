@@ -16,7 +16,9 @@ Python or FFmpeg on this computer.
 You will choose:
   - the installation folder (programs)
   - the case data folder (cases, evidence, audit log, reports). The case data
-    folder is never deleted when the workbench is uninstalled.
+    folder is never deleted when the workbench is uninstalled. When installed
+    for all users, only members of the local "Forensic Examiners" group can
+    open it; you are added, and an administrator adds the other examiners.
   - the local port the workbench uses (default 8000)
 
 After installation, run the acceptance self-test (offered on the last page,

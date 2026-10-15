@@ -65,11 +65,9 @@ Source: "{#PayloadDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 [Dirs]
 ; Case data stays when the workbench is uninstalled. A per-user install keeps the folder's
 ; inherited permissions, so only that user (and administrators) can reach it. An all-users
-; install shares it with every examiner who signs in to this computer.
-Name: "{code:DataDir}"; Flags: uninsneveruninstall; Check: not IsAdminInstallMode
-Name: "{code:DataDir}\import"; Flags: uninsneveruninstall; Check: not IsAdminInstallMode
-Name: "{code:DataDir}"; Flags: uninsneveruninstall; Permissions: users-modify; Check: IsAdminInstallMode
-Name: "{code:DataDir}\import"; Flags: uninsneveruninstall; Permissions: users-modify; Check: IsAdminInstallMode
+; install limits it to the local "Forensic Examiners" group (see RestrictDataDir below).
+Name: "{code:DataDir}"; Flags: uninsneveruninstall
+Name: "{code:DataDir}\import"; Flags: uninsneveruninstall
 
 [INI]
 Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "data_dir"; String: "{code:DataDir}"; Flags: uninsdeletesection
@@ -184,6 +182,41 @@ begin
     Space + 'Workbench user interface' + NewLine;
   if MemoTasksInfo <> '' then
     Result := Result + NewLine + MemoTasksInfo;
+end;
+
+const
+  ExaminersGroup = 'Forensic Examiners';
+
+procedure RunHidden(Exe, Params: String; MustSucceed: Boolean);
+var
+  Code: Integer;
+begin
+  if not Exec(Exe, Params, '', SW_HIDE, ewWaitUntilTerminated, Code) or (MustSucceed and (Code <> 0)) then
+  begin
+    Log(Format('%s %s failed with exit code %d', [Exe, Params, Code]));
+    if MustSucceed then
+      RaiseException('Could not set the permissions of the case data folder. See the setup log.');
+  end;
+end;
+
+procedure RestrictDataDir();
+var
+  Sys: String;
+begin
+  // All-users install: case data is shared only with members of a local "Forensic Examiners"
+  // group (the installing account is added), plus Administrators and SYSTEM. Other accounts on
+  // the computer cannot read or change evidence, the case database or the audit log.
+  Sys := ExpandConstant('{sys}');
+  RunHidden(Sys + '\net.exe', 'localgroup "' + ExaminersGroup + '" /add /comment:"Can open Forensic Workbench case data"', False);
+  RunHidden(Sys + '\net.exe', 'localgroup "' + ExaminersGroup + '" "' + GetUserNameString + '" /add', False);
+  RunHidden(Sys + '\icacls.exe', '"' + DataDir('') + '" /inheritance:r /grant:r *S-1-5-32-544:(OI)(CI)F *S-1-5-18:(OI)(CI)F "' +
+    ExaminersGroup + ':(OI)(CI)M" /T /C /Q', True);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and IsAdminInstallMode then
+    RestrictDataDir();
 end;
 
 function NeedsVCRedist(): Boolean;
