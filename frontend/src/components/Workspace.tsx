@@ -742,7 +742,7 @@ export function Workspace({ caseId, filters, analyses }: Props) {
         <Viewer
           src={view.kind === "map" ? urls.derived(view.digest) : ev?.media_type === "container" ? null : preview.url}
           overlays={view.kind === "chain" && !crop ? overlays : undefined}
-          compareSrc={ev ? urls.frame(ev.id, sourceFrame) : null}
+          compareSrc={ev && !crop && (view.kind === "map" || viewerLabel !== "Source") ? urls.frame(ev.id, sourceFrame) : null}
           label={viewerLabel}
           busy={view.kind === "chain" && preview.busy}
           error={view.kind === "chain" ? preview.error : null}
