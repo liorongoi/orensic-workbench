@@ -64,7 +64,7 @@ export function PlannerPanel(props: Props) {
   return (
     <details className="planner">
       <summary>
-        <b>Ask the planner</b> <span className="muted small">proposes chains for a goal; you accept or discard</span>
+        <b>Planner</b> <span className="muted small" title="Proposes chains for a goal; you accept or discard them">suggest a chain</span>
       </summary>
       <input placeholder="Goal, e.g. make the plate readable" value={goal} onChange={(e) => setGoal(e.target.value)} />
       <div className="row">
@@ -81,16 +81,16 @@ export function PlannerPanel(props: Props) {
         </button>
         {rect && <button onClick={props.onClearRoi}>Clear</button>}
       </div>
-      <p className="muted small">
-        {rect ? `Region ${rect[2]}×${rect[3]} at ${rect[0]}, ${rect[1]}.` : "No region: the whole frame is scored."}{" "}
-        {isVideo && frames && (frames.end > frames.start ? `Frames ${frames.start}–${frames.end} (multi-frame methods).` : `Frame ${frames.start} only; set a range in a chain for multi-frame methods.`)}
+      <p className="muted small" title={isVideo ? "Set a frame range in the chain to allow multi-frame methods" : undefined}>
+        {rect ? `Region ${rect[2]}×${rect[3]} at ${rect[0]}, ${rect[1]}` : "Whole frame"}
+        {isVideo && frames && (frames.end > frames.start ? ` · frames ${frames.start}–${frames.end}` : ` · frame ${frames.start}`)}
       </p>
       <div className="row">
         <button className="primary" onClick={plan} disabled={busy}>
           {busy ? "Planning…" : "Plan"}
         </button>
         <button onClick={estimate} title="Cepstral estimate of linear motion blur in the region, for the deblur filters">
-          Estimate motion blur
+          Estimate blur
         </button>
       </div>
       {blur && (
@@ -125,7 +125,7 @@ export function PlannerPanel(props: Props) {
                 </li>
               ))}
           </ol>
-          <p className="muted">{result.score_note}</p>
+          <p className="muted" title={result.score_note}>ⓘ how scores work</p>
         </div>
       )}
     </details>
