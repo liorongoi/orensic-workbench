@@ -44,6 +44,7 @@ export function SignIn({ setup, onSignedIn }: { setup: boolean; onSignedIn: (u: 
         <button className="primary" disabled={busy || !username.trim() || !password || (setup && !fullName.trim())}>
           {setup ? "Create and sign in" : "Sign in"}
         </button>
+        <a className="signin-help muted small" href="#/help/user-manual" target="_blank" rel="noreferrer">User manual</a>
       </form>
     </div>
   );

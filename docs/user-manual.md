@@ -57,6 +57,13 @@ Keep the console window open while you work; closing it stops Lucida. The Start 
 also has **Self-test** (checks the installation), **Case data folder** (opens the folder
 where cases are kept), and this **User manual** and the **Algorithm guide**.
 
+**Help inside Lucida.** Click **Help ▾** in the top bar and choose **User manual**, **Algorithm
+guide** or **Installation and settings**. The guide opens in a new browser tab, so your work stays
+as it was. The sign-in page has a **User manual** link too. The guides are built into Lucida, so
+they work offline and always match the installed version. On the Help page, click a guide on the
+left, type in **Find a section** to narrow its contents, and use the browser's find (Ctrl+F, or
+⌘F on a Mac) to search the text.
+
 **From a command line or Docker**, see [deployment.md](deployment.md). Then open
 `http://127.0.0.1:8000` in Chrome, Edge or Firefox.
 
@@ -88,7 +95,7 @@ The case list is the first page. When you open a case the screen has four parts:
 
 ```
 +----------------------------------------------------------------------------------+
-| ◆ Lucida / Case name                          Report ▾   Jobs 1 2   Your name ▾  |
+| ◆ Lucida / Case name                   Report ▾  Help ▾  Jobs 1 2   Your name ▾  |
 +--------------+-----------------------------------------------+-------------------+
 | Evidence   ‹ |  label · size · zoom   Crop  Fit  1:1  Orig.  |  Enhance |       › |
 | [Triage]     |                                               |  Authenticate |   |
@@ -103,8 +110,8 @@ The case list is the first page. When you open a case the screen has four parts:
 +--------------+-----------------------------------------------+-------------------+
 ```
 
-- **Top bar**: the case name, the **Report ▾** menu (see 12), the **Jobs** list (see 13.2) and
-  your account menu.
+- **Top bar**: the case name, the **Report ▾** menu (see 12), the **Help ▾** menu (this manual
+  and the other guides, see 2), the **Jobs** list (see 13.2) and your account menu.
 - **Left panel**: the evidence in the case, with buttons to add files and triage them all.
 - **Centre**: the viewer, with the frame strip underneath for video.
 - **Right panel**: four tabs. **Enhance** builds processing chains. **Authenticate** runs
