@@ -921,7 +921,7 @@ is in the [README](../README.md#connecting-an-agent). What an agent can and cann
 | Export PNG is greyed out | Save and render first; accept or remove agent proposals; justify any generative step. |
 | "This recorder export cannot be opened directly" | Make a working copy (5.3). |
 | Carved video plays at the wrong speed | Re-convert with the recorder's real frame rate, or use parse if it is offered. |
-| Parse says the codec was not recognised | Try remux, then carve. |
+| Parse fails (a "parser:" error, or the codec was not recognised) | The file may be damaged or a variant of the format. Try remux, then carve. |
 | Double encoding says the codec is not supported | It works on H.264 and MPEG-1/2/4 Part 2 streams, not on H.265. |
 | Face check finds no face | The detector misses small, turned or covered faces; mark them in its settings (**⚙**). |
 | PRNU: "the image is larger than the camera reference" | Build the reference from images at the camera's full resolution. |
