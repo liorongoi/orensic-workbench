@@ -9,6 +9,8 @@ import type {
   AuditEntry,
   Case,
   Chain,
+  CodecInfo,
+  CodecSettings,
   Evidence,
   FilterSchema,
   FrameInfo,
@@ -123,6 +125,7 @@ export const api = {
   removeChain: (id: string, reason = "") => req<Chain>("POST", `/api/chains/${id}/remove`, { reason }),
   restoreChain: (id: string) => req<Chain>("POST", `/api/chains/${id}/restore`),
   frames: (id: string) => req<FrameInfo[]>("GET", `/api/evidence/${id}/frames`),
+  codecInfo: (id: string, n: number) => req<CodecInfo>("GET", `/api/evidence/${id}/codec/${n}`),
   createChain: (caseId: string, evidenceId: string, name: string, graph?: Partial<Graph>) =>
     req<Chain>("POST", `/api/cases/${caseId}/chains`, { evidence_id: evidenceId, name, graph }),
   updateChain: (id: string, graph: Graph, name?: string) => req<Chain>("PUT", `/api/chains/${id}`, { graph, name }),
@@ -179,6 +182,8 @@ export async function fetchPreview(
 
 export const urls = {
   frame: (evidenceId: string, n: number) => `/api/evidence/${evidenceId}/frame/${n}.png`,
+  codec: (evidenceId: string, n: number, s: CodecSettings) =>
+    `/api/evidence/${evidenceId}/codec/${n}.png?layer=${s.layer}&mv=${s.mv ? 1 : 0}&grid=${s.grid ? 1 : 0}`,
   derived: (digest: string) => `/api/derived/${digest}.png`,
   original: (evidenceId: string) => `/api/evidence/${evidenceId}/original`,
   exportPng: (chainId: string, frame: number) => `/api/chains/${chainId}/export.png?frame=${frame}`,

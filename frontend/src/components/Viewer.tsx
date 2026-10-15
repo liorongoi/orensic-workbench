@@ -23,6 +23,8 @@ interface Props {
   illustrative?: boolean;
   /** Extra toolbar buttons, shown left of Fit / 1:1. */
   tools?: ReactNode;
+  /** Extra readout for the pixel under the cursor (e.g. its macroblock), shown in the status bar. */
+  describe?: (x: number, y: number) => string | null;
 }
 
 type CompareMode = "off" | "swipe" | "side" | "flip";
@@ -68,7 +70,7 @@ function placeOriginal(m: HTMLImageElement, c: HTMLImageElement): [number, numbe
 
 /** Pixel-exact viewer: nearest-neighbour above 100 %, wheel zoom around the cursor, drag to pan.
  * Compare modes put the original next to the result: swipe, side by side (linked zoom and pan) or flip. */
-export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", label, busy, error, points, pickHint, onPick, onRect, illustrative, tools }: Props) {
+export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", label, busy, error, points, pickHint, onPick, onRect, illustrative, tools, describe }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [main, setMain] = useState<Loaded | null>(null);
@@ -531,9 +533,13 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
                 <span className="swatch" style={{ background: `rgb(${cursor.rgb.join(",")})` }} />
               </>
             )}
+            {describe && !cursor.original && (() => {
+              const d = describe(cursor.x, cursor.y);
+              return d ? ` · ${d}` : null;
+            })()}
           </>
         ) : (
-          <span className="muted" title="Scroll: zoom · Drag: pan · F: fit · 1: actual pixels · Hold B: original · T: flip · Ctrl+Z / Ctrl+Y: undo / redo">
+          <span className="muted" title="Scroll: zoom · Drag: pan · F: fit · 1: actual pixels · Hold B: original · T: flip · M: macroblocks (video) · Ctrl+Z / Ctrl+Y: undo / redo">
             ? shortcuts
           </span>
         )}

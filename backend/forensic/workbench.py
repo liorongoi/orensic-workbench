@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
+from collections import OrderedDict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import BinaryIO
 
 import numpy as np
 
-from . import APP_NAME, __version__, compute, formats, media, models, policy, prnu
+from . import APP_NAME, __version__, codecview, compute, formats, media, models, policy, prnu
 from . import measure as measure_mod
 from .analysis import ANALYSES, AnalysisContext, get_analysis
 from .audit import Actor, AuditLog
@@ -37,6 +39,8 @@ class Workbench:
         self.store = EvidenceStore(self.settings)
         self.engine = Engine(self._load_source)
         self.frames = media.FrameCache(compute.frame_cache_budget())
+        self._blocks: "OrderedDict[tuple[str, int], dict]" = OrderedDict()
+        self._blocks_lock = threading.Lock()
 
     # Environment ----------------------------------------------------------
 
@@ -281,6 +285,58 @@ class Workbench:
     def source_frame(self, evidence_id: str, n: int = 0) -> np.ndarray:
         data = self._load_source({"evidence_id": evidence_id, "frames": {"start": n, "end": n}})
         return frame_of(data)
+
+    # Codec view: macroblocks, QP and motion vectors -------------------------
+
+    BLOCK_WINDOW = 24
+    BLOCK_CACHE = 2000
+
+    def _video_row(self, evidence_id: str, n: int) -> tuple[dict, dict]:
+        row = self._evidence_row(evidence_id)
+        if row["media_type"] != "video":
+            raise FilterError("macroblocks are only available for video")
+        probe = json.loads(row["probe_json"])
+        if not codecview.supported(probe.get("codec")):
+            raise FilterError(f"macroblocks are not available for {probe.get('codec') or 'this codec'} (H.264, MPEG-1/2/4 and H.263 only)")
+        if not 0 <= n < probe["frame_count"]:
+            raise FilterError(f"frame {n} is outside 0-{probe['frame_count'] - 1}")
+        return row, probe
+
+    def _frame_blocks(self, row: dict, probe: dict, n: int) -> dict:
+        """Macroblock grids of frame n, decoding a window of following frames so stepping through stays quick."""
+        key = (row["sha256"], n)
+        with self._blocks_lock:
+            if key in self._blocks:
+                self._blocks.move_to_end(key)
+                return self._blocks[key]
+        count = min(self.BLOCK_WINDOW, probe["frame_count"] - n)
+        got = codecview.blocks(Path(row["stored_path"]), self.settings, n, count, probe["width"], probe["height"])
+        if n not in got:
+            raise FilterError(f"the decoder reported no macroblocks for frame {n}")
+        with self._blocks_lock:
+            for k, v in got.items():
+                self._blocks[(row["sha256"], k)] = v
+            while len(self._blocks) > self.BLOCK_CACHE:
+                self._blocks.popitem(last=False)
+        return got[n]
+
+    def codec_info(self, evidence_id: str, n: int) -> dict:
+        """Per-frame macroblock classes, QP statistics and grids (for the cursor readout)."""
+        row, probe = self._video_row(evidence_id, n)
+        out = codecview.summary(self._frame_blocks(row, probe, n), probe.get("codec"))
+        return {"frame": n, "codec": probe.get("codec"), "legend": codecview.legend(), **out}
+
+    def codec_view(self, evidence_id: str, n: int, layer: str = "type", mv: bool = False, grid: bool = False) -> np.ndarray:
+        """Frame n as decoded, with block classes or a QP heat map, the macroblock grid and motion vectors drawn over it."""
+        if layer not in ("type", "qp", "none"):
+            raise FilterError("layer must be type, qp or none")
+        row, probe = self._video_row(evidence_id, n)
+        w, h = probe["width"], probe["height"]
+        path = Path(row["stored_path"])
+        frame = self.frames.frames(row["sha256"], path, self.settings, n, n, probe["frame_count"] - 1, w, h)[0]
+        b = self._frame_blocks(row, probe, n) if layer != "none" else None
+        vectors = codecview.motion_vectors(path, self.settings, n, w, h) if mv else None
+        return codecview.render(frame, b, probe.get("codec"), layer=layer, grid=grid, mv=vectors)
 
     def _load_source(self, source: dict, use_cache: bool = True) -> np.ndarray:
         row = self._evidence_row(source["evidence_id"])

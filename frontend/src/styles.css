@@ -110,6 +110,10 @@ code, .hash { font-family: var(--mono); font-size: 11px; }
 .compare-flip .dim { color: var(--muted); font-weight: 400; }
 .viewer-status { padding: 4px 10px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11px; display: flex; align-items: center; gap: 6px; min-height: 26px; }
 .swatch { display: inline-block; width: 12px; height: 12px; border: 1px solid var(--line); border-radius: 2px; }
+.codec-bar { padding: 4px 10px; border-top: 1px solid var(--line); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+.codec-legend { display: flex; gap: 10px; flex-wrap: wrap; font-family: var(--mono); font-size: 11px; }
+.codec-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin: 0 4px 0 2px; vertical-align: -1px; }
+.codec-legend i.qp-ramp { width: 48px; background: linear-gradient(90deg, #30123b, #4686fb, #1ae4b6, #a2fc3c, #faba39, #e4460a, #7a0403); }
 .map-bar { padding: 6px 10px; border-top: 1px solid var(--line); color: var(--warn); display: flex; gap: 8px; align-items: center; }
 
 .frame-strip { border-top: 1px solid var(--line); padding: 6px 10px; display: flex; flex-direction: column; gap: 4px; }
