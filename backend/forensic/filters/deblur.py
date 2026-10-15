@@ -2,7 +2,8 @@
 
 Both invert a known blur described by a point-spread function (PSF): linear
 motion, out-of-focus disk or Gaussian. All arithmetic is NumPy FFT in float64,
-which is deterministic, so a re-run reproduces the result bit for bit.
+which is deterministic, so a re-run reproduces the result bit for bit. The colour
+channels are independent and run in parallel.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import math
 
 import numpy as np
 
+from .. import compute
 from .base import FilterError, Param, register
 
 PSF_PARAMS = [
@@ -98,9 +100,7 @@ def wiener(img, p):
     h, w = padded.shape[:2]
     H = _otf(psf, (h, w))
     G = np.conj(H) / (np.abs(H) ** 2 + p["nsr"])
-    out = np.empty_like(padded)
-    for c in range(3):
-        out[..., c] = np.fft.irfft2(np.fft.rfft2(padded[..., c]) * G, s=(h, w))
+    out = np.dstack(compute.pmap(lambda c: np.fft.irfft2(np.fft.rfft2(padded[..., c]) * G, s=(h, w)), range(3)))
     return np.clip(out[m:-m, m:-m], 0, 1).astype(np.float32)
 
 
@@ -137,9 +137,9 @@ def richardson_lucy(img, p):
     h, w = padded.shape[:2]
     H = _otf(psf, (h, w))
     Hc = np.conj(H)
-    out = np.empty_like(padded)
-    for c in range(3):
-        g = padded[..., c]
+
+    def channel(c):
+        g = np.ascontiguousarray(padded[..., c])
         u = g.copy()
         for _ in range(p["iterations"]):
             blurred = np.fft.irfft2(np.fft.rfft2(u) * H, s=(h, w))
@@ -148,7 +148,9 @@ def richardson_lucy(img, p):
             if p["tv"] > 0:
                 corr = corr / np.maximum(1.0 - p["tv"] * _tv_term(u), 1e-3)
             u = np.clip(u * corr, 0, 2)
-        out[..., c] = u
+        return u
+
+    out = np.dstack(compute.pmap(channel, range(3)))
     return np.clip(out[m:-m, m:-m] - 1e-4, 0, 1).astype(np.float32)
 
 

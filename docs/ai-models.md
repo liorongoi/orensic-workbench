@@ -1,8 +1,8 @@
 # AI models
 
 The plan's rule is *classical first, AI second*. Every learned model the workbench runs is
-listed in a pinned manifest, verified before each load, run offline on the CPU, and named
-with its weights hash in the report next to every step or analysis that used it.
+listed in a pinned manifest, verified before each load, run offline (on the GPU through DirectML on Windows when a
+reproducibility probe passes, otherwise on every CPU core), and named with its weights hash in the report next to every step or analysis that used it.
 
 ## Bundled models
 

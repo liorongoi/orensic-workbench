@@ -14,8 +14,11 @@ by installing an ONNX file plus a model card into FORENSIC_MODELS_DIR:
     python -m forensic.models verify
     python -m forensic.models install detector.onnx --card detector.json
 
-Inference runs on the CPU through ONNX Runtime with one thread, so the same
-build on the same CPU family gives bit-identical results.
+Inference runs through ONNX Runtime: on the GPU when one is usable (DirectML on
+Windows, CUDA where onnxruntime-gpu is installed), otherwise on every CPU core.
+A GPU is only used after a probe shows it reproduces a model's output bit for bit;
+otherwise that model falls back to the CPU. The device each model ran on is
+recorded in the report's software environment.
 """
 
 from __future__ import annotations
@@ -114,23 +117,70 @@ def verify_all() -> list[dict]:
     return [verify(m) for m in manifest()]
 
 
+# One inference at a time per process: keeps results independent of server load, and
+# the single GPU is shared by every job (DirectML sessions also must not run concurrently).
 _lock = threading.Lock()
+GPU_PROVIDERS = ("CUDAExecutionProvider", "DmlExecutionProvider")
+_devices: dict[str, str] = {}
+
+
+def gpu_provider() -> str | None:
+    """The GPU execution provider this ONNX Runtime build offers, if any and if allowed."""
+    from .. import compute
+
+    if compute.ai_device() == "cpu":
+        return None
+    try:
+        import onnxruntime as ort
+
+        available = ort.get_available_providers()
+    except Exception:  # noqa: BLE001
+        return None
+    return next((p for p in GPU_PROVIDERS if p in available), None)
+
+
+def _options(gpu: bool):
+    import onnxruntime as ort
+
+    from .. import compute
+
+    opts = ort.SessionOptions()
+    opts.intra_op_num_threads = 1 if gpu else compute.cpu_threads()
+    opts.inter_op_num_threads = 1
+    opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+    opts.log_severity_level = 3
+    if gpu:
+        opts.enable_mem_pattern = False  # required by DirectML
+    return opts
+
+
+def _probe_input(sess) -> np.ndarray:
+    shape = [d if isinstance(d, int) and d > 0 else 64 for d in sess.get_inputs()[0].shape]
+    return np.random.default_rng(0).random(shape).astype(np.float32)
 
 
 @lru_cache(maxsize=32)
 def _session(path: str, sha256: str):
     import onnxruntime as ort
 
-    opts = ort.SessionOptions()
-    opts.intra_op_num_threads = 1
-    opts.inter_op_num_threads = 1
-    opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-    opts.log_severity_level = 3
-    return ort.InferenceSession(path, opts, providers=["CPUExecutionProvider"])
+    provider = gpu_provider()
+    if provider:
+        try:
+            sess = ort.InferenceSession(path, _options(True), providers=[provider, "CPUExecutionProvider"])
+            if sess.get_providers()[0] == provider:
+                x = {sess.get_inputs()[0].name: _probe_input(sess)}
+                a, b = sess.run(None, x)[0], sess.run(None, x)[0]
+                if np.array_equal(a, b):
+                    _devices[sha256] = provider
+                    return sess
+        except Exception:  # noqa: BLE001  (driver or memory problems: use the CPU)
+            pass
+    _devices[sha256] = "CPUExecutionProvider"
+    return ort.InferenceSession(path, _options(False), providers=["CPUExecutionProvider"])
 
 
 def session(model_id: str):
-    """A verified ONNX Runtime session (CPU, single thread)."""
+    """A verified ONNX Runtime session (GPU when usable and reproducible, otherwise all CPU cores)."""
     m = get(model_id)
     v = verify(m)
     if not v["ok"]:
@@ -138,10 +188,22 @@ def session(model_id: str):
     return _session(m["path"], m["sha256"])
 
 
+def device(model_id: str) -> str:
+    """Where a model runs: 'gpu (DmlExecutionProvider)' or 'cpu'."""
+    session(model_id)
+    p = _devices.get(get(model_id)["sha256"], "CPUExecutionProvider")
+    return "cpu" if p == "CPUExecutionProvider" else f"gpu ({p})"
+
+
+def device_label() -> str:
+    p = gpu_provider()
+    return f"GPU via {p} when reproducible, else CPU" if p else "CPU"
+
+
 def run(model_id: str, x: np.ndarray) -> np.ndarray:
     sess = session(model_id)
     name = sess.get_inputs()[0].name
-    with _lock:  # one inference at a time keeps results independent of server load
+    with _lock:
         return sess.run(None, {name: np.ascontiguousarray(x, dtype=np.float32)})[0]
 
 
