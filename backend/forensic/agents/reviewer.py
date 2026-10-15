@@ -149,13 +149,15 @@ def review_case(wb, case_id: str, rerun_analyses: bool = True, actor: Actor | No
     for mid, m in sorted(used_models.items()):
         try:
             info = models.get(mid)
-            ok = models.verify(info)
+            v = models.verify(info)
         except models.ModelError as e:
             items.append(_item("model.hash", "fail", f"Model {mid}: {e}", mid))
             continue
+        ok = v.get("ok") is True
         items.append(_item("model.hash", "pass" if ok else "fail",
                            f"Model {mid}: weights match the pinned hash." if ok
-                           else f"Model {mid}: weights do not match the pinned hash.", mid, sha256=m["sha256"]))
+                           else f"Model {mid}: {v.get('problem') or 'weights do not match the pinned hash'}.",
+                           mid, sha256=m["sha256"]))
 
     counts = {lvl: sum(1 for i in items if i["level"] == lvl) for lvl in LEVELS}
     level = "fail" if counts["fail"] else "warn" if counts["warn"] else "pass"

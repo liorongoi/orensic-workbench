@@ -1,4 +1,5 @@
 import io
+import os
 import subprocess
 from pathlib import Path
 
@@ -9,6 +10,9 @@ from PIL import Image
 from forensic.audit import Actor
 from forensic.config import load_settings
 from forensic.workbench import Workbench
+
+# FastAPI's TestClient addresses the app as http://testserver.
+os.environ.setdefault("FORENSIC_ALLOWED_HOSTS", "testserver")
 
 EXAMINER = Actor("Test Examiner")
 

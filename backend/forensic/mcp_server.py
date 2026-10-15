@@ -178,7 +178,8 @@ def _enhance(srv: MCPServer) -> None:
         g["nodes"].insert(pos, node)
         return w.update_chain(chain_id, g, agent())
 
-    @srv.tool(description="Remove a step from a chain by node id.")
+    @srv.tool(description="Remove a step you proposed that no examiner has accepted yet, by node id. "
+              "Steps the examiner wrote or accepted can only be removed by the examiner.")
     def remove_step(chain_id: str, node_id: str) -> dict:
         w = wb()
         g = w.get_chain(chain_id)["graph"]

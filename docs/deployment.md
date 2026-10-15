@@ -23,6 +23,10 @@ publish ports from internal-only networks) and an internal network shared with t
 servers, which have no route out. Nothing in the workbench makes outbound calls; to enforce
 that, run it on an air-gapped host or firewall the host.
 
+The API answers only requests whose Host is `127.0.0.1` or `localhost`. If a TLS proxy or a
+lab hostname fronts it, set `FORENSIC_ALLOWED_HOSTS` to that name (comma-separated for several),
+or the browser gets `400 Invalid host header`.
+
 ## Air-gapped installation
 
 On a connected machine with the same OS, CPU architecture and Python version as the target:

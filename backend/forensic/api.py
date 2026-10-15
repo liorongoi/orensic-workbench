@@ -11,6 +11,7 @@ import cv2
 from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, Field
 
 from . import __version__, formats, media
@@ -22,6 +23,15 @@ from .report import build_bundle, render_html, render_pdf
 from .workbench import NotFound, Workbench
 
 app = FastAPI(title="Forensic Workbench", version=__version__)
+
+# Answer only requests addressed to this computer by name. Without this check a web page could
+# rebind its own hostname to 127.0.0.1 and use the API as if it were the examiner's browser.
+# Add the names a lab uses to reach the workbench (for example behind a TLS proxy) to
+# FORENSIC_ALLOWED_HOSTS, comma-separated.
+ALLOWED_HOSTS = ["127.0.0.1", "localhost"] + [
+    h.strip() for h in os.environ.get("FORENSIC_ALLOWED_HOSTS", "").split(",") if h.strip()
+]
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 _wb: Workbench | None = None
 
 

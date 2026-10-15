@@ -32,7 +32,7 @@ def test_bundled_models_match_pinned_hashes():
     ms = models.manifest()
     assert {"sr.fsrcnn_x2", "sr.espcn_x4", "face.yunet"} <= {m["id"] for m in ms}
     for m in ms:
-        assert models.verify(m), m["id"]
+        assert models.verify(m)["ok"], m["id"]
         assert m["licence"] and m["source"] and m["training_data"]
 
 
