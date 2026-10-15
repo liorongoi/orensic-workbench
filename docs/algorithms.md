@@ -1160,8 +1160,14 @@ Inference follows the authors' evaluation protocol exactly: shorter side resized
 bilinear filtering, centre crop 384, ImageNet normalisation, sigmoid of one logit. A score of
 0.5 or more is reported as consistent with a generated image, and 0.2 to 0.8 as uncertain
 (Amped uses a similar uncertain band). The mirrored image is scored too, and a difference over
-0.3 is flagged as an unstable score. Accuracy on held-out generators, and after JPEG
-re-compression and down-scaling, is on the detector card.
+0.3 is flagged as an unstable score.
+
+*Measured* on a 4,769-image sample of the authors' evaluation set (20 generators held out from
+training): 84 % of generated images caught at 0.4 % false alarms (AUC 0.98); 72 % after JPEG 90,
+64 % after JPEG 75 and 73 % at half size, with false alarms staying under 1 %. By generator:
+94-100 % for open diffusion models, GANs and Midjourney 5.2; 76-89 % for DALL-E 2/3, Imagen 3 and
+Ideogram 1; only 35-65 % for Adobe Firefly 2/3, Midjourney 6.1, Ideogram 2 and Hourglass. Full
+figures are in the validation README and the detector card.
 
 *Why this model:* among the detectors with open weights it was trained on by far the most
 generators, it is the only strong one whose weights carry a permissive licence (Ojha et al.
