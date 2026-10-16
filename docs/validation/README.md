@@ -53,3 +53,6 @@ The noise map is a visual aid first: natural noise varies with focus, texture an
 prompts to look, and it is not part of the Smart Report battery. Copy-move detection is.
 
 Full results, conditions and known failure modes are in the detector cards (`backend/forensic/validation/cards/`), which the app shows next to each detector and prints in reports.
+
+Deblur filters are scored on public deblurring benchmarks (Levin et al. 2009 and the IRCNN/DPIR protocol) in
+[deblur-benchmarks.md](deblur-benchmarks.md), with `python -m forensic.validation.deblur`.
