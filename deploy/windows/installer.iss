@@ -178,8 +178,8 @@ procedure SystemCheck();
 var
   KB, Bytes: Int64;
   Locator, Wmi, Items, Item: Variant;
-  I, V: Integer;
-  Name: String;
+  I, V, Count: Integer;
+  Name, Driver: String;
 begin
   RamGB := 0;
   try
@@ -198,17 +198,22 @@ begin
     if RamGB = 0 then
     begin
       Items := Wmi.ExecQuery('SELECT TotalPhysicalMemory FROM Win32_ComputerSystem');
-      if Items.Count > 0 then
+      Count := Items.Count;
+      if Count > 0 then
       begin
-        Bytes := StrToInt64Def(Items.ItemIndex(0).TotalPhysicalMemory, 0);
+        Driver := Items.ItemIndex(0).TotalPhysicalMemory;
+        Bytes := StrToInt64Def(Driver, 0);
         RamGB := Integer((Bytes + 536870912) div 1073741824);
       end;
     end;
     Items := Wmi.ExecQuery('SELECT Name, DriverVersion FROM Win32_VideoController');
-    for I := 0 to Items.Count - 1 do
+    Count := Items.Count;
+    for I := 0 to Count - 1 do
     try
       Item := Items.ItemIndex(I);
-      Name := Trim(Item.Name);
+      // Copy Variant properties into Strings first: Trim and String parameters reject Variants.
+      Name := Item.Name;
+      Name := Trim(Name);
       if Name <> '' then
       begin
         if GpuNames <> '' then
@@ -217,7 +222,8 @@ begin
         if Pos('NVIDIA', Uppercase(Name)) > 0 then
         begin
           HasNvidia := True;
-          V := NvidiaVersion(Item.DriverVersion);
+          Driver := Item.DriverVersion;
+          V := NvidiaVersion(Driver);
           if V > NvidiaDriver then
             NvidiaDriver := V;
         end;
