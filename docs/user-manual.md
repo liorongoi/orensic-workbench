@@ -55,10 +55,10 @@ Five rules shape how Lucida behaves. Knowing them explains most of what you will
 console window opens showing the address and the log, and your browser opens Lucida.
 Keep the console window open while you work; closing it stops Lucida. The Start menu
 also has **Self-test** (checks the installation), **Case data folder** (opens the folder
-where cases are kept), and this **User manual** and the **Algorithm guide**.
+where cases are kept), and this **User manual**, the **Algorithm guide** and **Amped vs Lucida**, a tool-by-tool comparison with Amped FIVE and Authenticate.
 
 **Help inside Lucida.** Click **Help ▾** in the top bar and choose **User manual**, **Algorithm
-guide** or **Installation and settings**. The guide opens in a new browser tab, so your work stays
+guide**, **Amped vs Lucida** or **Installation and settings**. The guide opens in a new browser tab, so your work stays
 as it was. The sign-in page has a **User manual** link too. The guides are built into Lucida, so
 they work offline and always match the installed version. On the Help page, click a guide on the
 left, type in **Find a section** to narrow its contents, and use the browser's find (Ctrl+F, or

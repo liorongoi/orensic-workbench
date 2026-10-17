@@ -27,7 +27,7 @@ At the end it offers the acceptance self-test: it re-hashes every installed file
 installer's `SHA256SUMS`, then runs `forensic.selftest`, and saves its output under
 `<case data>\logs`. Start Lucida from **Start > Lucida**: a console window
 shows the address and log, and the browser opens Lucida; closing the window stops it.
-The Start menu also has **Self-test**, **Case data folder**, **User manual** and **Algorithm guide**.
+The Start menu also has **Self-test**, **Case data folder**, **User manual**, **Algorithm guide** and **Amped vs Lucida** (the algorithm-by-algorithm comparison).
 
 Settings live in `<install folder>\workbench.ini` (`data_dir`, `import_dir`, `host`, `port`, and
 optionally `c2pa_trust_anchors`, `allowed_hosts`, the extra names browsers may use to reach it,

@@ -68,7 +68,7 @@ export default function App() {
     <details className="menu">
       <summary className="button" title="User manual and guides (open in a new tab)">Help ▾</summary>
       <div className="menu-items">
-        {HELP_DOCS.slice(0, 3).map((d) => (
+        {HELP_DOCS.slice(0, 4).map((d) => (
           <a key={d.id} href={`#/help/${d.id}`} target="_blank" rel="noreferrer">{d.title}</a>
         ))}
       </div>
