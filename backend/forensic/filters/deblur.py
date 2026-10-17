@@ -94,13 +94,17 @@ def _pad(img: np.ndarray, m: int) -> np.ndarray:
     params=PSF_PARAMS + [Param("nsr", "float", 0.01, "Noise-to-signal ratio", 1e-5, 1.0, 0.001)],
 )
 def wiener(img, p):
-    psf = make_psf(p)
+    return wiener_psf(img, make_psf(p), p["nsr"])
+
+
+def wiener_psf(img: np.ndarray, psf: np.ndarray, nsr: float) -> np.ndarray:
+    """Wiener deconvolution of an H x W x C image in [0, 1] by any normalised PSF."""
     m = max(psf.shape)
     padded = _pad(img.astype(np.float64), m)
     h, w = padded.shape[:2]
     H = _otf(psf, (h, w))
-    G = np.conj(H) / (np.abs(H) ** 2 + p["nsr"])
-    out = np.dstack(compute.pmap(lambda c: np.fft.irfft2(np.fft.rfft2(padded[..., c]) * G, s=(h, w)), range(3)))
+    G = np.conj(H) / (np.abs(H) ** 2 + nsr)
+    out = np.dstack(compute.pmap(lambda c: np.fft.irfft2(np.fft.rfft2(padded[..., c]) * G, s=(h, w)), range(img.shape[2])))
     return np.clip(out[m:-m, m:-m], 0, 1).astype(np.float32)
 
 
@@ -131,7 +135,11 @@ def _tv_term(u: np.ndarray, eps: float = 1e-3) -> np.ndarray:
     ],
 )
 def richardson_lucy(img, p):
-    psf = make_psf(p)
+    return richardson_lucy_psf(img, make_psf(p), p["iterations"], p["tv"])
+
+
+def richardson_lucy_psf(img: np.ndarray, psf: np.ndarray, iterations: int, tv: float) -> np.ndarray:
+    """Richardson-Lucy deconvolution of an H x W x C image in [0, 1] by any normalised PSF."""
     m = max(psf.shape)
     padded = _pad(img.astype(np.float64), m) + 1e-4
     h, w = padded.shape[:2]
@@ -141,16 +149,16 @@ def richardson_lucy(img, p):
     def channel(c):
         g = np.ascontiguousarray(padded[..., c])
         u = g.copy()
-        for _ in range(p["iterations"]):
+        for _ in range(iterations):
             blurred = np.fft.irfft2(np.fft.rfft2(u) * H, s=(h, w))
             ratio = g / np.maximum(blurred, 1e-6)
             corr = np.fft.irfft2(np.fft.rfft2(ratio) * Hc, s=(h, w))
-            if p["tv"] > 0:
-                corr = corr / np.maximum(1.0 - p["tv"] * _tv_term(u), 1e-3)
+            if tv > 0:
+                corr = corr / np.maximum(1.0 - tv * _tv_term(u), 1e-3)
             u = np.clip(u * corr, 0, 2)
         return u
 
-    out = np.dstack(compute.pmap(channel, range(3)))
+    out = np.dstack(compute.pmap(channel, range(img.shape[2])))
     return np.clip(out[m:-m, m:-m] - 1e-4, 0, 1).astype(np.float32)
 
 
@@ -207,8 +215,11 @@ def estimate_motion_blur(gray: np.ndarray, max_length: int = 60) -> dict:
     ],
 )
 def tv_deconv(img, p):
+    return tv_psf(img, make_psf(p), p["regularisation"], p["iterations"])
+
+
+def tv_psf(img: np.ndarray, psf: np.ndarray, regularisation: float, iterations: int) -> np.ndarray:
     """FTVd: half-quadratic splitting for isotropic TV, with every sub-problem solved exactly by FFT."""
-    psf = make_psf(p)
     m = max(psf.shape)
     padded = _pad(img.astype(np.float64), m)
     h, w = padded.shape[:2]
@@ -216,14 +227,14 @@ def tv_deconv(img, p):
     Dx = _otf(np.array([[0.0, 0.0, 0.0], [0.0, -1.0, 1.0], [0.0, 0.0, 0.0]]), (h, w))
     Dy = _otf(np.array([[0.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 1.0, 0.0]]), (h, w))
     K2, D2 = np.abs(K) ** 2, np.abs(Dx) ** 2 + np.abs(Dy) ** 2
-    mu = 1.0 / p["regularisation"]
+    mu = 1.0 / regularisation
 
     def channel(c):
         f = padded[..., c]
         KtF = np.conj(K) * np.fft.rfft2(f)
         x = f.copy()
         for beta in 2.0 ** np.arange(0, 9):  # continuation: 1, 2, ... 256
-            for _ in range(p["iterations"]):
+            for _ in range(iterations):
                 X = np.fft.rfft2(x)
                 gx = np.fft.irfft2(Dx * X, s=(h, w))
                 gy = np.fft.irfft2(Dy * X, s=(h, w))
@@ -234,5 +245,5 @@ def tv_deconv(img, p):
                 x = np.fft.irfft2(num / (D2 + (mu / beta) * K2), s=(h, w))
         return x
 
-    out = np.dstack(compute.pmap(channel, range(3)))
+    out = np.dstack(compute.pmap(channel, range(img.shape[2])))
     return np.clip(out[m:-m, m:-m], 0, 1).astype(np.float32)

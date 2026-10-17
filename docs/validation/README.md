@@ -92,3 +92,6 @@ By generator: 94-100 % for open diffusion models (FLUX, Stable Cascade, Kandinsk
 GANs (DFGAN, GALIP) and Midjourney 5.2; 76-89 % for DALL-E 2/3, Imagen 3 and Ideogram 1; 35-65 % for
 Firefly Image 2/3, Midjourney 6.1, Ideogram 2 and Hourglass. Real images in the sample are mostly
 JPEG and generated ones mostly PNG; the JPEG rows re-encode both alike to remove that cue.
+
+Deblur filters are scored on public deblurring benchmarks (Levin et al. 2009 and the IRCNN/DPIR protocol) in
+[deblur-benchmarks.md](deblur-benchmarks.md), with `python -m forensic.validation.deblur`.
