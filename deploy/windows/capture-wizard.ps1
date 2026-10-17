@@ -50,6 +50,7 @@ function Snap($hwnd, $name) {
     $file = Join-Path $OutDir ("{0:D2}_{1}.png" -f $script:n, $name)
     $bmp.Save($file, [System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
     Write-Host "saved $file"
+    return $file
 }
 
 function Find-Window($pattern, $seconds = 60) {
@@ -107,12 +108,12 @@ for ($page = 0; $page -lt 20; $page++) {
         $accept.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
         Start-Sleep -Milliseconds 300
     }
-    $name = PageName $win
-    if ($name -eq $script:lastPage) { $script:same++ } else { $script:same = 0 }
-    if ($script:same -ge 2) { throw "the wizard stayed on '$name'; a button click did not go through" }
-    $script:lastPage = $name
-    Write-Host "page: $name"
-    Snap $hwnd $name
+    $file = Snap $hwnd "wizard"
+    # Inno's labels are not always exposed to UI Automation, so detect a stuck wizard by image.
+    $hash = (Get-FileHash $file).Hash
+    if ($hash -eq $script:lastHash) { Remove-Item $file; $script:n--; $script:same++ } else { $script:same = 0 }
+    if ($script:same -ge 2) { throw "the wizard did not move on from page $($script:n); a click did not go through" }
+    $script:lastHash = $hash
     if ($b = Button $win 'Finish') {
         # Stop here rather than run the post-install options; installation is already complete.
         Stop-Process -Id $setup.Id -Force -ErrorAction SilentlyContinue
@@ -128,7 +129,7 @@ Write-Host "== Uninstaller"
 Start-Sleep -Seconds 2
 Start-Process -FilePath "$Root\app\unins000.exe" | Out-Null
 $confirm = Find-Window 'Uninstall'
-Snap $confirm.Current.NativeWindowHandle "uninstall_confirm"
+Snap $confirm.Current.NativeWindowHandle "uninstall_confirm" | Out-Null
 Press (Button $confirm 'Yes')
 $keep = $null
 for ($i = 0; $i -lt 120 -and -not $keep; $i++) {
@@ -138,7 +139,7 @@ for ($i = 0; $i -lt 120 -and -not $keep; $i++) {
     }
 }
 if (-not $keep) { throw "the keep-or-delete case data question did not appear" }
-Snap $keep.Current.NativeWindowHandle "uninstall_case_data_question"
+Snap $keep.Current.NativeWindowHandle "uninstall_case_data_question" | Out-Null
 Press (Button $keep 'No')
 $done = $null
 for ($i = 0; $i -lt 240 -and -not $done; $i++) {
@@ -147,7 +148,7 @@ for ($i = 0; $i -lt 240 -and -not $done; $i++) {
         if ($w.Current.Name -match 'Uninstall' -and (Controls $w ([System.Windows.Automation.ControlType]::Text) | Where-Object { $_.Current.Name -match 'successfully removed' })) { $done = $w }
     }
 }
-if ($done) { Snap $done.Current.NativeWindowHandle "uninstall_done"; Press (Button $done 'OK') }
+if ($done) { Snap $done.Current.NativeWindowHandle "uninstall_done" | Out-Null; Press (Button $done 'OK') }
 Start-Sleep -Seconds 2
 if (-not (Test-Path "$Root\case data")) { throw "answering No removed the case data folder" }
 Write-Host "Wizard screenshots in $OutDir"
