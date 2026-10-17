@@ -1,0 +1,135 @@
+{
+  "detector": "synthetic.generated",
+  "name": "Generated-image detector (GAN and diffusion)",
+  "version": "1.0.0",
+  "validated_on": "2026-10-16",
+  "corpus": "Sample of the Community Forensics evaluation set (CompEval; 21 generators held out from training, 20 present here) downloaded 2026-10-15: 38 shards, 4,769 images (1,866 generated, 2,903 real from LAION, ImageNet, FFHQ and COCO). CC BY-NC-SA 4.0 data, used only to measure; not shipped.",
+  "seeded": false,
+  "results": {
+    "detection": {
+      "task": "Was the whole image made by a generative model (diffusion, GAN, other)?",
+      "positives": "1866 generated images from 20 generators unseen in training",
+      "negatives": "2903 real images (LAION, coco, ffhq, imagenet)",
+      "threshold": 0.5,
+      "true_positive_rate": 0.8424,
+      "false_positive_rate": 0.0041,
+      "auc": 0.9774,
+      "tpr_by_generator": {
+        "DFGAN": 1.0,
+        "Dalle2": 0.84,
+        "Dalle3": 0.8919,
+        "DeciDiffusionV2": 1.0,
+        "FLUX-dev": 0.9417,
+        "FLUX-schnell": 0.9322,
+        "Firefly_Image2": 0.5242,
+        "Firefly_Image3": 0.3548,
+        "GALIP": 0.9652,
+        "Hourglass": 0.3806,
+        "IdeogramV1": 0.8077,
+        "IdeogramV2": 0.6458,
+        "Imagen3": 0.7561,
+        "LCM_lora_sdv15": 1.0,
+        "LCM_lora_ssd1b": 1.0,
+        "MidjourneyV5_2": 0.9388,
+        "MidjourneyV6_1": 0.4545,
+        "kandinsky_2_2": 0.9388,
+        "kvikontent_midjourney_v6": 1.0,
+        "stable_cascade": 1.0
+      },
+      "images_by_generator": {
+        "DFGAN": 128,
+        "Dalle2": 50,
+        "Dalle3": 37,
+        "DeciDiffusionV2": 150,
+        "FLUX-dev": 120,
+        "FLUX-schnell": 118,
+        "Firefly_Image2": 124,
+        "Firefly_Image3": 62,
+        "GALIP": 230,
+        "Hourglass": 155,
+        "IdeogramV1": 52,
+        "IdeogramV2": 48,
+        "Imagen3": 41,
+        "LCM_lora_sdv15": 68,
+        "LCM_lora_ssd1b": 25,
+        "MidjourneyV5_2": 49,
+        "MidjourneyV6_1": 33,
+        "kandinsky_2_2": 98,
+        "kvikontent_midjourney_v6": 153,
+        "stable_cascade": 125
+      },
+      "fpr_by_real_source": {
+        "LAION": 0.0048,
+        "coco": 0.0,
+        "ffhq": 0.0,
+        "imagenet": 0.0
+      },
+      "images_by_real_source": {
+        "LAION": 2477,
+        "coco": 115,
+        "ffhq": 48,
+        "imagenet": 263
+      },
+      "by_stored_format": {
+        "gif": {
+          "tpr": null,
+          "fpr": 0.0,
+          "fake": 0,
+          "real": 10
+        },
+        "jpeg": {
+          "tpr": 0.4677,
+          "fpr": 0.0041,
+          "fake": 186,
+          "real": 2669
+        },
+        "png": {
+          "tpr": 0.8839,
+          "fpr": 0.0054,
+          "fake": 1680,
+          "real": 186
+        },
+        "webp": {
+          "tpr": null,
+          "fpr": 0.0,
+          "fake": 0,
+          "real": 38
+        }
+      },
+      "tpr_by_condition": {
+        "as given": 0.8424,
+        "jpeg 90": 0.716,
+        "jpeg 75": 0.6436,
+        "half size": 0.7251
+      },
+      "fpr_by_condition": {
+        "as given": 0.0041,
+        "jpeg 90": 0.0041,
+        "jpeg 75": 0.0038,
+        "half size": 0.009
+      },
+      "auc_by_condition": {
+        "as given": 0.9774,
+        "jpeg 90": 0.963,
+        "jpeg 75": 0.9528,
+        "half size": 0.9594
+      },
+      "note": "Real images in the sample are mostly JPEG and generated ones mostly PNG; the 'jpeg 90' and 'jpeg 75' conditions re-encode both alike, so they show accuracy without that format cue."
+    }
+  },
+  "known_failure_modes": [
+    "Generators released after the model was trained (late 2024) can be missed, and some commercial ones already are: Firefly Image 3 (35 %), Hourglass (38 %), Midjourney 6.1 (45 %), Firefly Image 2 (52 %) and Ideogram 2 (65 %) are detected far less often than open diffusion models and GANs (94-100 %). A low score on a modern commercial image means little.",
+    "JPEG re-compression and down-scaling lower detection (84 % as given, 72 % after JPEG 90, 64 % after JPEG 75, 73 % at half size) while false alarms stay under 1 %; generated images already stored as JPEG were detected in only 47 % of cases.",
+    "Scores the whole image: a generated object pasted into a real photograph, or an inpainted region, is usually not detected.",
+    "Heavily processed real photos (phone night modes, beautification, strong denoising or upscaling) can score as generated."
+  ],
+  "software": {
+    "forensic_workbench": "0.3.0",
+    "numpy": "2.5.4",
+    "onnxruntime": "1.31.0",
+    "opencv": "5.0.0",
+    "pillow": "12.3.0",
+    "python": "3.12.15"
+  },
+  "how_to_reproduce": "python -m forensic.validation.geomgen generated --parquet SHARDS"
+}

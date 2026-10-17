@@ -12,9 +12,12 @@ r.add_argument("--quick", action="store_true", help="small corpus (for CI)")
 r.add_argument("--pristine", type=Path, help="folder of real camera images to derive test cases from")
 r.add_argument("--out", type=Path, default=CARD_DIR, help="where to write the cards")
 r.add_argument("--summary", type=Path, help="also write a Markdown summary here")
-r.add_argument("--only", choices=["phase4"], help="run only one group of experiments (phase4: clone detection and noise map)")
+r.add_argument("--only", choices=["phase4", "phase5"],
+               help="run only one group of experiments (phase4: clone detection and noise map; "
+               "phase5: JPEG dimples, PRNU tampering map, fusion map, quantisation tables)")
+r.add_argument("--camera-originals", type=Path, help="folder of real camera-original JPEGs for the dimples observation")
 a = ap.parse_args()
-out = run(quick=a.quick, pristine=a.pristine, out_dir=a.out, only=a.only)
+out = run(quick=a.quick, pristine=a.pristine, out_dir=a.out, only=a.only, camera_originals=a.camera_originals)
 print(json.dumps(out["results"], indent=2))
 if a.summary:
     a.summary.parent.mkdir(parents=True, exist_ok=True)

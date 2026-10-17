@@ -81,6 +81,9 @@ def probe(path: Path, settings: Settings) -> dict:
     if not vstreams:
         raise MediaError("no video stream found; audio-only evidence is not supported yet")
     v = vstreams[0]
+    if v.get("codec_name") in (None, "", "none") or not v.get("width"):
+        tag = v.get("codec_tag_string") or "?"
+        raise MediaError(f"the video codec is not recognised (FourCC/tag '{tag}'); it may be a vendor format")
     frame_count = _count_frames(path, settings) if not v.get("nb_frames") else int(v["nb_frames"])
     return {
         "media_type": "video",

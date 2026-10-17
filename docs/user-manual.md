@@ -57,6 +57,13 @@ Keep the console window open while you work; closing it stops Lucida. The Start 
 also has **Self-test** (checks the installation), **Case data folder** (opens the folder
 where cases are kept), and this **User manual** and the **Algorithm guide**.
 
+**Help inside Lucida.** Click **Help ▾** in the top bar and choose **User manual**, **Algorithm
+guide** or **Installation and settings**. The guide opens in a new browser tab, so your work stays
+as it was. The sign-in page has a **User manual** link too. The guides are built into Lucida, so
+they work offline and always match the installed version. On the Help page, click a guide on the
+left, type in **Find a section** to narrow its contents, and use the browser's find (Ctrl+F, or
+⌘F on a Mac) to search the text.
+
 **From a command line or Docker**, see [deployment.md](deployment.md). Then open
 `http://127.0.0.1:8000` in Chrome, Edge or Firefox.
 
@@ -88,7 +95,7 @@ The case list is the first page. When you open a case the screen has four parts:
 
 ```
 +----------------------------------------------------------------------------------+
-| ◆ Lucida / Case name                          Report ▾   Jobs 1 2   Your name ▾  |
+| ◆ Lucida / Case name                   Report ▾  Help ▾  Jobs 1 2   Your name ▾  |
 +--------------+-----------------------------------------------+-------------------+
 | Evidence   ‹ |  label · size · zoom   Crop  Fit  1:1  Orig.  |  Enhance |       › |
 | [Triage]     |                                               |  Authenticate |   |
@@ -103,8 +110,8 @@ The case list is the first page. When you open a case the screen has four parts:
 +--------------+-----------------------------------------------+-------------------+
 ```
 
-- **Top bar**: the case name, the **Report ▾** menu (see 12), the **Jobs** list (see 13.2) and
-  your account menu.
+- **Top bar**: the case name, the **Report ▾** menu (see 12), the **Help ▾** menu (this manual
+  and the other guides, see 2), the **Jobs** list (see 13.2) and your account menu.
 - **Left panel**: the evidence in the case, with buttons to add files and triage them all.
 - **Centre**: the viewer, with the frame strip underneath for video.
 - **Right panel**: four tabs. **Enhance** builds processing chains. **Authenticate** runs
@@ -174,21 +181,56 @@ With an item selected, the buttons under the list are:
 ### 5.3 Recorder (DVR) exports
 
 Many recorders export video in vendor containers that ordinary players cannot open. When
-Lucida recognises one (Dahua DAV, Hikvision, MPEG program stream, raw H.264/H.265) or cannot
-open a file directly, a **Recorder export** panel appears under the evidence list.
+Lucida recognises one or cannot open a file directly, a **Recorder export** panel appears under
+the evidence list.
+
+Formats Lucida recognises:
+
+| Format | Typical files | Read by |
+| --- | --- | --- |
+| Dahua DAV (also Amcrest, Lorex, IC Realtime and other Dahua OEMs) | `.dav` | Lucida's own parser, or FFmpeg |
+| Hikvision IMKH + program stream (also Annke, LTS, Swann and other Hikvision OEMs) | `.mp4`, `.264`, `.ps` | Lucida's own parser, or FFmpeg |
+| Xiongmai / XMEye / NetSurveillance (many unbranded DVRs) | `.h264`, `.h265` | Lucida's own parser |
+| HiSilicon IP cameras (HXVS / HXVT) | `.264`, `.265` on SD cards | Lucida's own parser |
+| MPEG program stream (exacqVision and many others) | `.ps`, `.mpg`, `.vob` | Lucida's own parser, or FFmpeg |
+| Older Hikvision (4HKH header) | `.264`, `.mp4` | carve |
+| AVI with a vendor FourCC or per-frame vendor headers (Hikvision HKVI, Geovision GMP4, Mace and other DVRs) | `.avi` | Lucida's own parser (FFmpeg reads the standard ones) |
+| MPEG transport stream, including vendor stream types and captures with lost packets; M2TS | `.ts`, `.m2ts`, `.mts` | FFmpeg, or Lucida's own parser for the loss and timing check |
+| Network capture of a camera's or recorder's RTSP stream (Wireshark, tcpdump) | `.pcap`, `.pcapng` | Lucida's own parser: H.264, H.265 or MPEG-PS over RTP, by UDP or inside the RTSP connection |
+| MP4/MOV, ASF, Matroska | | FFmpeg |
+| Raw H.264, H.265, MPEG-4 Part 2 and MPEG-2 video streams | `.264`, `.h264`, `.265`, `.m4v`, `.m2v` | FFmpeg, or carve |
+| Anything else holding H.264, H.265, MPEG-4 Part 2, MPEG-2 or JPEG frames | | carve |
+
+Some formats are closed or encrypted and have no public description: Avigilon `.avk`, Genetec
+`.g64` / `.g64x`, Samsung/Hanwha `.sec`, Dedicated Micros `.nvf`, Verint `.vxg` and self-playing
+`.exe` exports. Lucida refuses them with a message saying how to export a standard file from the
+vendor's software instead.
+
+For a network capture, the working copy's clock comes from the capture computer, so it includes
+network delay and that computer's clock error; the frame spacing comes from the camera's RTP
+timestamps. Lost RTP packets are counted and the frames around them may show damage.
 
 1. Read the identification line (for example "Identified as Dahua DAV · carries H264 video").
 2. Choose a method:
-   - **remux** copies the video stream into a standard MPEG transport stream without
-     re-encoding. Every compressed frame stays byte-identical and the recorder's timestamps are
-     kept. Use this whenever it works.
-   - **carve** extracts the raw H.264/H.265 stream from an unknown container. It has no
-     timestamps, so enter the recorder's frame rate; frame times are then computed from it.
+   - **parse** (offered when Lucida has its own parser for the format, and chosen by default
+     unless the file is an AVI or transport stream that already plays) reads the vendor file
+     record by record. Every compressed frame stays
+     byte-identical and keeps the recorder's own timing: per-frame times, the recorder clock and
+     the frame rate it wrote. Gaps (missing frames) and timestamps that go backwards are listed.
+     For Dahua files holding several cameras, the first channel is extracted and the others are
+     named in the record.
+   - **remux** copies the video stream into a standard MPEG transport stream with FFmpeg,
+     without re-encoding. Use it when there is no parser, or to compare with parse.
+   - **carve** extracts the raw H.264, H.265, MPEG-4 Part 2, MPEG-2 or Motion JPEG stream from
+     an unknown container. It has no timestamps, so enter the recorder's frame rate; frame times
+     are then computed from it.
 3. Click **Make working copy**.
 
 The working copy is added as a new evidence item, linked to the original, with the method, the
-command and the FFmpeg version recorded. Work on the working copy; the original stays as it
-was.
+command and the FFmpeg version recorded. A copy made by parse shows a **Recorder timing**
+panel: frame count, measured and recorded frame rates, the recorder clock span, gaps and
+timestamp anomalies. The frame list then shows each frame's recorder time. Work on the working
+copy; the original stays as it was.
 
 ### 5.4 Removing evidence
 
@@ -223,8 +265,16 @@ Removing evidence is a human action: an AI agent cannot remove or restore eviden
   At 1600 % and above a pixel grid is drawn.
 - **Pixel inspector**: the bar under the image shows the x, y position and the R, G, B values
   of the pixel under the cursor, with a colour swatch.
-- **Compare with the original**: hold **B**, or hold the **Original** button. The viewer
-  shows the original frame until you let go.
+- **Compare with the original**: once a chain has steps, three buttons at the top right of the
+  viewer put the original next to the result. Click the lit button again to turn it off.
+  - **Swipe**: the original on the left, the result on the right; drag the yellow divider.
+  - **Side by side**: two panes that zoom and pan together.
+  - **Flip**: one image at a time; press **T** or click the label at the bottom to switch.
+
+  Hold **B** at any time to peek at the original. If the chain changed the image size, the
+  original is scaled onto the result so both line up (after a crop it is scaled to the same
+  height). The pixel bar reads the original's own pixel when the cursor is over it.
+- **▦ MB** (or key **M**, video only): how the encoder coded each block of the frame (see 6.3).
 - **⛶ Crop** (or key **C**): draw a crop box on the image (see 7.5).
 - **? shortcuts** at the bottom right lists the keyboard shortcuts when you hover it.
 
@@ -246,6 +296,25 @@ For video, the frame strip under the viewer shows:
 
 Frames are selected by their position in the decoded stream, so frame 1234 is always the same
 frame.
+
+### 6.3 Video: macroblocks, QP and motion vectors
+
+For H.264, MPEG-1/2, MPEG-4 Part 2 and H.263 video, **▦ MB** in the viewer toolbar (or **M**)
+shows how the encoder coded the current frame, block by block (16×16 pixels). A bar under the
+viewer picks what to draw:
+
+- **Type** colours each block: red intra (coded from scratch), blue forward (predicted from an
+  earlier frame), green backward (from a later frame), purple bi (from both), yellow direct,
+  grey skip (copied without new detail). The bar shows each class's share of the frame.
+- **QP** is a heat map of the quantiser: blue is a low QP (more detail kept), red a high one.
+- **MV** draws the motion vectors: yellow forward, cyan backward.
+- **Grid** draws the macroblock grid.
+
+Hover a block to read its position, class and QP in the status bar. **Flip**, **Swipe** and
+**Side by side** compare the overlay with the plain frame. Use it to pick the frames worth
+enhancing or averaging (intra blocks and a low QP carry the most real detail) and to see which
+regions were only copied from another frame. It only reads the video and changes no chain.
+How the data is obtained is in the algorithm guide, section 3.3.
 
 ---
 
@@ -435,7 +504,7 @@ and check every frame before release.
 ## 8. Enhancement recipes
 
 These are starting points. Adjust parameters while watching the preview, and compare with the
-original (hold **B**).
+original (hold **B**, or use **Swipe**, **Side by side** or **Flip**; see section 6).
 
 ### 8.1 Read a number plate from video
 
@@ -523,8 +592,8 @@ file, never a preview. Results are stored, hashed and logged.
 ### 9.1 Smart Report and Triage
 
 - **Smart Report** (top of the tab) runs a fixed set of checks on this item: file structure and
-  metadata, provenance and clone (copy-move) detection, for JPEGs the two double-compression
-  analyses; for video, frame
+  metadata, provenance and clone (copy-move) detection; for JPEGs also the quantisation-table
+  lookup, the two double-compression analyses and JPEG dimples; for video, frame
   integrity and double encoding. It sorts the item **red** (a local or structural inconsistency
   to examine first), **yellow** (a processing history, such as re-saving or editing software,
   that limits what can be said) or **green** (no check found an inconsistency). Each reason is
@@ -566,6 +635,7 @@ viewer. Each result shows:
 | Analysis | Use it to | Read it |
 |---|---|---|
 | File structure and metadata | See EXIF, GPS, XMP, JPEG markers, quantisation tables, thumbnail; for video the container, frame types and GOP. | Warnings are inconsistencies to explain (editor software, date mismatch, thumbnail not matching, trailing data). Metadata is easy to edit, so it can support but never prove authenticity. |
+| Quantisation tables vs camera database | List the cameras and programs known to write exactly this JPEG's tables, and check them against the camera named in EXIF. | A match narrows the source, never proves it. A mismatch with the EXIF camera suggests re-saving, unless the camera used a quality the database lacks (the number of table sets held for it is shown). In testing, about one genuine camera original in four gave such a false mismatch, so treat a mismatch as a reason to look further, not as a finding. Add your own reference images with `python -m forensic.qtables add <folder> --source "<name>"`. |
 | Content credentials and AI provenance | Validate C2PA Content Credentials and find declarations of AI generation. | A declaration of AI generation is strong evidence. No credentials is normal and means nothing. |
 | Error Level Analysis (ELA) | Quick look for areas compressed differently. | Edges and texture are bright in authentic images too. Compare like with like. Confirm with other analyses. |
 | JPEG Ghost | Find a region saved earlier at a lower quality. | A compact dark region at a quality where the rest is bright. |
@@ -573,10 +643,18 @@ viewer. Each result shows:
 | Non-aligned JPEG grid (NA-DJPG) | Detect cropping between saves, or a region from another JPEG. | A secondary grid over the whole image suggests cropping; in one region, a pasted region. Brick, fences and text can mimic a grid. |
 | Clone (copy-move) detection | Find an area copied from one part of the image to another, to hide or duplicate something. | Each copy is outlined (strong colour one side, light colour the other) with lines joining matching points, and its rotation, scale and shift are listed. Repeated patterns (tiles, windows, fences, text, symmetric objects) match naturally: judge each match against the scene. No match does not show the image is unedited. Part of the Smart Report for still images. |
 | Noise level map | Find areas whose fine-grain sensor noise is clearly stronger or weaker than elsewhere at the same brightness (pasted, smoothed or retouched areas). | Dark means less noise, bright yellow more; hatched areas cannot be measured. A compact area with different noise whose outline follows an object is worth a closer look; gradual changes across the frame are natural. A visual aid: its outlines are information, not warnings, and it is not part of the Smart Report. |
+| JPEG dimples | Find the faint mark many camera encoders leave in every 8x8 block, and areas that lack it. | A dimple (strength 13 or more) shows the image passed through a camera encoder that makes them; it often survives re-saving, so it does not prove the file is the original. Only about one camera original in ten has a dimple, so absence alone means nothing. Bright areas in the map lack the dimple the rest carries (pasted or retouched); hatched areas are too flat to tell. |
+| Luminance gradient (LGA) | See which way brightness changes everywhere (colour = direction, brightness = strength). | Compare surfaces that should be lit alike; a pasted object often shades in a direction that does not fit. Visual aid only. |
+| PRNU tampering map | For an image from a camera with a reference in the case, find areas without that camera's sensor fingerprint. | Only meaningful when the whole image matches (PCE above 60, shown). Outlined areas lack the fingerprint (pasted, cloned or painted); hatched areas are too dark, flat or saturated to decide. Needs a camera reference (9.4). |
+| Fusion map | One map that weighs A-DJPG, NA-DJPG, dimples and noise together. | Bright = belief of alteration; outlined areas list the analyses behind them. In testing it found about 8 in 10 pasted areas and outlined about 1 in 20 innocently re-saved images. Each input counts only when its conditions hold; open the inputs' own maps before relying on an outline. A fixed rule, not a learned model. |
 | Camera identification (PRNU) | Test if the image came from a specific camera. | PCE above 60 is consistent with the reference camera. Needs a camera reference (9.4). |
 | Camera-pipeline traces | Look for demosaicing traces (camera capture) and resampling (resized or rotated). | Traces present are consistent with a camera at this resolution. Their absence means little after JPEG or resizing. |
-| Learned AI-image detector | Run a detector your lab installed. | Available only when installed. A score to weigh with the others, never proof. |
+| Generated-image detector (GAN and diffusion) | Screen an image for being made entirely by an AI generator (Stable Diffusion, FLUX, DALL-E, Midjourney, GANs). Bundled; runs on the GPU when available. | Score 0.5 or more: consistent with generated; 0.2 to 0.8 is uncertain. Screening, never proof. In testing on 20 generators it had never seen, it caught 84 % of generated images with 0.4 % false alarms, but only 35-65 % for Adobe Firefly, Midjourney 6.1 and Ideogram 2, and fewer after JPEG re-saving or down-scaling. Newer generators can be missed, and a generated object pasted into a real photo is usually not detected. |
+| Learned AI-image detector | Run a further detector your lab installed (for example one trained on newer generators). | Available only when installed. A score to weigh with the others, never proof. |
 | Face-swap and face-edit checks | Compare each face's noise and detail with its surroundings. | z of 4 or more: the face differs more than almost any other region does. Faces under 40 pixels between the eyes give weak results. Mark faces the detector misses. |
+| Shadow consistency | Test whether one light casts every shadow. Open ⚙, **Pick on image**, then click a shadow point and the object point casting it, for each shadow (at least two). | Green region: where the light can be. **Inconsistent** names the smallest set of shadows that conflict (red in the map) and the tolerance the conflict holds to; report that tolerance. Use clear shadow-object pairs only. In testing there were no false alarms on consistent scenes, and a shadow from a light 20° off was caught in 84 % of cases (about half at 10°, rarely at 5°). **Consistent** does not show the image is authentic. |
+| Reflection consistency | Test reflections in one flat mirror, window or water: click an object point, then the same point in the reflection. | As for shadows; curved or rippled surfaces are not supported. |
+| Perspective consistency | Test whether lines parallel in the scene (building edges, kerbs, shelves) meet at one vanishing point: click two points along each line. | One direction per run. Lens distortion bends lines; correct it first. |
 | Double encoding (VPF) | Test if a video was decoded and re-encoded, and estimate the first GOP. | Re-encoding is not manipulation; it shows the file is not the recorder's original stream. |
 | Frame duplication and deletion | Find repeated frames, jumps, repeated segments and timestamp gaps. | Each finding marks frames to look at. CCTV repeats frames routinely. |
 
@@ -884,7 +962,10 @@ is in the [README](../README.md#connecting-an-agent). What an agent can and cann
 | A multi-frame filter says it needs a frame range | Set **[ In** and **Out ]** on a video (7.6). |
 | Export PNG is greyed out | Save and render first; accept or remove agent proposals; justify any generative step. |
 | "This recorder export cannot be opened directly" | Make a working copy (5.3). |
-| Carved video plays at the wrong speed | Re-convert with the recorder's real frame rate. |
+| A recorder file is refused as a closed format | Export a standard MP4 or AVI from the vendor's software, as the message says (5.3). |
+| Carved video plays at the wrong speed | Re-convert with the recorder's real frame rate, or use parse if it is offered. |
+| Parse fails (a "parser:" error, or the codec was not recognised) | The file may be damaged or a variant of the format. Try remux, then carve. |
+| ▦ MB is missing for a video | Macroblocks are read from the decoder for H.264 and MPEG-1/2/4 Part 2 and H.263, not H.265 or Motion JPEG. |
 | Double encoding says the codec is not supported | It works on H.264 and MPEG-1/2/4 Part 2 streams, not on H.265. |
 | Face check finds no face | The detector misses small, turned or covered faces; mark them in its settings (**⚙**). |
 | PRNU: "the image is larger than the camera reference" | Build the reference from images at the camera's full resolution. |

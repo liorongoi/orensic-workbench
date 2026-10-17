@@ -9,18 +9,18 @@ battery found an inconsistency, not that the item is authentic.
 
 from __future__ import annotations
 
-RULES_VERSION = "1.2.0"
+RULES_VERSION = "1.3.0"
 
 # Analyses run per media type, with their parameters (fixed, so triage is reproducible).
 BATTERY: dict[str, list[tuple[str, dict]]] = {
-    "image": [("file.metadata", {}), ("synthetic.provenance", {}), ("tamper.double_jpeg", {}), ("tamper.nonaligned_grid", {}),
-              ("tamper.copy_move", {})],
+    "image": [("file.metadata", {}), ("file.qt_database", {}), ("synthetic.provenance", {}), ("tamper.double_jpeg", {}),
+              ("tamper.nonaligned_grid", {}), ("tamper.jpeg_dimples", {}), ("tamper.copy_move", {})],
     "video": [("file.metadata", {}), ("synthetic.provenance", {}), ("video.frame_integrity", {}), ("video.double_encoding", {})],
     "container": [],
 }
 
 # Analyses that only apply to JPEG files (skipped for other images).
-JPEG_ONLY = frozenset({"tamper.double_jpeg", "tamper.nonaligned_grid"})
+JPEG_ONLY = frozenset({"tamper.double_jpeg", "tamper.nonaligned_grid", "tamper.jpeg_dimples", "file.qt_database"})
 
 # Flag code -> (level, short reason). Red: a local or structural inconsistency worth examining first.
 # Yellow: a processing history (re-saving, editing software, missing metadata) that limits what can be said.
@@ -28,6 +28,8 @@ RULES: dict[str, tuple[str, str]] = {
     "djpg.local": ("red", "a region is inconsistent with the image's double-compression history"),
     "nadjpg.local": ("red", "a region carries a JPEG grid offset from the rest"),
     "clone.match": ("red", "two areas of the image are near-identical (possible copy-move)"),
+    "prnu.local": ("red", "a region lacks the camera's sensor fingerprint"),
+    "fusion.local": ("red", "the combined local analyses point to an altered region"),
     "meta.thumbnail": ("red", "the embedded thumbnail does not match the image"),
     "meta.dimensions": ("red", "EXIF dimensions differ from the image"),
     "meta.structure": ("red", "the JPEG structure is irregular"),
@@ -36,6 +38,8 @@ RULES: dict[str, tuple[str, str]] = {
     "prov.c2pa_invalid": ("red", "the Content Credentials do not validate against the file"),
     "vint.repeated_segment": ("red", "a run of moving frames appears twice"),
     "meta.editor": ("yellow", "the Software tag names an image editor"),
+    "dimples.local": ("yellow", "a region lacks the camera JPEG dimple the rest of the image carries (check its map)"),
+    "qt.model_mismatch": ("yellow", "the JPEG tables match none recorded for the camera named in EXIF"),
     "meta.xmp_history": ("yellow", "XMP carries editing history"),
     "meta.date_mismatch": ("yellow", "modification time differs from capture time"),
     "meta.no_exif": ("yellow", "there is no EXIF metadata"),

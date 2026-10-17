@@ -51,7 +51,7 @@ function cardLine(a: AnalysisSchema): string | null {
     | { true_positive_rate?: number; false_positive_rate?: number }
     | undefined;
   if (!r || r.true_positive_rate === undefined) return null;
-  return `Validated ${c.validated_on}: detects ${Math.round((r.true_positive_rate ?? 0) * 100)} %, false alarms ${((r.false_positive_rate ?? 0) * 100).toFixed(1)} % (synthetic corpus; see card)`;
+  return `Validated ${c.validated_on}: detects ${Math.round((r.true_positive_rate ?? 0) * 100)} %, false alarms ${((r.false_positive_rate ?? 0) * 100).toFixed(1)} % (${c.seeded === false ? "held-out real data" : "synthetic corpus"}; see card)`;
 }
 
 function TriageBox({ evidence, triage, onTriage }: { evidence: Evidence; triage: Triage | null; onTriage: (t: Triage) => void }) {
@@ -172,7 +172,7 @@ export function AuthPanel(props: Props) {
                 {busy === a.id ? "Running…" : latest[a.id] ? "Re-run" : "Run"}
               </button>
             </div>
-            {a.id === "camera.prnu" && (
+            {a.params.some((p) => p.name === "reference_id") && (
               <select
                 onClick={(e) => e.stopPropagation()}
                 className="ref-select"

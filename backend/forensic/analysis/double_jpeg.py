@@ -37,7 +37,7 @@ DCT8[0] /= np.sqrt(2)
 def read_luma(data: bytes) -> np.ndarray:
     """The decoded Y plane (0..255 float64) without any colour conversion."""
     with Image.open(io.BytesIO(data)) as im:
-        if im.format != "JPEG":
+        if im.format not in ("JPEG", "MPO"):
             raise ValueError("double JPEG analysis needs a JPEG file")
         if im.mode in ("RGB", "YCbCr"):
             im.draft("YCbCr", im.size)
@@ -124,12 +124,14 @@ def adjpg(data: bytes, n_freq: int = 15, q1_max: int = 40) -> dict:
     if bh < 4 or bw < 4:
         raise ValueError("image is too small for double JPEG analysis")
     llr = np.zeros((bh, bw), np.float64)
+    nonzero = np.zeros((bh, bw), np.int32)  # informative coefficients per block (flat blocks have none)
     per_freq = []
     zz_pos = [divmod(int(ZIGZAG[k]), 8) for k in range(1, 1 + n_freq)]
     for (r, c) in zz_pos:
         q2 = float(q2_table[r, c])
         xa = np.rint(coef[:, :, r, c] / q2)
         xs = np.rint(shifted[:, :, r, c] / q2)
+        nonzero += (xa != 0)
         fit = _fit_frequency(xa.ravel(), xs.ravel(), q2, q1_max)
         entry = {"freq": [r, c], "q2": int(q2)}
         if fit is None:
@@ -160,6 +162,7 @@ def adjpg(data: bytes, n_freq: int = 15, q1_max: int = 40) -> dict:
         "score": score,
         "estimated_first_quality": est_q1,
         "block_llr": llr,
+        "block_nonzero": nonzero,
     }
 
 
@@ -190,6 +193,7 @@ ADJPG_THRESHOLD = 0.05  # calibrated on the validation corpus; see forensic/vali
 def double_jpeg(ctx: AnalysisContext, p: dict) -> AnalysisResult:
     res = adjpg(ctx.data, n_freq=p["frequencies"])
     llr = res.pop("block_llr")
+    res.pop("block_nonzero")
     double = res["score"] >= ADJPG_THRESHOLD and res["supporting_frequencies"] >= 2
     flags = []
     prob_single = 1.0 / (1.0 + np.exp(np.clip(cv2.blur(llr, (3, 3), borderType=cv2.BORDER_REFLECT), -30, 30)))
@@ -275,6 +279,29 @@ def grid_residual(E: np.ndarray) -> tuple[tuple[int, int], float, float]:
     return best
 
 
+def local_grid(E: np.ndarray, window: int, shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
+    """Secondary-grid score of sliding windows (half-window step), and a full-size map of it.
+
+    The map paints each window's score, halved and clipped to [0, 1], on its centre cell.
+    """
+    wb = max(4, window // 8)
+    step = max(1, wb // 2)
+    bh, bw = E.shape[2:]
+    rows, cols = max(1, (bh - wb) // step + 1), max(1, (bw - wb) // step + 1)
+    local = np.zeros((rows, cols), np.float32)
+    for i in range(rows):
+        for j in range(cols):
+            sub = E[:, :, i * step : i * step + wb, j * step : j * step + wb].mean(axis=(2, 3))
+            local[i, j] = grid_residual(sub)[2]
+    h, w = shape
+    heat = np.zeros((h, w), np.float32)
+    cell = cv2.resize(np.clip(local / 2, 0, 1), (cols * step * 8, rows * step * 8), interpolation=cv2.INTER_NEAREST)
+    o = (wb - step) * 4
+    hh, ww = min(cell.shape[0], h - o), min(cell.shape[1], w - o)
+    heat[o : o + hh, o : o + ww] = cell[:hh, :ww]
+    return local, heat
+
+
 @register(
     "tamper.nonaligned_grid",
     name="Non-aligned JPEG grid (NA-DJPG)",
@@ -303,22 +330,7 @@ def nonaligned_grid(ctx: AnalysisContext, p: dict) -> AnalysisResult:
         raise ValueError("image is too small for grid analysis")
     offset, z, score = grid_residual(E.mean(axis=(2, 3)))
     detected = score >= 1.0
-    wb = max(4, p["window"] // 8)
-    step = max(1, wb // 2)
-    bh, bw = E.shape[2:]
-    rows, cols = max(1, (bh - wb) // step + 1), max(1, (bw - wb) // step + 1)
-    local = np.zeros((rows, cols), np.float32)
-    for i in range(rows):
-        for j in range(cols):
-            sub = E[:, :, i * step : i * step + wb, j * step : j * step + wb].mean(axis=(2, 3))
-            local[i, j] = grid_residual(sub)[2]
-    h, w = y.shape
-    heat = np.zeros((h, w), np.float32)
-    # Paint each window's centre cell so the map lines up with the image.
-    cell = cv2.resize(np.clip(local / 2, 0, 1), (cols * step * 8, rows * step * 8), interpolation=cv2.INTER_NEAREST)
-    o = (wb - step) * 4
-    hh, ww = min(cell.shape[0], h - o), min(cell.shape[1], w - o)
-    heat[o : o + hh, o : o + ww] = cell[:hh, :ww]
+    local, heat = local_grid(E, p["window"], y.shape)
     share = float(np.mean(local >= 1.0))
     flags = []
     if detected:

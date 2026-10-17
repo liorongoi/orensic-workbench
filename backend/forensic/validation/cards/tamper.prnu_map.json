@@ -1,0 +1,38 @@
+{
+  "detector": "tamper.prnu_map",
+  "name": "PRNU tampering map",
+  "version": "1.0.0",
+  "validated_on": "2026-10-15",
+  "corpus": "synthetic photo-like scenes generated from fixed seeds (forensic.validation.run.scene)",
+  "seeded": true,
+  "results": {
+    "detection": {
+      "task": "Which area of an image from the reference camera lacks its sensor fingerprint?",
+      "cameras": "2 simulated sensors, PRNU std 0.005, 384x512; reference from 15 flat images at JPEG 95",
+      "positives": "40 images, each altered two ways in a third of each side (see true_positive_rate_by_condition), JPEG 85-95",
+      "negatives": "the same 40 images untouched",
+      "detected_means": "an outlined area covers at least 30% of the altered rectangle (128-px windows)",
+      "true_positive_rate_by_condition": {
+        "pasted from another camera": 0.65,
+        "copied from elsewhere in the same image": 0.825
+      },
+      "true_positive_rate": 0.65,
+      "false_positive_rate": 0.0
+    }
+  },
+  "known_failure_modes": [
+    "Needs a camera reference built from images of the same camera at the same resolution, and the whole image must match it (PCE above 60).",
+    "Areas smaller than about one window (128 px) are missed; dark, saturated and flat areas cannot be decided.",
+    "Simulated sensors follow the classical PRNU model; phones' multi-frame processing can weaken it locally.",
+    "Resizing, rotation by other than 90 degrees, or strong compression after editing defeat it."
+  ],
+  "software": {
+    "forensic_workbench": "0.3.0",
+    "numpy": "2.5.3",
+    "opencv": "5.0.0",
+    "pillow": "12.3.0",
+    "pywavelets": "1.8.0",
+    "python": "3.13.16"
+  },
+  "how_to_reproduce": "python -m forensic.validation run --camera-originals <folder>"
+}

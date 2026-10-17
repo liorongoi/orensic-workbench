@@ -69,9 +69,10 @@ validation run that fails if detector accuracy drops below the published floor).
 
 | Plan item | Where | How |
 |---|---|---|
-| DVR vendor formats | `forensic/formats.py` | Recorder exports are identified by signature (Dahua DAV, Hikvision, MPEG-PS/TS, raw H.264/H.265 and others). "Make working copy" either stream-copies into MPEG-TS with FFmpeg (no re-encode, recorder timestamps kept) or carves the H.264/H.265 elementary stream out of an unknown container with synthetic timestamps at a stated frame rate. The copy is new evidence linked to the original, with the method recorded. |
+| DVR vendor formats | `forensic/formats.py`, `forensic/dvr.py` | Recorder exports are identified by signature (Dahua DAV, Hikvision, Xiongmai/XMEye, HiSilicon HXVS, MPEG-PS/TS, AVI with vendor FourCCs, pcap/pcapng network captures of RTSP streams, raw H.264/H.265/MPEG-4/MPEG-2 and others; closed formats such as Avigilon AVK and Genetec G64 are refused with export advice). "Make working copy" either reads the container with Lucida's own parser (Dahua, Hikvision, XMEye, HiSilicon, MPEG-PS, MPEG-TS, AVI, RTP in pcap) and keeps the recorder's per-frame timing, clock, gaps and anomalies, or stream-copies into MPEG-TS with FFmpeg, or carves the H.264/H.265/MPEG-4/MPEG-2/Motion JPEG stream out of an unknown container with synthetic timestamps at a stated frame rate. Nothing is re-encoded. The copy is new evidence linked to the original, with the method recorded. |
 | Deblur | `forensic/filters/deblur.py` | Wiener and Richardson-Lucy (optional total-variation regularisation) for motion, defocus and Gaussian blur. "Estimate blur" suggests a motion length and angle from the cepstrum. |
 | Multi-frame super resolution | `forensic/filters/multiframe.py` | Registers frames to a reference (ECC), then iterative back-projection with robust median fusion (Irani-Peleg / Farsiu), 2-4x. |
+| Authenticate detectors added after the Amped comparison | `forensic/analysis/qtdb.py`, `dimples.py`, `gradient.py`, `fusion.py`, `camera.py`; `forensic/qtables.py` | Quantisation tables matched against an offline camera and software database (built from CC0 and free sample collections, growable from a lab's own reference images); JPEG dimples (Agarwal-Farid) with a missing-dimple map; luminance gradient (LGA) map; PRNU tampering map (Chen et al. 2008); Dempster-Shafer fusion map. Each with a detector card except LGA, a visual aid. |
 | Measurement | `forensic/measure.py` | Height by single-view metrology (Criminisi): vanishing point and ground horizon from traced lines plus one reference height. Distance and speed through a ground-plane homography from surveyed points; speed uses the frames' own timestamps. Every result carries a seeded Monte Carlo 95 % interval from clicking and survey uncertainty, and can be taken on an enhanced result. |
 | Double JPEG | `forensic/analysis/double_jpeg.py` | Aligned double compression (Bianchi-Piva) with a first-quality estimate and a per-block map of single-compressed (pasted) regions; non-aligned grid detection for crops between saves. |
 | PRNU | `forensic/prnu.py`, `forensic/analysis/camera.py` | Camera references are built from the case's own images (ML fingerprint, Binghamton-style residual). Matching reports peak-to-correlation energy (decision at PCE 60) with rotation, crop and scale search, and the number of hypotheses tried. |
@@ -85,7 +86,7 @@ validation run that fails if detector accuracy drops below the published floor).
 |---|---|---|
 | AI models | `forensic/models/`, [docs/ai-models.md](docs/ai-models.md) | A pinned manifest: every model's weights SHA-256, source, licence, training data and limits. Weights ship in the package and are verified before every load; inference runs on the GPU (DirectML on Windows) when a probe shows it reproduces bit for bit, otherwise on every CPU core; the device is printed in the report. Labs add their own models with a model card (`python -m forensic.models install`). |
 | AI-assisted enhancement | `forensic/filters/ai.py`, `forensic/policy.py` | AI super resolution (FSRCNN / ESPCN, 2-4x) and face redaction (YuNet). Both are badged "AI" in the UI and report with the model's hash. Super resolution is *generative*: watermarked "illustrative only", measurement refused, and it cannot be accepted or exported until an examiner writes a justification, which is logged. Agents cannot write one. |
-| AI-generated images | `forensic/analysis/synthetic.py` | Content Credentials (C2PA) read and validated offline, AI-generation declarations in IPTC/XMP and generator text chunks; camera-pipeline traces (CFA demosaicing and resampling); a slot for a learned detector the lab licenses and validates (none is bundled; see the licence policy). |
+| AI-generated images | `forensic/analysis/synthetic.py` | Content Credentials (C2PA) read and validated offline, AI-generation declarations in IPTC/XMP and generator text chunks; camera-pipeline traces (CFA demosaicing and resampling); the bundled Community Forensics GAN and diffusion detector (`forensic/analysis/generated.py`, MIT-licensed weights); and a slot for a further detector the lab licenses and validates. |
 | Deepfake / face swap | `forensic/analysis/faces.py` | Faces found by YuNet (or marked by hand) are compared with 200 random places in the same image for noise and detail, and with the image's double-JPEG history; on video, faces are tracked over sampled frames and flicker is measured. Results are z-scores with a reliability grade by face size. |
 | Video authentication | `forensic/analysis/video.py` | Double encoding from the variation of prediction footprint (former I-frames re-coded as P-frames), with the first GOP estimated; frame deletion (jumps), duplication (repeated moving segments), repeated frames and timestamp gaps. |
 | Photogrammetry | `forensic/measure.py` | Height by camera resection: at least six surveyed 3D points give focal length, position and pose; the target's height is read where the ray through its top meets the vertical through its base. Monte Carlo interval from clicking and survey uncertainty. |
@@ -127,7 +128,7 @@ Set `FORENSIC_AGENT_NAME` and `FORENSIC_AGENT_MODEL` so the audit log records wh
 
 ## Not yet
 
-- No learned AI-image or deepfake detector is bundled: the published ones reviewed carry non-commercial licences or lack validation on current generators. The slot (`synthetic.learned`) takes one the lab licenses and validates.
+- One learned generated-image detector is bundled (`synthetic.generated`: Community Forensics, CVPR 2025, MIT licence); it scores whole images for GAN and diffusion generation. A second slot (`synthetic.learned`) takes a detector the lab licenses and validates itself.
 - Every detector is so far validated on synthetic data only, including the phase 3 checks; no real photographs, real face swaps or recorder footage have been run. Run the validation with real material before relying on a detector in casework.
 - Clone detection, OCR, multi-view triangulation, native parsers for vendor formats FFmpeg cannot demux (they are carved instead), Postgres + S3 Object Lock, SSO, MCP agents sharing the API's job queue, and sandboxed parsers. Chains are linear; branching graphs use the same document format later.
 
@@ -146,6 +147,8 @@ backend/
     policy.py       rules for generative (AI) steps
     selftest.py     installation acceptance test
     formats.py      recorder export identification, remux and carving
+    dvr.py          native parsers for vendor recorder containers
+    dvr_net.py      video from network captures (RTP in pcap / pcapng)
     measure.py      height, distance and speed with uncertainty
     prnu.py         sensor fingerprint estimation and matching
     triage.py       Smart Report rules

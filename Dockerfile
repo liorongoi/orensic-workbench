@@ -7,6 +7,9 @@ WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci || npm install
 COPY frontend/ ./
+# The Help page bundles the guides from docs/.
+COPY docs/ /src/docs/
+COPY README.md /src/README.md
 RUN npm run build
 
 FROM python:3.12-slim-bookworm

@@ -7,6 +7,8 @@ import type {
   Case,
   Catalogue,
   Chain,
+  CodecInfo,
+  CodecSettings,
   Evidence,
   FilterSchema,
   FrameInfo,
@@ -19,7 +21,8 @@ import type {
 import { AuditPanel } from "./AuditPanel";
 import { AuthPanel } from "./AuthPanel";
 import { ChainEditor } from "./ChainEditor";
-import { ConvertPanel } from "./ConvertPanel";
+import { ConvertPanel, RecorderTimingPanel } from "./ConvertPanel";
+import { CODEC_VIEW_CODECS, CodecBar, describeBlock } from "./CodecBar";
 import { FrameStrip } from "./FrameStrip";
 import { MEASURE_FIELDS, MeasurePanel, type PointFields } from "./MeasurePanel";
 import { PlannerPanel } from "./PlannerPanel";
@@ -35,7 +38,10 @@ type Tab = "enhance" | "authenticate" | "measure" | "audit";
 const TAB_LABEL: Record<Tab, string> = { enhance: "Enhance", authenticate: "Authenticate", measure: "Measure", audit: "Audit & review" };
 type ExtPick = { field: string; count: number };
 
-const PROPRIETARY = new Set(["dahua_dav", "hikvision", "mpeg_ps", "annexb_h264", "annexb_hevc"]);
+const PROPRIETARY = new Set([
+  "dahua_dav", "hikvision", "hxvs", "xmeye", "hikvision_old", "mpeg_ps", "pcap",
+  "annexb_h264", "annexb_hevc", "annexb_mpeg4", "annexb_mpeg2",
+]);
 type View = { kind: "chain" } | { kind: "map"; digest: string; label: string };
 
 const sameGraph = (a: Graph, b: Graph) => JSON.stringify(a) === JSON.stringify(b);
@@ -62,6 +68,9 @@ export function Workspace({ caseId, filters, analyses }: Props) {
   const [frame, setFrame] = useState(0);
   const [tab, setTab] = useState<Tab>("enhance");
   const [view, setView] = useState<View>({ kind: "chain" });
+  const [codecOpen, setCodecOpen] = useState(false);
+  const [codec, setCodec] = useState<CodecSettings>({ layer: "type", mv: false, grid: false });
+  const [codecInfo, setCodecInfo] = useState<{ info: CodecInfo | null; error: string | null }>({ info: null, error: null });
   const [preview, setPreview] = useState<{ url: string | null; steps: StepInfo[]; error: string | null; busy: boolean }>({ url: null, steps: [], error: null, busy: false });
   const [picking, setPicking] = useState<{ nodeId: string; param: string; count?: number } | null>(null);
   const [status, setStatus] = useState<{ kind: "ok" | "bad" | "info"; text: string } | null>(null);
@@ -96,6 +105,8 @@ export function Workspace({ caseId, filters, analyses }: Props) {
   const dirty = !!(chain && draft && !sameGraph(chain.graph, draft));
   const isVideo = ev?.media_type === "video";
   const range = draft?.source.frames ?? null;
+  const codecOk = isVideo && CODEC_VIEW_CODECS.includes(ev?.probe.codec ?? "");
+  const codecOn = codecOpen && codecOk && view.kind === "chain" && !crop;
 
   const reload = useCallback(async () => {
     const d = await api.caseDetail(caseId);
@@ -254,11 +265,26 @@ export function Workspace({ caseId, filters, analyses }: Props) {
       redo();
     } else if (!mod && (e.key === "c" || e.key === "C") && ev && ev.media_type !== "container") {
       startCrop(null);
+    } else if (!mod && (e.key === "m" || e.key === "M") && codecOk) {
+      setCodecOpen((o) => !o);
     } else if (!mod && isVideo && frames.length && (e.key === "j" || e.key === "J" || e.key === "l" || e.key === "L")) {
       const step = (e.key.toLowerCase() === "l" ? 1 : -1) * (e.shiftKey ? 10 : 1);
       seek(Math.min(frames.length - 1, Math.max(0, frame + step)));
     }
   };
+  useEffect(() => {
+    if (!codecOn || !ev) return;
+    let alive = true;
+    setCodecInfo({ info: null, error: null });
+    api
+      .codecInfo(ev.id, frame)
+      .then((info) => alive && setCodecInfo({ info, error: null }))
+      .catch((e) => alive && setCodecInfo({ info: null, error: (e as Error).message }));
+    return () => {
+      alive = false;
+    };
+  }, [codecOn, ev?.id, frame]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => keys.current(e);
     window.addEventListener("keydown", onKey);
@@ -534,7 +560,8 @@ export function Workspace({ caseId, filters, analyses }: Props) {
     }
   } else if (tab === "authenticate") {
     for (const [k, pts] of Object.entries(mpoints)) {
-      if (k.startsWith("auth:") && pts.length) overlays.push({ points: pts, color: "#ffcf3f", mode: "rect", label: k.split(":")[2] });
+      // geometric checks are drawn as the clicked pairs (shadow to object, object to reflection, line points)
+      if (k.startsWith("auth:") && pts.length) overlays.push({ points: pts, color: "#ffcf3f", mode: k.startsWith("auth:geometry.") ? "segments" : "rect", label: k.split(":")[2] });
     }
   } else if (tab === "enhance" && mpoints.plan_roi?.length) {
     overlays.push({ points: mpoints.plan_roi, color: "#3fe08a", mode: "rect", label: "planner region" });
@@ -718,6 +745,7 @@ export function Workspace({ caseId, filters, analyses }: Props) {
               }}
             />
           )}
+          {ev?.conversion?.timing && <RecorderTimingPanel key={`t-${ev.id}`} evidence={ev} />}
           {removed.length > 0 && (
             <div className="removed">
               <button className="link small" onClick={() => setShowRemoved((v) => !v)}>
@@ -740,12 +768,28 @@ export function Workspace({ caseId, filters, analyses }: Props) {
 
       <main className="center">
         <Viewer
-          src={view.kind === "map" ? urls.derived(view.digest) : ev?.media_type === "container" ? null : preview.url}
-          overlays={view.kind === "chain" && !crop ? overlays : undefined}
-          compareSrc={ev ? urls.frame(ev.id, sourceFrame) : null}
-          label={viewerLabel}
-          busy={view.kind === "chain" && preview.busy}
-          error={view.kind === "chain" ? preview.error : null}
+          src={
+            codecOn && ev
+              ? urls.codec(ev.id, frame, codec)
+              : view.kind === "map"
+                ? urls.derived(view.digest)
+                : ev?.media_type === "container"
+                  ? null
+                  : preview.url
+          }
+          overlays={view.kind === "chain" && !crop && !codecOn ? overlays : undefined}
+          compareSrc={
+            codecOn && ev
+              ? urls.frame(ev.id, frame)
+              : ev && !crop && (view.kind === "map" || viewerLabel !== "Source")
+                ? urls.frame(ev.id, sourceFrame)
+                : null
+          }
+          compareLabel={codecOn ? "Frame" : undefined}
+          label={codecOn ? `Macroblocks${codecInfo.info ? ` · ${codecInfo.info.type}-frame` : ""}` : viewerLabel}
+          busy={view.kind === "chain" && !codecOn && preview.busy}
+          error={codecOn ? codecInfo.error : view.kind === "chain" ? preview.error : null}
+          describe={codecOn ? (x, y) => describeBlock(codecInfo.info, x, y) : undefined}
           points={picking ? pickPoints : undefined}
           pickHint={picking ? `Click to place points${picking.count ? ` (${pickPoints?.length ?? 0}/${picking.count})` : ""} · Esc to stop` : crop ? "Drag a box · Shift = square · Esc to cancel" : extHint}
           onPick={picking || extPick ? onPick : undefined}
@@ -753,9 +797,16 @@ export function Workspace({ caseId, filters, analyses }: Props) {
           illustrative={view.kind === "chain" && !!draft && draft.nodes.some((n) => n.enabled && filters.find((f) => f.id === n.filter)?.generative)}
           tools={
             ev && ev.media_type !== "container" ? (
-              <button className={crop ? "active" : ""} onClick={() => startCrop(null)} title="Crop: drag a box on the image (C)">
-                ⛶ Crop
-              </button>
+              <>
+                {codecOk && (
+                  <button className={codecOn ? "active" : ""} onClick={() => setCodecOpen((o) => !o)} title="Macroblocks, QP and motion vectors (M)">
+                    ▦ MB
+                  </button>
+                )}
+                <button className={crop ? "active" : ""} onClick={() => startCrop(null)} title="Crop: drag a box on the image (C)">
+                  ⛶ Crop
+                </button>
+              </>
             ) : null
           }
         />
@@ -764,6 +815,7 @@ export function Workspace({ caseId, filters, analyses }: Props) {
             Analysis map <button onClick={() => setView({ kind: "chain" })}>Back to image</button>
           </div>
         )}
+        {codecOn && <CodecBar settings={codec} info={codecInfo.info} error={codecInfo.error} onChange={setCodec} onClose={() => setCodecOpen(false)} />}
         {isVideo && frames.length > 0 && (
           <FrameStrip
             frames={frames}
