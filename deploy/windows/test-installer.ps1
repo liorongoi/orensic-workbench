@@ -56,7 +56,7 @@ if ($AllUsers -and -not ($acl | Where-Object { $_.IdentityReference -match "\\Fo
 }
 if ($AllUsers) { net localgroup "Forensic Examiners" | Out-Host }
 $programs = if ($AllUsers) { "$env:ProgramData\Microsoft\Windows\Start Menu\Programs" } else { "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" }
-foreach ($l in "Lucida.lnk", "Self-test.lnk", "Case data folder.lnk", "User manual.lnk", "Algorithm guide.lnk") {
+foreach ($l in "Lucida.lnk", "Self-test.lnk", "Case data folder.lnk", "User manual.lnk", "Algorithm guide.lnk", "Amped vs Lucida.lnk") {
     if (-not (Test-Path "$programs\Lucida\$l")) { throw "Start menu shortcut missing: $l" }
 }
 Get-Content "$App\BUILDINFO.txt"

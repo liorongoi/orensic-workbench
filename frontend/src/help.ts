@@ -2,6 +2,7 @@
 export const HELP_DOCS = [
   { id: "user-manual", title: "User manual", file: "user-manual.md" },
   { id: "algorithms", title: "Algorithm guide", file: "algorithms.md" },
+  { id: "amped-comparison", title: "Amped vs Lucida", file: "amped-comparison.md" },
   { id: "deployment", title: "Installation and settings", file: "deployment.md" },
   { id: "ai-models", title: "AI models", file: "ai-models.md" },
   { id: "validation", title: "Detector validation", file: "validation/README.md" },
