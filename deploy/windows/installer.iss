@@ -184,7 +184,7 @@ begin
   RamGB := 0;
   try
     if GetPhysicallyInstalledSystemMemory(KB) then
-      RamGB := (KB + 524288) div 1048576;
+      RamGB := Integer((KB + 524288) div 1048576);
   except
     Log('GetPhysicallyInstalledSystemMemory is not available');
   end;
@@ -201,7 +201,7 @@ begin
       if Items.Count > 0 then
       begin
         Bytes := StrToInt64Def(Items.ItemIndex(0).TotalPhysicalMemory, 0);
-        RamGB := (Bytes + 536870912) div 1073741824;
+        RamGB := Integer((Bytes + 536870912) div 1073741824);
       end;
     end;
     Items := Wmi.ExecQuery('SELECT Name, DriverVersion FROM Win32_VideoController');
@@ -242,8 +242,8 @@ begin
       DriverText(MinNvidiaDriver) + '. Install a current NVIDIA driver (an offline installer from nvidia.com ' +
       'carried on removable media works) so the learned models can use the GPU. Until then Lucida ' +
       'uses the CPU whenever the GPU does not give identical results on two runs.' + #13#10;
-  Log(Format('System check: %d GB RAM, %d CPU threads, GPUs: %s, NVIDIA driver %s',
-    [RamGB, CpuThreads, GpuNames, DriverText(NvidiaDriver)]));
+  // (The argument list stays on this line: a line starting with "[" would end the [Code] section.)
+  Log(Format('System check: %d GB RAM, %d CPU threads, GPUs: %s, NVIDIA driver %s', [RamGB, CpuThreads, GpuNames, DriverText(NvidiaDriver)]));
   if SysWarnings <> '' then
     Log('System check warnings:' + #13#10 + SysWarnings);
 end;
