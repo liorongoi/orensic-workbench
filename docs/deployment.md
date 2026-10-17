@@ -11,8 +11,8 @@ users" in the first dialog to install under Program Files for everyone on the ma
 Get the installer from the **Windows installer** workflow in GitHub Actions (artifact
 `Lucida-Windows-Setup`, with its `.sha256`), or from a release when a `v*` tag is
 pushed. Carry the `.exe` to the offline machine, check its SHA-256 if your lab requires it
-(`certutil -hashfile Lucida-0.3.0-Setup.exe SHA256`), and run it. The wizard asks
-for:
+(`certutil -hashfile Lucida-0.3.0-Setup.exe SHA256`), and run it. The wizard opens with a
+welcome page, the licence agreement and a list of what is included, then asks for:
 
 - the installation folder;
 - the case data folder (cases, write-once evidence store, derived outputs, audit log, logs).
@@ -21,7 +21,17 @@ for:
   that ran the installer is added), administrators and SYSTEM can open it; add each examiner with
   `net localgroup "Forensic Examiners" <account> /add`, and they sign out and in again;
 - the local port (default 8000; Lucida listens on 127.0.0.1 only, unless you tick the
-  lab-network option, see [Examiners on other PCs](#examiners-on-other-pcs)).
+  lab-network option, see [Examiners on other PCs](#examiners-on-other-pcs));
+- Start menu and desktop shortcuts (both ticked by default).
+
+A summary page shows every choice before anything is installed. The last page offers to run
+the acceptance self-test and to start Lucida straight away.
+
+**Uninstalling** (Settings > Apps, or **Start > Lucida > Uninstall Lucida**) removes the
+programs and shortcuts, then asks whether to delete the case data folder too. The answer
+defaults to **No**, and deleting needs a second confirmation. A drive root or a whole Documents,
+Desktop or profile folder is never deleted, even if it was chosen as the case data folder. A
+silent uninstall (`unins000.exe /VERYSILENT`) keeps case data unless you add `/DELETECASEDATA`.
 
 At the end it offers the acceptance self-test: it re-hashes every installed file against the
 installer's `SHA256SUMS`, then runs `forensic.selftest`, and saves its output under
@@ -43,14 +53,19 @@ these settings and the case data. Silent installation for managed rollouts:
 Lucida-0.3.0-Setup.exe /VERYSILENT /ALLUSERS /DIR="C:\Program Files\Lucida" /DATADIR="D:\Cases" /PORT=8000
 ```
 
+Add `/TASKS="startmenu,desktopicon"` to choose shortcuts (and `labnetwork` for the lab-network
+option); a `/TASKS` list replaces the defaults, so name every task you want.
+
 To build the installer yourself, on a connected Windows x64 machine with Python 3.12 and
 Node.js 22: `powershell -ExecutionPolicy Bypass -File deploy\windows\build-installer.ps1`
 (Inno Setup 6 is used, and installed with Chocolatey if missing). It writes
 `dist\Lucida-<version>-Setup.exe`; `BUILDINFO.txt` in the installation records the
 commit and the SHA-256 of the Python, FFmpeg and Visual C++ downloads it was built from.
 CI installs every build on a fresh Windows runner, for one user and for all users, blocks the
-bundled Python from the network, runs the self-test, starts Lucida, and uninstalls
-(`deploy\windows\test-installer.ps1`).
+bundled Python from the network, runs the self-test, starts Lucida, and uninstalls, once keeping
+and once deleting the case data (`deploy\windows\test-installer.ps1`). A further job clicks
+through the real wizard and uninstaller and keeps a screenshot of every page (artifact
+`Lucida-Setup-wizard-screenshots`, `deploy\windows\capture-wizard.ps1`).
 
 ## Several examiners
 

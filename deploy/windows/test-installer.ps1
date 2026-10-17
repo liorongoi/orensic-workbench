@@ -7,13 +7,15 @@
   Installs, blocks the installed Python from the network with a firewall rule (needs an
   administrator shell), runs the acceptance self-test with nothing but Windows itself on PATH,
   starts Lucida and checks the API and UI answer, then uninstalls and checks the case
-  data folder was kept. With -LabNetwork it chooses the lab-network option and checks that
+  data folder was kept (or, with -DeleteCaseData, that /DELETECASEDATA removed it, read-only
+  evidence included). With -LabNetwork it chooses the lab-network option and checks that
   Lucida answers over HTTPS with a certificate that verifies against its local authority.
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Installer,
     [switch]$AllUsers,
     [switch]$LabNetwork,
+    [switch]$DeleteCaseData,
     [string]$Root = "C:\fw-test",
     [int]$Port = 8765
 )
@@ -29,7 +31,7 @@ New-Item -ItemType Directory $Root | Out-Null
 
 Step "Installing silently ($mode)"
 $p = Start-Process -Wait -PassThru -FilePath (Resolve-Path $Installer) -ArgumentList @(
-    "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", $mode, $(if ($LabNetwork) { "/TASKS=desktopicon,labnetwork" } else { "/TASKS=desktopicon" }),
+    "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", $mode, $(if ($LabNetwork) { "/TASKS=startmenu,desktopicon,labnetwork" } else { "/TASKS=startmenu,desktopicon" }),
     "/DIR=`"$App`"", "/DATADIR=`"$Data`"", "/PORT=$Port", "/LOG=`"$Root\install.log`"")
 if ($p.ExitCode -ne 0) { Get-Content "$Root\install.log" -Tail 40; throw "installer exited with $($p.ExitCode)" }
 Get-Content "$App\workbench.ini"
@@ -131,12 +133,21 @@ try {
     Remove-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue
 }
 
-Step "Uninstalling"
-$u = Start-Process -Wait -PassThru -FilePath "$App\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+Step "Uninstalling$(if ($DeleteCaseData) { ' and deleting case data' })"
+$uargs = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
+if ($DeleteCaseData) {
+    # Stored evidence is read-only; the uninstaller has to clear that to remove it.
+    Set-Content "$Data\readonly-evidence-test.bin" "x"
+    Set-ItemProperty "$Data\readonly-evidence-test.bin" -Name IsReadOnly -Value $true
+    $uargs += "/DELETECASEDATA"
+}
+$u = Start-Process -Wait -PassThru -FilePath "$App\unins000.exe" -ArgumentList $uargs
 if ($u.ExitCode -ne 0) { throw "uninstaller exited with $($u.ExitCode)" }
 Start-Sleep -Seconds 3
 if (Test-Path "$App\python\python.exe") { throw "programs were not removed" }
-if (-not (Test-Path "$Data\forensic.sqlite3")) { throw "uninstall removed case data" }
+if ($DeleteCaseData) {
+    if (Test-Path $Data) { Get-ChildItem -Recurse $Data | Select-Object -First 20 | Out-Host; throw "/DELETECASEDATA left the case data folder behind" }
+} elseif (-not (Test-Path "$Data\forensic.sqlite3")) { throw "uninstall removed case data" }
 if (Test-Path "$programs\Lucida") { throw "Start menu folder was not removed" }
 if ($LabNetwork -and $AllUsers -and (Get-NetFirewallRule -DisplayName "Lucida" -ErrorAction SilentlyContinue)) {
     throw "uninstall left the firewall rule behind"

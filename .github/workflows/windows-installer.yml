@@ -46,9 +46,32 @@ jobs:
           $setup = (Get-ChildItem dist\*-Setup.exe).FullName
           switch ("${{ matrix.scope }}") {
             "all-users"     { deploy\windows\test-installer.ps1 -Installer $setup -AllUsers }
-            "all-users-lab" { deploy\windows\test-installer.ps1 -Installer $setup -AllUsers -LabNetwork }
+            "all-users-lab" { deploy\windows\test-installer.ps1 -Installer $setup -AllUsers -LabNetwork -DeleteCaseData }
             default         { deploy\windows\test-installer.ps1 -Installer $setup }
           }
+
+  # Clicks through the real wizard and uninstaller and keeps a screenshot of every page.
+  wizard-screenshots:
+    needs: build
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with: { sparse-checkout: deploy/windows }
+      - uses: actions/download-artifact@v4
+        with: { name: Lucida-Windows-Setup, path: dist }
+      - name: Capture the wizard pages
+        shell: pwsh
+        run: deploy\windows\capture-wizard.ps1 -Installer (Get-ChildItem dist\*-Setup.exe).FullName -OutDir wizard-screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Lucida-Setup-wizard-screenshots
+          path: wizard-screenshots
+          if-no-files-found: warn
+      - name: Print the screenshots (base64, one line each) for readers without artifact access
+        if: always()
+        shell: pwsh
+        run: Get-ChildItem wizard-screenshots\*.png -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "WIZARD-PNG $($_.Name) $([Convert]::ToBase64String([IO.File]::ReadAllBytes($_.FullName)))" }
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

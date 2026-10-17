@@ -38,7 +38,15 @@ PrivilegesRequiredOverridesAllowed=dialog commandline
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
+; Wizard pages: welcome, licence, what is included, install folder, case data folder, port,
+; shortcuts and network, ready, installing, finish (with "Start Lucida now").
+DisableWelcomePage=no
+LicenseFile=licence.txt
 InfoBeforeFile=install-notes.txt
+DisableReadyPage=no
+DisableFinishedPage=no
+WizardImageFile=wizard\wizard-large-100.bmp,wizard\wizard-large-150.bmp,wizard\wizard-large-200.bmp
+WizardSmallImageFile=wizard\wizard-small-100.bmp,wizard\wizard-small-150.bmp,wizard\wizard-small-200.bmp
 OutputDir={#OutputDir}
 OutputBaseFilename=Lucida-{#AppVersion}-Setup
 SetupIconFile=lucida.ico
@@ -55,7 +63,12 @@ SetupLogging=yes
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[Messages]
+WelcomeLabel2=This will install [name/ver] on your computer.%n%nLucida is an offline forensic image and video workbench. Everything it needs is inside this installer: the Python runtime, FFmpeg, the AI models, the user interface and the guides. No internet connection is needed, now or later.%n%nIt is recommended that you close all other applications before continuing.
+FinishedLabel=Setup has finished installing [name] on your computer. Start it from the Start menu or the desktop shortcut; it opens in your browser.
+
 [Tasks]
+Name: "startmenu"; Description: "Create Start menu shortcuts"; GroupDescription: "Shortcuts:"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"
 Name: "labnetwork"; Description: "Let examiners connect from other PCs on the lab network (HTTPS, Lucida sign-in)"; GroupDescription: "Network:"; Flags: unchecked
 
@@ -72,6 +85,7 @@ Type: files; Name: "{autodesktop}\{#OldAppName}.lnk"
 [Files]
 Source: "{#PayloadDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "lucida.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "licence.txt"; DestDir: "{app}\licences"; DestName: "Lucida-licence.txt"; Flags: ignoreversion
 
 [Dirs]
 ; Case data stays when Lucida is uninstalled. A per-user install keeps the folder's
@@ -88,18 +102,18 @@ Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "port"; String: "{co
 Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "network"; String: "{code:NetworkMode}"
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Start Lucida and open it in the browser"
-Name: "{group}\Self-test"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" selftest --pause"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Check the installation and run the acceptance self-test"
-Name: "{group}\Case data folder"; Filename: "{code:DataDir}"
-Name: "{group}\User manual"; Filename: "{app}\docs\user-manual.md"
-Name: "{group}\Algorithm guide"; Filename: "{app}\docs\algorithms.md"
-Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
+Name: "{group}\{#AppName}"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Start Lucida and open it in the browser"; Tasks: startmenu
+Name: "{group}\Self-test"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" selftest --pause"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Check the installation and run the acceptance self-test"; Tasks: startmenu
+Name: "{group}\Case data folder"; Filename: "{code:DataDir}"; Tasks: startmenu
+Name: "{group}\User manual"; Filename: "{app}\docs\user-manual.md"; Tasks: startmenu
+Name: "{group}\Algorithm guide"; Filename: "{app}\docs\algorithms.md"; Tasks: startmenu
+Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"; Tasks: startmenu
 Name: "{autodesktop}\{#AppName}"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Start Lucida and open it in the browser"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\vcredist\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing the Microsoft Visual C++ runtime..."; Check: NeedsVCRedist; Flags: waituntilterminated
 Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" selftest --pause"; WorkingDir: "{app}"; Description: "Run the acceptance self-test now (recommended)"; Flags: postinstall skipifsilent
-Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; Description: "Start {#AppName}"; Flags: postinstall nowait unchecked skipifsilent
+Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; Description: "Start {#AppName} now"; Flags: postinstall nowait unchecked skipifsilent
 
 [UninstallRun]
 ; Removes the inbound rule an all-users lab-network install added (harmless when there is none).
@@ -140,7 +154,7 @@ begin
   DataPage := CreateInputDirPage(wpSelectDir,
     'Case data folder', 'Where should Lucida keep case data?',
     'Cases, the write-once evidence store, derived outputs, the audit log and reports are kept in this folder. ' +
-    'Choose a drive with enough space for your evidence. It is never removed when Lucida is uninstalled.',
+    'Choose a drive with enough space for your evidence. It is kept when Lucida is uninstalled unless you choose to delete it then.',
     False, '');
   DataPage.Add('');
   // /DATADIR= and /PORT= on the command line set these for a silent install.
@@ -278,4 +292,91 @@ begin
   Result := IsAdminInstallMode and FileExists(ExpandConstant('{app}\vcredist\vc_redist.x64.exe')) and
     not (RegQueryDWordValue(HKLM64, 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Installed', Installed)
          and (Installed = 1));
+end;
+
+// ---- Uninstall: case data is kept unless the user chooses to delete it ----
+
+var
+  CaseDataDir: String;
+  DeleteCaseData: Boolean;
+
+function HasSwitch(Name: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), '/' + Name) = 0 then
+      Result := True;
+end;
+
+function SameFolder(A, B: String): Boolean;
+begin
+  Result := CompareText(RemoveBackslashUnlessRoot(A), RemoveBackslashUnlessRoot(B)) = 0;
+end;
+
+function IsUnsafeToDelete(Dir: String): Boolean;
+begin
+  // Never delete a drive root or a whole user or system folder, even if it was chosen as the
+  // case data folder: only a folder that belongs to Lucida alone may go.
+  Result := (Length(RemoveBackslashUnlessRoot(Dir)) <= 3) or
+    SameFolder(Dir, ExpandConstant('{userdocs}')) or SameFolder(Dir, ExpandConstant('{commondocs}')) or
+    SameFolder(Dir, ExpandConstant('{userdesktop}')) or SameFolder(Dir, ExpandConstant('{commondesktop}')) or
+    SameFolder(Dir, ExpandConstant('{%USERPROFILE}')) or SameFolder(Dir, ExpandConstant('{win}')) or
+    SameFolder(Dir, ExpandConstant('{commonpf}')) or SameFolder(Dir, ExtractFileDir(ExpandConstant('{app}')));
+end;
+
+function AskDeleteCaseData(): Boolean;
+begin
+  Result := MsgBox('Lucida keeps your case data when it is uninstalled:' + #13#10#13#10 + '    ' + CaseDataDir + #13#10#13#10 +
+    'This folder holds every case, the stored evidence, derived outputs, the audit log and reports. ' +
+    'Keep it if you may need any of it again, or if you will reinstall Lucida.' + #13#10#13#10 +
+    'Do you also want to permanently delete the case data folder?',
+    mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+  if Result then
+    Result := MsgBox('All cases and evidence in' + #13#10#13#10 + '    ' + CaseDataDir + #13#10#13#10 +
+      'will be deleted. This cannot be undone. Delete the case data?',
+      mbError, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Code: Integer;
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    // Read the folder now: workbench.ini is removed with the programs.
+    CaseDataDir := RemoveBackslashUnlessRoot(GetIniString('workbench', 'data_dir', '', ExpandConstant('{app}\workbench.ini')));
+    DeleteCaseData := False;
+    if (CaseDataDir = '') or not DirExists(CaseDataDir) then
+      Exit;
+    // A silent uninstall keeps case data unless /DELETECASEDATA is given.
+    if UninstallSilent then
+      DeleteCaseData := HasSwitch('DELETECASEDATA')
+    else
+      DeleteCaseData := AskDeleteCaseData();
+    if DeleteCaseData and IsUnsafeToDelete(CaseDataDir) then
+    begin
+      Log('Not deleting case data: ' + CaseDataDir + ' is a drive root or a shared system folder');
+      if not UninstallSilent then
+        MsgBox(CaseDataDir + ' is not a folder Lucida can delete as a whole, so it was kept. Delete the case files in it yourself.',
+          mbInformation, MB_OK);
+      DeleteCaseData := False;
+    end;
+  end
+  else if (CurUninstallStep = usPostUninstall) and DeleteCaseData then
+  begin
+    // Stored evidence is read-only by design; clear that so the folder can be removed.
+    Exec(ExpandConstant('{sys}\attrib.exe'), '-R "' + CaseDataDir + '\*" /S /D', '', SW_HIDE, ewWaitUntilTerminated, Code);
+    DelTree(CaseDataDir, True, True, True);
+    if DirExists(CaseDataDir) then
+    begin
+      Log('Case data folder could not be removed completely: ' + CaseDataDir);
+      if not UninstallSilent then
+        MsgBox('Some files in ' + CaseDataDir + ' could not be deleted (they may be open in another program). Delete the folder yourself.',
+          mbError, MB_OK);
+    end
+    else
+      Log('Deleted case data folder ' + CaseDataDir);
+  end;
 end;
