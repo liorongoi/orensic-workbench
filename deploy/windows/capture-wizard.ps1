@@ -76,14 +76,20 @@ function Button($win, $name) {
     return $null
 }
 
-function Press($b) {
-    # Invoke on a background thread: UI Automation's Invoke waits for the button's handler, and
-    # the uninstaller's "Yes" runs the whole uninstall (including our own question box) inside
-    # it, which would deadlock this script.
-    Start-ThreadJob -ScriptBlock {
-        param($e) $e.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    } -ArgumentList $b | Out-Null
-    Start-Sleep -Milliseconds 300
+function Press($b, [switch]$NoWait) {
+    if (-not $NoWait) {
+        $b.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        return
+    }
+    # UI Automation's Invoke waits for the button's handler. The uninstaller's "Yes" runs the
+    # whole uninstall (including our own question box) inside it, so click it from another
+    # process to avoid a deadlock.
+    $h = $b.Current.NativeWindowHandle
+    $cmd = "Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes; " +
+        "[System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$h).GetCurrentPattern(" +
+        "[System.Windows.Automation.InvokePattern]::Pattern).Invoke()"
+    Start-Process -WindowStyle Hidden -FilePath (Get-Process -Id $PID).Path -ArgumentList "-NoProfile", "-Command", $cmd | Out-Null
+    Start-Sleep -Seconds 1
 }
 
 function PageName($win) {
@@ -120,7 +126,7 @@ for ($page = 0; $page -lt 20; $page++) {
         Get-Process | Where-Object { $_.MainWindowTitle -match '^Setup - Lucida' } | Stop-Process -Force -ErrorAction SilentlyContinue
         break
     }
-    if ($b = Button $win 'Install') { Press $b; continue }
+    if ($b = Button $win 'Install') { Press $b -NoWait; continue }
     if ($b = Button $win 'Next') { Press $b; continue }
 }
 if (-not (Test-Path "$Root\app\unins000.exe")) { Get-Content "$Root\wizard.log" -Tail 40; throw "the wizard did not install Lucida" }
@@ -130,7 +136,7 @@ Start-Sleep -Seconds 2
 Start-Process -FilePath "$Root\app\unins000.exe" | Out-Null
 $confirm = Find-Window 'Uninstall'
 Snap $confirm.Current.NativeWindowHandle "uninstall_confirm" | Out-Null
-Press (Button $confirm 'Yes')
+Press (Button $confirm 'Yes') -NoWait
 $keep = $null
 for ($i = 0; $i -lt 120 -and -not $keep; $i++) {
     Start-Sleep -Milliseconds 500
@@ -140,7 +146,7 @@ for ($i = 0; $i -lt 120 -and -not $keep; $i++) {
 }
 if (-not $keep) { throw "the keep-or-delete case data question did not appear" }
 Snap $keep.Current.NativeWindowHandle "uninstall_case_data_question" | Out-Null
-Press (Button $keep 'No')
+Press (Button $keep 'No') -NoWait
 $done = $null
 for ($i = 0; $i -lt 240 -and -not $done; $i++) {
     Start-Sleep -Milliseconds 500
@@ -148,7 +154,7 @@ for ($i = 0; $i -lt 240 -and -not $done; $i++) {
         if ($w.Current.Name -match 'Uninstall' -and (Controls $w ([System.Windows.Automation.ControlType]::Text) | Where-Object { $_.Current.Name -match 'successfully removed' })) { $done = $w }
     }
 }
-if ($done) { Snap $done.Current.NativeWindowHandle "uninstall_done" | Out-Null; Press (Button $done 'OK') }
+if ($done) { Snap $done.Current.NativeWindowHandle "uninstall_done" | Out-Null; Press (Button $done 'OK') -NoWait }
 Start-Sleep -Seconds 2
 if (-not (Test-Path "$Root\case data")) { throw "answering No removed the case data folder" }
 Write-Host "Wizard screenshots in $OutDir"
