@@ -93,6 +93,7 @@ Name: "{group}\Self-test"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launc
 Name: "{group}\Case data folder"; Filename: "{code:DataDir}"
 Name: "{group}\User manual"; Filename: "{app}\docs\user-manual.md"
 Name: "{group}\Algorithm guide"; Filename: "{app}\docs\algorithms.md"
+Name: "{group}\Amped vs Lucida"; Filename: "{app}\docs\amped-comparison.md"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Start Lucida and open it in the browser"; Tasks: desktopicon
 

@@ -4,6 +4,7 @@ import { Marked } from "marked";
 // matches the installed version.
 import manual from "../../../docs/user-manual.md?raw";
 import algorithms from "../../../docs/algorithms.md?raw";
+import ampedComparison from "../../../docs/amped-comparison.md?raw";
 import deployment from "../../../docs/deployment.md?raw";
 import aiModels from "../../../docs/ai-models.md?raw";
 import validation from "../../../docs/validation/README.md?raw";
@@ -13,6 +14,7 @@ import { HELP_DOCS, type HelpDocId, readHelpHash } from "../help";
 const TEXT: Record<HelpDocId, string> = {
   "user-manual": manual,
   algorithms,
+  "amped-comparison": ampedComparison,
   deployment,
   "ai-models": aiModels,
   validation,
