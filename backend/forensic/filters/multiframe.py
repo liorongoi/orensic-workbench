@@ -294,3 +294,58 @@ def denoise_temporal(stack, p):
         return cv2.fastNlMeansDenoisingColored(u, None, p["strength"], p["strength"], 7, 21).astype(np.float32) / 255.0
 
     return np.stack(compute.pmap(one, range(n)))
+
+
+def _u8_luma(img: np.ndarray) -> np.ndarray:
+    return np.clip(np.rint(luminance(img) * 255.0), 0, 255).astype(np.uint8)
+
+
+@register(
+    "stack.turbulence",
+    name="Turbulence removal",
+    version="1.0.0",
+    category="Multi-frame",
+    description="For footage through hot air or over long distances, where the scene shimmers and wobbles from frame to "
+    "frame. Builds a steady reference (the per-pixel median), warps every frame onto it with dense optical flow so each "
+    "detail sits in its true place, fuses the aligned frames, then removes the remaining soft blur by total-variation "
+    "deconvolution. Needs a fixed camera (stabilise first if it moves) and a static scene: moving objects are averaged away.",
+    reference="X. Zhu and P. Milanfar, 'Removing Atmospheric Turbulence via Space-Invariant Deconvolution', IEEE TPAMI "
+    "35(1), 2013; G. Farnebäck, 'Two-Frame Motion Estimation Based on Polynomial Expansion', SCIA 2003; Y. Wang et al., "
+    "SIAM J. Imaging Sciences 1(3), 2008 (final deconvolution).",
+    input_kind="stack",
+    output_kind="image",
+    params=[
+        Param("passes", "int", 2, "Registration passes", 1, 5, 1,
+              help="Each pass registers the frames to the previous pass's fused image"),
+        Param("fusion", "choice", "median", "Fusion", choices=("mean", "median")),
+        Param("residual_blur", "float", 1.0, "Remaining blur sigma (px)", 0.0, 5.0, 0.1,
+              help="Softness left after fusion, removed by deconvolution; 0 skips this step"),
+        Param("regularisation", "float", 0.001, "Regularisation", 1e-5, 0.1, 0.0005),
+    ],
+)
+def turbulence(stack, p):
+    _require_stack(stack)
+    return turbulence_fuse(stack, p["passes"], p["fusion"], p["residual_blur"], p["regularisation"])
+
+
+def turbulence_fuse(stack, passes: int, fusion: str, residual_blur: float, regularisation: float) -> np.ndarray:
+    from .deblur import make_psf, tv_psf
+
+    n, h, w = stack.shape[:3]
+    if n < 3:
+        raise FilterError("turbulence removal needs at least 3 frames")
+    fuse = compute.median0 if fusion == "median" else (lambda s: compute.mean0(s, np.float64))
+    fused = fuse(stack).astype(np.float32)
+    gx, gy = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
+    for _ in range(passes):
+        ref = _u8_luma(fused)
+
+        def align(i):
+            flow = cv2.calcOpticalFlowFarneback(ref, _u8_luma(stack[i]), None, 0.5, 3, 15, 3, 5, 1.2, 0)
+            return cv2.remap(stack[i], gx + flow[..., 0], gy + flow[..., 1], cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+
+        fused = fuse(np.stack(compute.pmap(align, range(n)))).astype(np.float32)
+    if residual_blur > 0:
+        psf = make_psf({"psf": "gaussian", "sigma": residual_blur})
+        fused = tv_psf(fused, psf, regularisation, 3)
+    return np.clip(fused, 0, 1).astype(np.float32)

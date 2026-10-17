@@ -40,7 +40,9 @@ import numpy as np
 from PIL import Image
 
 from .. import __version__
-from ..filters.deblur import estimate_motion_blur, make_psf, richardson_lucy_psf, tv_psf, wiener_psf
+from ..filters.base import REGISTRY
+from ..filters.deblur import estimate_kernel, estimate_motion_blur, make_psf, richardson_lucy_psf, streak_psf, tv_psf, wiener_psf
+from ..filters.multiframe import turbulence_fuse
 
 # Settings each filter is tried at. The app's default is always among them.
 GRID: dict[str, list[dict]] = {
@@ -50,7 +52,11 @@ GRID: dict[str, list[dict]] = {
 }
 DEFAULT = {"wiener": {"nsr": 0.01}, "richardson_lucy": {"iterations": 20, "tv": 0.0},
            "tv": {"regularisation": 0.002, "iterations": 3}}
-NAMES = {"wiener": "Wiener", "richardson_lucy": "Richardson-Lucy", "tv": "Total variation"}
+NAMES = {"wiener": "Wiener", "richardson_lucy": "Richardson-Lucy", "tv": "Total variation", "blind": "Blind (estimated kernel)",
+         "variable": "Variable motion (4 streaks drawn)", "one_streak": "Uniform motion (1 streak drawn)", "single": "One frame", "mean": "Mean of frames", "median": "Median of frames",
+         "turbulence": "Turbulence removal"}
+BLIND_GRID = [{"smoothness": l, "regularisation": r} for l in (0.004, 0.01, 0.02) for r in (5e-4, 1e-3, 2e-3, 5e-3)]
+DEFAULT["blind"] = {"smoothness": 0.01, "regularisation": 0.002}
 
 
 def deconvolve(method: str, img: np.ndarray, psf: np.ndarray, s: dict) -> np.ndarray:
@@ -142,6 +148,12 @@ def _kernel_distance(a: np.ndarray, b: np.ndarray) -> float:
     B[: b.shape[0], : b.shape[1]] = b
     corr = np.fft.irfft2(np.fft.rfft2(A) * np.conj(np.fft.rfft2(B)), s=(n, n))
     return float(np.sum(a * a) + np.sum(b * b) - 2 * corr.max())
+
+
+def _fit_delta(size: int) -> np.ndarray:
+    k = np.zeros((size, size))
+    k[size // 2, size // 2] = 1.0
+    return k
 
 
 def closest_parametric_psf(k: np.ndarray) -> tuple[np.ndarray, dict]:
@@ -325,6 +337,7 @@ def run_levin(folder: Path, references: dict[str, Path], save_inputs: Path | Non
         estimates[c["name"]] = make_psf({"psf": "motion", "length": e["length"], "angle": e["angle"]})
     res["app_motion_estimate"] = evaluate(cases, levin_score, lambda c: estimates[c["name"]])
     res["references"] = {name: score_folder(cases, levin_score, p) for name, p in references.items()}
+    res["extra"] = levin_extras(cases)
     return res
 
 
@@ -341,6 +354,200 @@ def run_synthetic(sets: dict[str, Path], kernels: list[np.ndarray], sigmas: list
                 "true_kernel": evaluate(cases, synthetic_score),
                 "references": {n: score_folder(cases, synthetic_score, p) for n, p in references.items()}}
     return res
+
+
+# Blur the examiner does not have to describe -------------------------------------------------
+
+
+def shake_trajectory(length: float, seed: int, steps: int = 64) -> np.ndarray:
+    """A random camera-shake path (Boracchi and Foi 2012): inertia, a pull back to the start, and occasional jerks."""
+    rng = np.random.default_rng(seed)
+    v = rng.normal(0, 1, 2)
+    v /= np.linalg.norm(v)
+    p = np.zeros((steps, 2))
+    for t in range(1, steps):
+        jerk = rng.normal(0, 1.0, 2) if rng.random() < 0.05 else 0.0
+        v = v + rng.normal(0, 0.4, 2) - 0.08 * p[t - 1] / max(1.0, np.linalg.norm(p[t - 1])) + jerk
+        v /= max(np.linalg.norm(v), 1e-9)
+        p[t] = p[t - 1] + v
+    seg = np.hypot(*np.diff(p, axis=0).T).sum()
+    return p * (length / seg)
+
+
+def drawn_path(trajectory: np.ndarray, clicks: int = 10, seed: int = 0) -> list[list[float]]:
+    """An examiner's clicks along a blur path: evenly spaced along it, each off by up to half a pixel."""
+    seg = np.hypot(*np.diff(trajectory, axis=0).T)
+    cum = np.concatenate([[0.0], np.cumsum(seg)])
+    t = np.linspace(0, cum[-1], clicks)
+    pick = np.stack([np.interp(t, cum, trajectory[:, 0]), np.interp(t, cum, trajectory[:, 1])], 1)
+    return (pick + np.random.default_rng(seed).uniform(-0.5, 0.5, pick.shape)).tolist()
+
+
+def run_shake(sets: dict[str, Path], lengths=(15.0, 25.0), shakes: int = 4, noise: float = 1.0) -> dict:
+    """Curved camera-shake blur generated along random paths, as the Sun et al. 2013 and Lai et al. 2016 sets are made."""
+    cases = []
+    for label, folder in sets.items():
+        for name, x in _sharp_images(folder):
+            for L in lengths:
+                for si in range(shakes):
+                    traj = shake_trajectory(L, seed=si)
+                    k = make_psf({"psf": "path", "path": traj.tolist()})
+                    y = _blur(x, k, circular=False) + np.random.RandomState(si).normal(0, noise / 255.0, x.shape)
+                    cases.append({"name": f"{label}_{name}_L{L:g}_t{si}", "blurred": np.clip(y, 0, 1), "sharp": x,
+                                  "kernel": k, "trajectory": traj})
+    paths = {c["name"]: make_psf({"psf": "path", "path": drawn_path(c["trajectory"])}) for c in cases}
+    line = {}
+    for c in cases:
+        key = c["name"].split("_L")[1]
+        if key not in line:
+            line[key] = closest_parametric_psf(c["kernel"])[0]
+    tv = {"tv": [{"regularisation": r, "iterations": 3} for r in (3e-4, 1e-3, 3e-3)]}
+    blind_grid = {"blind": [{"smoothness": l, "regularisation": r} for l in (0.004, 0.01) for r in (3e-4, 1e-3, 3e-3)]}
+    return {"n": len(cases),
+            "blurred": _brief(summarise({c["name"]: _interior_score(c["blurred"], c["sharp"]) for c in cases})),
+            "True kernel": evaluate(cases, _interior_score, methods=("tv",), grid=tv),
+            "Drawn path (10 clicks)": evaluate(cases, _interior_score, lambda c: paths[c["name"]], methods=("tv",), grid=tv),
+            "Closest straight line or disk": evaluate(cases, _interior_score, lambda c: line[c["name"].split("_L")[1]],
+                                                      methods=("tv",), grid=tv),
+            "Blind": evaluate(cases, _interior_score, methods=("blind",), grid=blind_grid, runner=_blind_runner({}))}
+
+
+def light_streak(k: np.ndarray, noise: float = 0.005, seed: int = 0) -> np.ndarray:
+    """The kernel as an 8-bit photo of a small light would record it: dim background, sensor noise, no saturation."""
+    pad = 8
+    canvas = np.full((k.shape[0] + 2 * pad, k.shape[1] + 2 * pad), 0.05)
+    canvas[pad:-pad, pad:-pad] += 0.85 * k / k.max()
+    canvas += np.random.default_rng(seed).normal(0, noise, canvas.shape)
+    u8 = np.clip(np.round(canvas * 255), 0, 255) / 255.0
+    k = streak_psf(np.dstack([u8] * 3), [[0, 0], [canvas.shape[1], canvas.shape[0]]])
+    return k / k.sum()
+
+
+def _blind_runner(cache: dict):
+    def run(m, c, s):
+        key = (c["name"], s["smoothness"])
+        if key not in cache:
+            cache[key] = estimate_kernel(c["blurred"], 31, s["smoothness"], 5)
+        return deconvolve("tv", c["blurred"], cache[key], {"regularisation": s["regularisation"], "iterations": 3})
+    return run
+
+
+def levin_extras(cases: list[dict]) -> dict:
+    """The blur shapes an examiner can give without knowing the kernel, and the blind estimate."""
+    streaks = {c["name"]: light_streak(c["kernel"]) for c in cases}
+    two = ("richardson_lucy", "tv")
+    return {
+        "Light streak": evaluate(cases, levin_score, lambda c: streaks[c["name"]], methods=two),
+        "Blind": evaluate(cases, levin_score, methods=("blind",), grid={"blind": BLIND_GRID}, runner=_blind_runner({})),
+    }
+
+
+def _interior_score(est: np.ndarray, sharp: np.ndarray, border: int = 20) -> dict:
+    i = (slice(border, -border), slice(border, -border))
+    return {"psnr": psnr(est[i], sharp[i]), "ssim": ssim(est[i], sharp[i])}
+
+
+def _sharp_images(folder: Path) -> list[tuple[str, np.ndarray]]:
+    files = sorted(p for p in folder.iterdir() if p.suffix.lower() in (".png", ".bmp", ".tif", ".jpg"))
+    out = []
+    for f in files:
+        x = _read(f)
+        out.append((f.stem, x.mean(axis=2) if x.ndim == 3 else x))
+    return out
+
+
+def rotation_blur(x: np.ndarray, degrees: float, centre: tuple[float, float], steps: int = 61) -> np.ndarray:
+    """Exposure during a camera roll: the mean of the image rotated through the angle, about a point."""
+    h, w = x.shape[:2]
+    acc = np.zeros_like(x, dtype=np.float64)
+    for a in np.linspace(-degrees / 2, degrees / 2, steps):
+        m = cv2.getRotationMatrix2D(centre, float(a), 1.0)
+        acc += cv2.warpAffine(x.astype(np.float32), m, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+    return acc / steps
+
+
+def rotation_streaks(degrees: float, centre: tuple[float, float], h: int, w: int, seed: int = 0) -> list[list[float]]:
+    """An examiner's clicks on both ends of the blur streak at four places, each off by up to half a pixel."""
+    rng = np.random.default_rng(seed)
+    pts = []
+    for fy, fx in ((0.2, 0.2), (0.2, 0.8), (0.8, 0.2), (0.8, 0.8)):
+        x, y = fx * w, fy * h
+        for a in (-degrees / 2, degrees / 2):
+            m = cv2.getRotationMatrix2D(centre, float(a), 1.0)
+            q = m @ np.array([x, y, 1.0])
+            pts.append((q + rng.uniform(-0.5, 0.5, 2)).tolist())
+    return pts
+
+
+def run_variable(sets: dict[str, Path], degrees: float = 3.0, noise: float = 1.0) -> dict:
+    """Blur that changes across the frame: a camera roll about a point off the image centre."""
+    cases = []
+    for label, folder in sets.items():
+        for name, x in _sharp_images(folder):
+            h, w = x.shape
+            centre = (w * 0.3, h * 0.35)
+            y = rotation_blur(x, degrees, centre)
+            y = y + np.random.RandomState(0).normal(0, noise / 255.0, y.shape)
+            cases.append({"name": f"{label}_{name}", "blurred": np.clip(y, 0, 1), "sharp": x,
+                          "streaks": rotation_streaks(degrees, centre, h, w)})
+    variable, cache = REGISTRY["deblur.variable"], {}
+
+    def run(m, c, s):
+        y3 = np.dstack([c["blurred"]] * 3)
+        if m == "blind":
+            if c["name"] not in cache:
+                cache[c["name"]] = estimate_kernel(c["blurred"], 31, DEFAULT["blind"]["smoothness"], 5)
+            return tv_psf(y3, cache[c["name"]], s["regularisation"], 3)[..., 0]
+        if m == "one_streak":
+            seg = np.asarray(c["streaks"][:2])
+            v = seg[1] - seg[0]
+            psf = make_psf({"psf": "motion", "length": float(np.hypot(*v)), "angle": math.degrees(math.atan2(-v[1], v[0]))})
+            return tv_psf(y3, psf, s["regularisation"], 3)[..., 0]
+        return variable.fn(y3, variable.validate({"streaks": c["streaks"], **s}))[..., 0]
+
+    regs = (5e-4, 1e-3, 2e-3, 5e-3)
+    grid = {"one_streak": [{"regularisation": r} for r in regs], "blind": [{"regularisation": r} for r in regs],
+            "variable": [{"tiles": t, "regularisation": r} for t in (4, 6, 8) for r in regs]}
+    return {"n": len(cases), "degrees": degrees,
+            "blurred": _brief(summarise({c["name"]: _interior_score(c["blurred"], c["sharp"]) for c in cases})),
+            "results": evaluate(cases, _interior_score, methods=tuple(grid), grid=grid, runner=run)}
+
+
+def turbulence_stack(x: np.ndarray, frames: int, amplitude: float, blur: float, noise: float, seed: int) -> np.ndarray:
+    """Frames of a static scene seen through turbulence: smooth random local shifts, short-exposure blur, noise."""
+    rng = np.random.default_rng(seed)
+    h, w = x.shape
+    gx, gy = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
+    out = []
+    for _ in range(frames):
+        d = cv2.GaussianBlur(rng.normal(0, 1, (h, w, 2)).astype(np.float32), (0, 0), 8)
+        d *= amplitude / max(float(np.sqrt(np.mean(d ** 2))), 1e-9)
+        f = cv2.remap(x.astype(np.float32), gx + d[..., 0], gy + d[..., 1], cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT)
+        f = cv2.GaussianBlur(f, (0, 0), blur) + rng.normal(0, noise / 255.0, (h, w))
+        out.append(np.dstack([np.clip(f, 0, 1)] * 3))
+    return np.stack(out).astype(np.float32)
+
+
+def run_turbulence(sets: dict[str, Path], frames: int = 20, amplitude: float = 1.5, blur: float = 1.0, noise: float = 2.0) -> dict:
+    cases = []
+    for label, folder in sets.items():
+        for i, (name, x) in enumerate(_sharp_images(folder)):
+            cases.append({"name": f"{label}_{name}", "blurred": turbulence_stack(x, frames, amplitude, blur, noise, i), "sharp": x})
+
+    def run(m, c, s):
+        st = c["blurred"]
+        if m == "single":
+            return st[len(st) // 2, ..., 0]
+        if m == "mean":
+            return st.mean(axis=0)[..., 0]
+        if m == "median":
+            return np.median(st, axis=0)[..., 0]
+        return turbulence_fuse(st, s["passes"], "median", s["residual_blur"], s["regularisation"])[..., 0]
+
+    grid = {"single": [{}], "mean": [{}], "median": [{}],
+            "turbulence": [{"passes": 2, "residual_blur": b, "regularisation": r} for b in (0.0, 0.8, 1.0, 1.3) for r in (0.001, 0.003)]}
+    return {"n": len(cases), "frames": frames, "amplitude": amplitude, "blur": blur, "noise": noise,
+            "results": evaluate(cases, _interior_score, methods=tuple(grid), grid=grid, runner=run)}
 
 
 def environment() -> dict:
@@ -373,13 +580,29 @@ def summary_markdown(results: dict) -> str:
     out = []
     if "levin" in results:
         L = results["levin"]
-        groups = [("True kernel, ", L["true_kernel"]), ("Closest app blur shape, ", L["closest_app_shape"]),
-                  ("App motion estimate, ", L["app_motion_estimate"])] + [(f"{k}, ", v) for k, v in L.get("extra", {}).items()]
-        out += table(f"### Levin et al. 2009, real camera shake ({L['n']} images)", {**L, "groups": groups}, ["psnr", "ssim"])
+        groups = [(label, L[key]) for label, key in (("True kernel, ", "true_kernel"), ("Closest app blur shape, ", "closest_app_shape"),
+                                                     ("App motion estimate, ", "app_motion_estimate")) if key in L]
+        groups += [("" if k == "Blind" else f"{k}, ", v) for k, v in L.get("extra", {}).items()]
+        out += table(f"### Levin et al. 2009, real camera shake ({L['n']} images)", {"references": {}, **L, "groups": groups}, ["psnr", "ssim"])
     for key, S in results.get("synthetic", {}).items():
         groups = [("", S["true_kernel"])] + [(f"{k}, ", v) for k, v in S.get("extra", {}).items()]
         out += table(f"### {key} (IRCNN/DPIR protocol, {S['n']} images)", {**S, "groups": groups},
                      ["psnr", "ssim", "psnr_interior", "ssim_interior"])
+    if "shake" in results:
+        S = results["shake"]
+        groups = [("" if g == "Blind" else f"{g}, ", S[g]) for g in ("True kernel", "Drawn path (10 clicks)", "Closest straight line or disk", "Blind")]
+        out += table(f"### Curved camera shake along random paths ({S['n']} images)", {**S, "groups": groups, "references": {}},
+                     ["psnr", "ssim"])
+    if "variable" in results:
+        V = results["variable"]
+        out += table(f"### Variable blur: camera roll of {V['degrees']:g} degrees about an off-centre point ({V['n']} images)",
+                     {**V, "groups": [("", V["results"])], "references": {}}, ["psnr", "ssim"])
+    if "turbulence" in results:
+        T = results["turbulence"]
+        out += table(f"### Turbulence: {T['frames']} frames, {T['amplitude']:g} px shimmer, blur {T['blur']:g} px, noise "
+                     f"{T['noise']:g} grey levels ({T['n']} scenes)",
+                     {**T, "groups": [("", T["results"])], "references": {}, "blurred": T["results"]["single"]["best"]},
+                     ["psnr", "ssim"])
     return "\n".join(out)
 
 
@@ -392,6 +615,11 @@ def main(argv=None):
     ap.add_argument("--images", action="append", default=[], metavar="NAME=DIR", help="sharp test images for the synthetic protocol")
     ap.add_argument("--kernels", type=Path, help="folder of kernels (.npy or .png) for the synthetic protocol")
     ap.add_argument("--sigma", type=float, action="append", help="noise sigma in grey levels (default 2.55 and 7.65)")
+    ap.add_argument("--levin-new-only", type=Path, metavar="DIR",
+                    help="Levin set: only the light-streak and blind tests (skips the known-kernel filters)")
+    ap.add_argument("--shake", action="append", default=[], metavar="NAME=DIR", help="sharp images for the curved camera-shake test")
+    ap.add_argument("--variable", action="append", default=[], metavar="NAME=DIR", help="sharp images for the variable-blur test")
+    ap.add_argument("--turbulence", action="append", default=[], metavar="NAME=DIR", help="sharp images for the turbulence test")
     ap.add_argument("--reference", action="append", default=[], metavar="NAME=DIR", help="score another method's outputs (<case>.png or .npy)")
     ap.add_argument("--save-inputs", type=Path, help="write the degraded inputs as .npy, for running another method on them")
     ap.add_argument("--out", type=Path, required=True, help="folder for results.json and summary.md")
@@ -409,6 +637,16 @@ def main(argv=None):
         results["synthetic"] = run_synthetic(sets, load_kernels(a.kernels), a.sigma or [2.55, 7.65],
                                              {n: Path(p) / "synthetic" for n, p in refs.items()},
                                              a.save_inputs / "synthetic" if a.save_inputs else None)
+    if a.levin_new_only:
+        cases = levin_cases(a.levin_new_only)
+        results["levin"] = {"n": len(cases), "blurred": _brief(summarise({c["name"]: levin_score(c["blurred"], c["sharp"]) for c in cases})),
+                            "extra": levin_extras(cases)}
+    if a.shake:
+        results["shake"] = run_shake({n: Path(p) for n, p in (v.split("=", 1) for v in a.shake)})
+    if a.variable:
+        results["variable"] = run_variable({n: Path(p) for n, p in (v.split("=", 1) for v in a.variable)})
+    if a.turbulence:
+        results["turbulence"] = run_turbulence({n: Path(p) for n, p in (v.split("=", 1) for v in a.turbulence)})
     results["environment"]["seconds"] = round(time.time() - t0, 1)
     a.out.mkdir(parents=True, exist_ok=True)
     (a.out / "results.json").write_text(json.dumps(results, indent=1))

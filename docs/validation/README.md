@@ -93,5 +93,5 @@ GANs (DFGAN, GALIP) and Midjourney 5.2; 76-89 % for DALL-E 2/3, Imagen 3 and Ide
 Firefly Image 2/3, Midjourney 6.1, Ideogram 2 and Hourglass. Real images in the sample are mostly
 JPEG and generated ones mostly PNG; the JPEG rows re-encode both alike to remove that cue.
 
-Deblur filters are scored on public deblurring benchmarks (Levin et al. 2009 and the IRCNN/DPIR protocol) in
+Deblur filters, including the blind, light-streak, drawn-path, variable-motion and turbulence tools, are scored on public deblurring benchmarks (Levin et al. 2009 and the IRCNN/DPIR protocol) and seeded synthetic tests in
 [deblur-benchmarks.md](deblur-benchmarks.md), with `python -m forensic.validation.deblur`.

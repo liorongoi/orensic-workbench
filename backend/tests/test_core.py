@@ -62,6 +62,8 @@ def _every_image_filter_chain():
             params = {"points": [[20, 20], [280, 30], [290, 200], [10, 210]]}
         if f.id == "geometry.crop":
             params = {"x": 4, "y": 4}
+        if f.id == "deblur.variable":
+            params = {"streaks": [[10, 10], [16, 12], [200, 150], [206, 146]], "tiles": 3}
         nodes.append({"filter": f.id, "params": params})
     return nodes
 
