@@ -69,16 +69,20 @@ function Controls($win, $type) {
 
 function Button($win, $name) {
     foreach ($b in Controls $win ([System.Windows.Automation.ControlType]::Button)) {
-        if (($b.Current.Name -replace '&', '') -eq $name -and $b.Current.IsEnabled -and -not $b.Current.IsOffscreen) { return $b }
+        # Captions vary by wizard style ("Next" or "Next >", "&Yes"): compare without & and >.
+        if (($b.Current.Name -replace '[&>]', '').Trim() -eq $name -and $b.Current.IsEnabled -and -not $b.Current.IsOffscreen) { return $b }
     }
     return $null
 }
 
 function Press($b) {
-    # Post BM_CLICK rather than UI Automation's Invoke: Invoke waits for the button's handler,
-    # and the uninstaller's "Yes" runs the whole uninstall (including our own question box)
-    # inside it, which would deadlock this script.
-    [Win]::PostMessage([IntPtr]$b.Current.NativeWindowHandle, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+    # Invoke on a background thread: UI Automation's Invoke waits for the button's handler, and
+    # the uninstaller's "Yes" runs the whole uninstall (including our own question box) inside
+    # it, which would deadlock this script.
+    Start-ThreadJob -ScriptBlock {
+        param($e) $e.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    } -ArgumentList $b | Out-Null
+    Start-Sleep -Milliseconds 300
 }
 
 function PageName($win) {
@@ -97,13 +101,18 @@ $hwnd = $win.Current.NativeWindowHandle
 for ($page = 0; $page -lt 20; $page++) {
     Start-Sleep -Milliseconds 1200
     # Wait out the installing page.
-    for ($i = 0; $i -lt 600 -and -not ((Button $win 'Next >') -or (Button $win 'Install') -or (Button $win 'Finish')); $i++) { Start-Sleep -Milliseconds 500 }
+    for ($i = 0; $i -lt 600 -and -not ((Button $win 'Next') -or (Button $win 'Install') -or (Button $win 'Finish')); $i++) { Start-Sleep -Milliseconds 500 }
     $accept = Controls $win ([System.Windows.Automation.ControlType]::RadioButton) | Where-Object { $_.Current.Name -replace '&', '' -match '^I accept' -and -not $_.Current.IsOffscreen }
     if ($accept) {
         $accept.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
         Start-Sleep -Milliseconds 300
     }
-    Snap $hwnd (PageName $win)
+    $name = PageName $win
+    if ($name -eq $script:lastPage) { $script:same++ } else { $script:same = 0 }
+    if ($script:same -ge 2) { throw "the wizard stayed on '$name'; a button click did not go through" }
+    $script:lastPage = $name
+    Write-Host "page: $name"
+    Snap $hwnd $name
     if ($b = Button $win 'Finish') {
         # Stop here rather than run the post-install options; installation is already complete.
         Stop-Process -Id $setup.Id -Force -ErrorAction SilentlyContinue
@@ -111,7 +120,7 @@ for ($page = 0; $page -lt 20; $page++) {
         break
     }
     if ($b = Button $win 'Install') { Press $b; continue }
-    if ($b = Button $win 'Next >') { Press $b; continue }
+    if ($b = Button $win 'Next') { Press $b; continue }
 }
 if (-not (Test-Path "$Root\app\unins000.exe")) { Get-Content "$Root\wizard.log" -Tail 40; throw "the wizard did not install Lucida" }
 
