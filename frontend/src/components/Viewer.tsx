@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { keyOf, onCommand, type Command } from "../desktop";
+
+/** Screen pixels per CSS pixel: 1.5 on a 4K monitor at 150 % Windows scaling. */
+const dpr = () => window.devicePixelRatio || 1;
 
 export interface Overlay {
   points: number[][];
@@ -129,10 +133,24 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
     setView({ zoom: z, x: (pw - w * z) / 2, y: (el.clientHeight - h * z) / 2 });
   }, [shown, side]);
 
+  /** Actual pixels: one image pixel on one screen pixel, whatever the monitor's scaling. */
   const oneToOne = () => {
     const el = wrap.current;
     if (!el || !shown) return;
-    setView({ zoom: 1, x: (paneWidth() - shown.img.naturalWidth) / 2, y: (el.clientHeight - shown.img.naturalHeight) / 2 });
+    const z = 1 / dpr();
+    setView({ zoom: z, x: (paneWidth() - shown.img.naturalWidth * z) / 2, y: (el.clientHeight - shown.img.naturalHeight * z) / 2 });
+  };
+
+  /** Zoom by `factor` around the centre of the pane. */
+  const zoomBy = (factor: number) => {
+    const el = wrap.current;
+    if (!el || !shown) return;
+    const sx = paneWidth() / 2;
+    const sy = el.clientHeight / 2;
+    setView((v) => {
+      const z = Math.min(64, Math.max(0.02, v.zoom * factor));
+      return { zoom: z, x: sx - ((sx - v.x) / v.zoom) * z, y: sy - ((sy - v.y) / v.zoom) * z };
+    });
   };
 
   const pickMode = (m: CompareMode) => {
@@ -163,16 +181,17 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
     const c = canvas.current;
     const el = wrap.current;
     if (!c || !el) return;
-    const dpr = window.devicePixelRatio || 1;
-    c.width = el.clientWidth * dpr;
-    c.height = el.clientHeight * dpr;
+    const ratio = dpr();
+    c.width = Math.round(el.clientWidth * ratio);
+    c.height = Math.round(el.clientHeight * ratio);
     const cx = c.getContext("2d")!;
-    cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cx.setTransform(ratio, 0, 0, ratio, 0, 0);
     const W = el.clientWidth;
     const H = el.clientHeight;
     cx.clearRect(0, 0, W, H);
     if (!shown) return;
-    cx.imageSmoothingEnabled = view.zoom < 1;
+    // Below actual pixels the image is averaged down; at and above it, pixels stay square.
+    cx.imageSmoothingEnabled = view.zoom * ratio < 0.999;
     cx.imageSmoothingQuality = "high";
     const paint = (original: boolean) => {
       const [ox, oy, ow, oh] = original && orig ? orig : [0, 0, shown.img.naturalWidth, shown.img.naturalHeight];
@@ -184,7 +203,7 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
       cx.clip();
     };
     const grid = () => {
-      if (view.zoom >= 16) {
+      if (view.zoom * ratio >= 16) {
         cx.strokeStyle = "rgba(128,128,128,0.35)";
         cx.lineWidth = 1;
         const w = shown.img.naturalWidth;
@@ -330,19 +349,17 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
-      if (e.key === "b" || e.key === "B") setHoldB(true);
-      if ((e.key === "t" || e.key === "T") && !e.ctrlKey && !e.metaKey && canCompare) {
-        if (mode === "flip") setFlipped((f) => !f);
-        else {
-          setMode("flip");
-          setFlipped(true);
-        }
-      }
-      if (e.key === "f" || e.key === "F") fit();
-      if (e.key === "1") oneToOne();
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const k = keyOf(e);
+      if (k === "b") setHoldB(true);
+      if (k === "t") flip();
+      if (k === "f") fit();
+      if (k === "1") oneToOne();
+      if (k === "+" || k === "=") zoomBy(1.25);
+      if (k === "-") zoomBy(0.8);
     };
     const up = (e: KeyboardEvent) => {
-      if (e.key === "b" || e.key === "B") setHoldB(false);
+      if (keyOf(e) === "b") setHoldB(false);
     };
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
@@ -351,6 +368,28 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
       window.removeEventListener("keyup", up);
     };
   });
+
+  const flip = () => {
+    if (!canCompare) return;
+    if (mode === "flip") setFlipped((f) => !f);
+    else {
+      setMode("flip");
+      setFlipped(true);
+    }
+  };
+
+  // Commands from the menu bar.
+  const commands = useRef<(c: Command) => void>(() => {});
+  commands.current = (c: Command) => {
+    if (c === "fit") fit();
+    else if (c === "one-to-one") oneToOne();
+    else if (c === "zoom-in") zoomBy(1.25);
+    else if (c === "zoom-out") zoomBy(0.8);
+    else if (c === "compare-swipe" && canCompare) pickMode("swipe");
+    else if (c === "compare-side" && canCompare) pickMode("side");
+    else if (c === "compare-flip") flip();
+  };
+  useEffect(() => onCommand((c) => commands.current(c)), []);
 
   /** Pointer position in pane and image coordinates; `original` is true over a part showing the original. */
   const toImage = (e: React.MouseEvent | React.WheelEvent) => {
@@ -446,13 +485,13 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
         {shown && (
           <span className="muted">
             {showOriginal && !side && cmp ? `${cmp.img.naturalWidth}×${cmp.img.naturalHeight}` : `${shown.img.naturalWidth}×${shown.img.naturalHeight}`} ·{" "}
-            {Math.round(view.zoom * 100)}%
+            {Math.round(view.zoom * dpr() * 100)}%
           </span>
         )}
         <span className="spacer" />
         {tools}
         <button onClick={fit} title="Fit (F)">Fit</button>
-        <button onClick={oneToOne} title="Actual pixels (1)">1:1</button>
+        <button onClick={oneToOne} title="Actual pixels: one image pixel per screen pixel (1)">1:1</button>
         {compareSrc && (
           <span className="seg" title={`Compare with the ${compareLabel.toLowerCase()} · hold B to peek`}>
             <button className={active === "swipe" ? "active" : ""} disabled={!canCompare} onClick={() => pickMode("swipe")} title="Swipe: drag the divider">
@@ -539,7 +578,7 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
             })()}
           </>
         ) : (
-          <span className="muted" title="Scroll: zoom · Drag: pan · F: fit · 1: actual pixels · Hold B: original · T: flip · M: macroblocks (video) · Ctrl+Z / Ctrl+Y: undo / redo">
+          <span className="muted" title="Scroll or + / -: zoom · Drag: pan · F: fit · 1: actual pixels · Hold B: original · T: flip · M: macroblocks (video) · Ctrl+Z / Ctrl+Y: undo / redo · F1: all shortcuts">
             ? shortcuts
           </span>
         )}

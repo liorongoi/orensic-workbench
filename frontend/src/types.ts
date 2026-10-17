@@ -381,3 +381,13 @@ export interface CodecInfo {
   qp_grid: number[][];
   legend: { id: string; label: string; color: string }[];
 }
+
+export interface SystemInfo {
+  cpu_threads: number;
+  ram_mb: number;
+  result_cache_mb: number;
+  frame_cache_mb: number;
+  range_mb: number;
+  gpu: { name: string; memory_mb: number; source: string; provider: string | null; jobs: number };
+  models_on: string;
+}

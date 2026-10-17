@@ -1,19 +1,26 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { api, setExaminer, SIGNED_OUT, urls } from "./api";
+import { api, setExaminer, SIGNED_OUT } from "./api";
 import { AccountMenu } from "./components/AccountMenu";
 import { CaseList } from "./components/CaseList";
 import { JobQueue } from "./components/JobQueue";
+import { MenuBar } from "./components/MenuBar";
 import { SignIn } from "./components/SignIn";
 import { Workspace } from "./components/Workspace";
 import type { AnalysisSchema, FilterSchema, User } from "./types";
 import logo from "./assets/lucida.svg";
-import { HELP_DOCS, readHelpHash } from "./help";
+import { readHelpHash } from "./help";
 
 const HelpPage = lazy(() => import("./components/HelpPage"));
 
 function readHash() {
   const m = location.hash.match(/^#\/case\/([\w-]+)/);
   return m ? m[1] : null;
+}
+
+/** `#/case/<id>?ev=<evidence>&layout=viewer`: a second window showing only the viewer. */
+function readHashOptions() {
+  const q = new URLSearchParams(location.hash.split("?")[1] ?? "");
+  return { evidence: q.get("ev"), viewerOnly: q.get("layout") === "viewer" };
 }
 
 export default function App() {
@@ -64,17 +71,6 @@ export default function App() {
     if (me && caseId) api.caseDetail(caseId).then((d) => setCaseName(d.case.name)).catch(() => setCaseName(""));
   }, [caseId, me?.username]);
 
-  const helpMenu = (
-    <details className="menu">
-      <summary className="button" title="User manual and guides (open in a new tab)">Help ▾</summary>
-      <div className="menu-items">
-        {HELP_DOCS.slice(0, 4).map((d) => (
-          <a key={d.id} href={`#/help/${d.id}`} target="_blank" rel="noreferrer">{d.title}</a>
-        ))}
-      </div>
-    </details>
-  );
-
   // Help needs no sign-in: the guides are part of the app.
   if (help) {
     return (
@@ -84,6 +80,7 @@ export default function App() {
             <img src={logo} alt="" width={22} height={22} />
             <span className="wordmark">Lucida</span>
           </a>
+          <MenuBar caseId={null} signedIn={!!me} />
           <span className="crumb">/ Help</span>
           <span className="spacer" />
           <a className="button" href="#/">Back to Lucida</a>
@@ -115,27 +112,14 @@ export default function App() {
           <img src={logo} alt="" width={22} height={22} />
           <span className="wordmark">Lucida</span>
         </a>
-        {caseId && (
-          <>
-            <span className="crumb">/ {caseName}</span>
-            <span className="spacer" />
-            <details className="menu">
-              <summary className="button">Report ▾</summary>
-              <div className="menu-items">
-                <a href={urls.report(caseId, "html")} target="_blank" rel="noreferrer">HTML report</a>
-                <a href={urls.report(caseId, "pdf")} target="_blank" rel="noreferrer">PDF report</a>
-                <a href={urls.report(caseId, "json")} target="_blank" rel="noreferrer" title="Machine-readable bundle with every hash">JSON bundle</a>
-              </div>
-            </details>
-          </>
-        )}
-        {!caseId && <span className="spacer" />}
-        {helpMenu}
+        <MenuBar caseId={caseId} signedIn />
+        {caseId && <span className="crumb">/ {caseName}</span>}
+        <span className="spacer" />
         <JobQueue me={me} />
         <AccountMenu me={me} onSignedOut={() => signedIn(null)} />
       </header>
       {caseId ? (
-        <Workspace key={caseId} caseId={caseId} filters={filters} analyses={analyses} />
+        <Workspace key={caseId} caseId={caseId} filters={filters} analyses={analyses} {...readHashOptions()} />
       ) : (
         <CaseList onOpen={(id) => (location.hash = `#/case/${id}`)} />
       )}

@@ -159,6 +159,33 @@ def _probe_input(sess) -> np.ndarray:
     return np.random.default_rng(0).random(shape).astype(np.float32)
 
 
+def provider_options(provider: str) -> dict:
+    """Which card a GPU provider uses.
+
+    A workstation often has the processor's own graphics next to the NVIDIA card, and DirectML
+    takes the first adapter Windows lists unless told otherwise. Ask for the high-performance
+    GPU (the RTX A4000 on the lab machines), or the adapter number in FORENSIC_GPU_DEVICE.
+    """
+    dev = os.environ.get("FORENSIC_GPU_DEVICE", "").strip()
+    if provider == "DmlExecutionProvider":
+        if dev.isdigit():
+            return {"device_id": dev}
+        return {"performance_preference": "high_performance", "device_filter": "gpu"}
+    if provider == "CUDAExecutionProvider":
+        return {"device_id": dev if dev.isdigit() else "0"}
+    return {}
+
+
+def _gpu_session(path: str, provider: str):
+    import onnxruntime as ort
+
+    try:
+        return ort.InferenceSession(path, _options(True), providers=[(provider, provider_options(provider)),
+                                                                      "CPUExecutionProvider"])
+    except Exception:  # noqa: BLE001  (an older runtime that does not know these options)
+        return ort.InferenceSession(path, _options(True), providers=[provider, "CPUExecutionProvider"])
+
+
 @lru_cache(maxsize=32)
 def _session(path: str, sha256: str):
     import onnxruntime as ort
@@ -166,7 +193,7 @@ def _session(path: str, sha256: str):
     provider = gpu_provider()
     if provider:
         try:
-            sess = ort.InferenceSession(path, _options(True), providers=[provider, "CPUExecutionProvider"])
+            sess = _gpu_session(path, provider)
             if sess.get_providers()[0] == provider:
                 x = {sess.get_inputs()[0].name: _probe_input(sess)}
                 a, b = sess.run(None, x)[0], sess.run(None, x)[0]
@@ -198,6 +225,19 @@ def device(model_id: str) -> str:
 def device_label() -> str:
     p = gpu_provider()
     return f"GPU via {p} when reproducible, else CPU" if p else "CPU"
+
+
+def warm(model_ids: list[str] | None = None) -> dict[str, str]:
+    """Load, verify and probe models ahead of use (the desktop app does this in the background
+    at start), so the first enhancement does not wait for the GPU to compile the network.
+    Returns each model's device; a model that cannot load is reported, not raised."""
+    out = {}
+    for mid in model_ids or [m["id"] for m in manifest() if m["bundled"] and m["kind"] == "enhancement"]:
+        try:
+            out[mid] = device(mid)
+        except Exception as e:  # noqa: BLE001
+            out[mid] = f"not loaded: {e}"
+    return out
 
 
 def run(model_id: str, x: np.ndarray) -> np.ndarray:

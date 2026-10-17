@@ -22,6 +22,7 @@ import type {
   User,
   Job,
   JobOverview,
+  SystemInfo,
 } from "./types";
 
 // The signed-in examiner's full name; the server records actions under the signed-in account.
@@ -113,6 +114,9 @@ export const api = {
     req<PlanResult>("POST", `/api/cases/${caseId}/plan`, body),
   estimateBlur: (evidenceId: string, body: { graph: Graph | null; frame: number; roi: number[] | null }) =>
     req<{ length: number; angle: number; strength: number; note: string }>("POST", `/api/evidence/${evidenceId}/estimate-blur`, body),
+  /** A file chosen in the desktop app's Open dialog, read from its folder (no upload). */
+  ingestLocal: (caseId: string, token: string) => req<Evidence>("POST", `/api/cases/${caseId}/evidence/local`, { token }),
+  system: () => req<SystemInfo>("GET", "/api/system"),
   upload: (caseId: string, file: File) => {
     const fd = new FormData();
     fd.append("file", file);

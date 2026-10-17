@@ -199,6 +199,23 @@ class Engine:
         )
 
     @staticmethod
+    def _per_frame(f, params, data: np.ndarray) -> np.ndarray:
+        """Apply an image filter to every frame of a stack, writing into one preallocated
+        result, so a long range needs one copy in RAM instead of a list of frames plus a stack."""
+        first = np.asarray(f.fn(data[0], params), dtype=np.float32)
+        out = np.empty((data.shape[0],) + first.shape, np.float32)
+        out[0] = first
+
+        def one(i):
+            r = np.asarray(f.fn(data[i], params), dtype=np.float32)
+            if r.shape != first.shape:
+                raise FilterError(f"'{f.name}' gave frames of different sizes")
+            out[i] = r
+
+        compute.pmap(one, range(1, data.shape[0]))
+        return out
+
+    @staticmethod
     def _apply(f, params, data: np.ndarray) -> np.ndarray:
         if f.input_kind == "stack":
             if data.ndim != 4:
@@ -208,7 +225,7 @@ class Engine:
                 )
             out = f.fn(data, params)
         elif data.ndim == 4:
-            out = np.stack(compute.pmap(lambda frame: f.fn(frame, params), data))
+            out = Engine._per_frame(f, params, data)
         else:
             out = f.fn(data, params)
         out = np.asarray(out, dtype=np.float32)
