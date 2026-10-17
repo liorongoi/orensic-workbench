@@ -11,8 +11,18 @@ users" in the first dialog to install under Program Files for everyone on the ma
 Get the installer from the **Windows installer** workflow in GitHub Actions (artifact
 `Lucida-Windows-Setup`, with its `.sha256`), or from a release when a `v*` tag is
 pushed. Carry the `.exe` to the offline machine, check its SHA-256 if your lab requires it
-(`certutil -hashfile Lucida-0.3.0-Setup.exe SHA256`), and run it. The wizard asks
-for:
+(`certutil -hashfile Lucida-0.3.0-Setup.exe SHA256`), and run it. The wizard opens with a
+welcome page, the licence agreement and a list of what is included, then a **system check**.
+It reads the installed memory, the graphics card and the NVIDIA driver version. Lucida is sized for
+an NVIDIA RTX A4000 (16 GB) with 48 to 128 GB of RAM. The page warns, without stopping the install,
+when memory is under 48 GB, when no NVIDIA card is found, or when the driver is older than R470.
+Learned models use the GPU through DirectML, which is in the installer and needs only the NVIDIA
+display driver (no CUDA). A model runs on the GPU only when two runs give identical output, and
+otherwise on the CPU. The check also sizes `workbench.ini`: `job_workers` is one per 16 GB of RAM
+(3 at 48 GB, 6 from 96 GB, never more than half the processor threads), `gpu_jobs = 1` and
+`ai_device = auto`. The caches size themselves from RAM when Lucida starts (a quarter, at most 32 GB,
+for results and an eighth, at most 16 GB, for video frames). An upgrade keeps values you changed.
+The wizard then asks for:
 
 - the installation folder;
 - the case data folder (cases, write-once evidence store, derived outputs, audit log, logs).
@@ -21,7 +31,24 @@ for:
   that ran the installer is added), administrators and SYSTEM can open it; add each examiner with
   `net localgroup "Forensic Examiners" <account> /add`, and they sign out and in again;
 - the local port (default 8000; Lucida listens on 127.0.0.1 only, unless you tick the
-  lab-network option, see [Examiners on other PCs](#examiners-on-other-pcs)).
+  lab-network option, see [Examiners on other PCs](#examiners-on-other-pcs));
+- Start menu and desktop shortcuts (both ticked by default). **Lucida** opens the desktop
+  window (no console, no browser; see the desktop app section). **Lucida in the browser** starts
+  Lucida with a console window and opens the browser, as before. With the lab-network option,
+  both start the shared HTTPS server and open the browser.
+
+The desktop window runs on the Microsoft Edge WebView2 runtime, which Windows 11 includes. On a
+Windows 10 machine without it, Setup installs it from the copy inside the installer, offline.
+The desktop window's messages go to `<case data>\logs\desktop-<date>.txt`.
+
+A summary page shows every choice before anything is installed. The last page offers to run
+the acceptance self-test and to start Lucida straight away.
+
+**Uninstalling** (Settings > Apps, or **Start > Lucida > Uninstall Lucida**) removes the
+programs and shortcuts, then asks whether to delete the case data folder too. The answer
+defaults to **No**, and deleting needs a second confirmation. A drive root or a whole Documents,
+Desktop or profile folder is never deleted, even if it was chosen as the case data folder. A
+silent uninstall (`unins000.exe /VERYSILENT`) keeps case data unless you add `/DELETECASEDATA`.
 
 At the end it offers the acceptance self-test: it re-hashes every installed file against the
 installer's `SHA256SUMS`, then runs `forensic.selftest`, and saves its output under
@@ -35,13 +62,17 @@ optionally `c2pa_trust_anchors`, `allowed_hosts`, the extra names browsers may u
 [Several examiners](#several-examiners)). Compute settings are
 optional too: `threads` (default every core), `cache_mb` (RAM for intermediate results, default a
 quarter of RAM up to 32 GB), `frame_cache_mb` (decoded video frames, default an eighth up to 16 GB)
-and `ai_device` (`auto`, `gpu` or `cpu`; auto uses the GPU through DirectML when it reproduces results
-bit for bit). Running a newer installer upgrades in place and keeps
+`range_mb` (RAM one video frame range may use), `ai_device` (`auto`, `gpu` or `cpu`; auto uses
+the GPU through DirectML when it reproduces results bit for bit) and `gpu_device` (the DirectML
+adapter number, if the NVIDIA card is not picked on its own). Running a newer installer upgrades in place and keeps
 these settings and the case data. Silent installation for managed rollouts:
 
 ```
 Lucida-0.3.0-Setup.exe /VERYSILENT /ALLUSERS /DIR="C:\Program Files\Lucida" /DATADIR="D:\Cases" /PORT=8000
 ```
+
+Add `/TASKS="startmenu,desktopicon"` to choose shortcuts (and `labnetwork` for the lab-network
+option); a `/TASKS` list replaces the defaults, so name every task you want.
 
 To build the installer yourself, on a connected Windows x64 machine with Python 3.12 and
 Node.js 22: `powershell -ExecutionPolicy Bypass -File deploy\windows\build-installer.ps1`
@@ -49,8 +80,10 @@ Node.js 22: `powershell -ExecutionPolicy Bypass -File deploy\windows\build-insta
 `dist\Lucida-<version>-Setup.exe`; `BUILDINFO.txt` in the installation records the
 commit and the SHA-256 of the Python, FFmpeg and Visual C++ downloads it was built from.
 CI installs every build on a fresh Windows runner, for one user and for all users, blocks the
-bundled Python from the network, runs the self-test, starts Lucida, and uninstalls
-(`deploy\windows\test-installer.ps1`).
+bundled Python from the network, runs the self-test, starts Lucida, and uninstalls, once keeping
+and once deleting the case data (`deploy\windows\test-installer.ps1`). A further job clicks
+through the real wizard and uninstaller and keeps a screenshot of every page (artifact
+`Lucida-Setup-wizard-screenshots`, `deploy\windows\capture-wizard.ps1`).
 
 ## Desktop app
 

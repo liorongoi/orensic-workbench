@@ -2,7 +2,8 @@
 
 Runs with the Python bundled in the installation (<app>\\python\\python.exe):
 
-    workbench_launcher.py run [--no-browser]   start Lucida and open it in the browser
+    workbench_launcher.py desktop              start Lucida in its own window (pythonw.exe, no console)
+    workbench_launcher.py run [--no-browser]   start Lucida with a console and open it in the browser
     workbench_launcher.py selftest [--pause]   check the installed files, then the acceptance self-test
 
 Settings come from <app>\\workbench.ini (written by the installer); environment
@@ -54,7 +55,8 @@ def configure() -> dict:
         env["FORENSIC_GPU_JOBS"] = cfg["gpu_jobs"]
     # Compute settings (see forensic/compute.py); unset means use every core, a share of RAM and the GPU.
     for key, var in (("threads", "FORENSIC_THREADS"), ("cache_mb", "FORENSIC_CACHE_MB"),
-                     ("frame_cache_mb", "FORENSIC_FRAME_CACHE_MB"), ("ai_device", "FORENSIC_AI_DEVICE")):
+                     ("frame_cache_mb", "FORENSIC_FRAME_CACHE_MB"), ("range_mb", "FORENSIC_RANGE_MB"),
+                     ("ai_device", "FORENSIC_AI_DEVICE"), ("gpu_device", "FORENSIC_GPU_DEVICE")):
         if cfg.get(key):
             env[var] = cfg[key]
     for k, v in env.items():
@@ -150,6 +152,52 @@ def run(open_browser: bool) -> int:
     return 0
 
 
+def _windowed() -> bool:
+    """True under pythonw.exe (the desktop shortcut), where there is no console to print to."""
+    return sys.stdout is None or sys.stderr is None
+
+
+def _tell(message: str, error: bool = True) -> None:
+    print(message)
+    if _windowed() or getattr(sys.stdout, "_lucida_log", False):
+        try:
+            import ctypes
+
+            ctypes.windll.user32.MessageBoxW(None, message, "Lucida", 0x10 if error else 0x40)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def desktop() -> int:
+    """Lucida in its own window (forensic.desktop), on this computer only.
+
+    With the lab-network option the shared HTTPS server is what examiners use, so this starts
+    that, as `run` does, and opens the browser. If Lucida is already running here, the browser
+    opens on it rather than starting a second server on the same case data.
+    """
+    net = configure()
+    if _windowed():
+        logs = Path(os.environ["FORENSIC_DATA_DIR"]) / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        log = open(logs / f"desktop-{dt.datetime.now():%Y%m%d}.txt", "a", encoding="utf-8", buffering=1)
+        log._lucida_log = True  # type: ignore[attr-defined]
+        sys.stdout = sys.stderr = log
+        print(f"\n== Lucida desktop, {dt.datetime.now().isoformat(timespec='seconds')}")
+    if net["tls"]:
+        return run(True)
+    url = f"http://127.0.0.1:{net['port']}"
+    if _health(url):
+        print(f"Lucida is already running at {url}; opening it in the browser")
+        webbrowser.open(url)
+        return 0
+    if not _port_free("127.0.0.1", net["port"]):
+        _tell(f"Port {net['port']} is used by another program. Set a different port in {CONFIG}")
+        return 1
+    from forensic import desktop as shell
+
+    return shell.main(["--port", str(net["port"])])
+
+
 def verify_installation() -> tuple[bool, str]:
     """Re-hash every installed file against the SHA256SUMS written when the installer was built."""
     sums = APP / "SHA256SUMS"
@@ -219,18 +267,25 @@ def selftest(pause: bool) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="workbench_launcher")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("desktop")
     r = sub.add_parser("run")
     r.add_argument("--no-browser", action="store_true")
     s = sub.add_parser("selftest")
     s.add_argument("--pause", action="store_true")
     a = ap.parse_args(argv)
     try:
-        code = run(not a.no_browser) if a.cmd == "run" else selftest(a.pause)
+        if a.cmd == "desktop":
+            code = desktop()
+        else:
+            code = run(not a.no_browser) if a.cmd == "run" else selftest(a.pause)
     except Exception as e:  # noqa: BLE001
         import traceback
 
         traceback.print_exc()
-        print(f"\nLucida stopped: {e}")
+        if a.cmd == "desktop":
+            _tell(f"Lucida stopped: {e}")
+        else:
+            print(f"\nLucida stopped: {e}")
         code = 1
     # Keep a window opened from a shortcut on screen long enough to read why it stopped.
     if code and sys.stdin and sys.stdin.isatty() and not (a.cmd == "selftest" and a.pause):

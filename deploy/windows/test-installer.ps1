@@ -7,13 +7,15 @@
   Installs, blocks the installed Python from the network with a firewall rule (needs an
   administrator shell), runs the acceptance self-test with nothing but Windows itself on PATH,
   starts Lucida and checks the API and UI answer, then uninstalls and checks the case
-  data folder was kept. With -LabNetwork it chooses the lab-network option and checks that
+  data folder was kept (or, with -DeleteCaseData, that /DELETECASEDATA removed it, read-only
+  evidence included). With -LabNetwork it chooses the lab-network option and checks that
   Lucida answers over HTTPS with a certificate that verifies against its local authority.
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Installer,
     [switch]$AllUsers,
     [switch]$LabNetwork,
+    [switch]$DeleteCaseData,
     [string]$Root = "C:\fw-test",
     [int]$Port = 8765
 )
@@ -29,11 +31,16 @@ New-Item -ItemType Directory $Root | Out-Null
 
 Step "Installing silently ($mode)"
 $p = Start-Process -Wait -PassThru -FilePath (Resolve-Path $Installer) -ArgumentList @(
-    "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", $mode, $(if ($LabNetwork) { "/TASKS=desktopicon,labnetwork" } else { "/TASKS=desktopicon" }),
+    "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", $mode, $(if ($LabNetwork) { "/TASKS=startmenu,desktopicon,labnetwork" } else { "/TASKS=startmenu,desktopicon" }),
     "/DIR=`"$App`"", "/DATADIR=`"$Data`"", "/PORT=$Port", "/LOG=`"$Root\install.log`"")
 if ($p.ExitCode -ne 0) { Get-Content "$Root\install.log" -Tail 40; throw "installer exited with $($p.ExitCode)" }
 Get-Content "$App\workbench.ini"
-foreach ($f in "python\python.exe", "ffmpeg\ffmpeg.exe", "ffmpeg\ffprobe.exe", "frontend\dist\index.html",
+foreach ($k in "ai_device", "job_workers", "gpu_jobs") {
+    if (-not (Select-String -Quiet -Path "$App\workbench.ini" -Pattern "^$k\s*=\s*\S")) { throw "workbench.ini has no $k (system check sizing)" }
+}
+if (-not (Select-String -Quiet -Path "$Root\install.log" -Pattern "System check: \d+ GB RAM")) { throw "the system check did not run" }
+Select-String -Path "$Root\install.log" -Pattern "System check" | ForEach-Object { $_.Line }
+foreach ($f in "python\python.exe", "python\pythonw.exe", "ffmpeg\ffmpeg.exe", "ffmpeg\ffprobe.exe", "frontend\dist\index.html",
                "launcher\workbench_launcher.py", "SHA256SUMS", "BUILDINFO.txt", "unins000.exe") {
     if (-not (Test-Path "$App\$f")) { throw "missing after install: $f" }
 }
@@ -49,7 +56,7 @@ if ($AllUsers -and -not ($acl | Where-Object { $_.IdentityReference -match "\\Fo
 }
 if ($AllUsers) { net localgroup "Forensic Examiners" | Out-Host }
 $programs = if ($AllUsers) { "$env:ProgramData\Microsoft\Windows\Start Menu\Programs" } else { "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" }
-foreach ($l in "Lucida.lnk", "Self-test.lnk", "Case data folder.lnk", "User manual.lnk", "Algorithm guide.lnk", "Amped vs Lucida.lnk") {
+foreach ($l in "Lucida.lnk", "Lucida in the browser.lnk", "Self-test.lnk", "Case data folder.lnk", "User manual.lnk", "Algorithm guide.lnk", "Amped vs Lucida.lnk") {
     if (-not (Test-Path "$programs\Lucida\$l")) { throw "Start menu shortcut missing: $l" }
 }
 Get-Content "$App\BUILDINFO.txt"
@@ -125,18 +132,38 @@ try {
     Step "Launcher reuses a running workbench"
     & $py -B -X utf8 $launcher run --no-browser
     if ($LASTEXITCODE -ne 0) { throw "second launch did not detect the running workbench" }
+    if (-not $LabNetwork) {
+        # The desktop shortcut must not start a second server on the same case data.
+        & $py -B -X utf8 $launcher desktop
+        if ($LASTEXITCODE -ne 0) { throw "the desktop command did not reuse the running workbench" }
+    }
+
+    Step "Desktop window libraries"
+    & $py -B -I -c "import webview, clr, forensic.desktop; print('pywebview and pythonnet load')"
+    if ($LASTEXITCODE -ne 0) { throw "pywebview or pythonnet does not load in the installation" }
+    $wv = Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" -ErrorAction SilentlyContinue
+    Write-Host "WebView2 runtime: $(if ($wv) { $wv.pv } else { 'per-user or missing' })"
     Stop-Process -Id $server.Id -Force
     Start-Sleep -Seconds 2
 } finally {
     Remove-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue
 }
 
-Step "Uninstalling"
-$u = Start-Process -Wait -PassThru -FilePath "$App\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+Step "Uninstalling$(if ($DeleteCaseData) { ' and deleting case data' })"
+$uargs = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
+if ($DeleteCaseData) {
+    # Stored evidence is read-only; the uninstaller has to clear that to remove it.
+    Set-Content "$Data\readonly-evidence-test.bin" "x"
+    Set-ItemProperty "$Data\readonly-evidence-test.bin" -Name IsReadOnly -Value $true
+    $uargs += "/DELETECASEDATA"
+}
+$u = Start-Process -Wait -PassThru -FilePath "$App\unins000.exe" -ArgumentList $uargs
 if ($u.ExitCode -ne 0) { throw "uninstaller exited with $($u.ExitCode)" }
 Start-Sleep -Seconds 3
 if (Test-Path "$App\python\python.exe") { throw "programs were not removed" }
-if (-not (Test-Path "$Data\forensic.sqlite3")) { throw "uninstall removed case data" }
+if ($DeleteCaseData) {
+    if (Test-Path $Data) { Get-ChildItem -Recurse $Data | Select-Object -First 20 | Out-Host; throw "/DELETECASEDATA left the case data folder behind" }
+} elseif (-not (Test-Path "$Data\forensic.sqlite3")) { throw "uninstall removed case data" }
 if (Test-Path "$programs\Lucida") { throw "Start menu folder was not removed" }
 if ($LabNetwork -and $AllUsers -and (Get-NetFirewallRule -DisplayName "Lucida" -ErrorAction SilentlyContinue)) {
     throw "uninstall left the firewall rule behind"
