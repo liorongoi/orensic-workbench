@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fetchPreview, urls } from "../api";
+import { bridge, keyOf, onCommand, openWindow, type Command, type OfferedFile } from "../desktop";
 import type {
   AnalysisRun,
   AnalysisSchema,
@@ -32,7 +33,18 @@ interface Props {
   caseId: string;
   filters: FilterSchema[];
   analyses: AnalysisSchema[];
+  /** Evidence to open first (a second viewer window opens on the same item). */
+  evidence?: string | null;
+  /** A window with only the viewer: both panels start hidden and the layout is not saved. */
+  viewerOnly?: boolean;
 }
+
+type Widths = { left: number; right: number };
+const DEFAULT_WIDTHS: Widths = { left: 260, right: 360 };
+const clampWidths = (w: Widths): Widths => ({
+  left: Math.round(Math.min(640, Math.max(180, w.left))),
+  right: Math.round(Math.min(760, Math.max(280, w.right))),
+});
 
 type Tab = "enhance" | "authenticate" | "measure" | "audit";
 const TAB_LABEL: Record<Tab, string> = { enhance: "Enhance", authenticate: "Authenticate", measure: "Measure", audit: "Audit & review" };
@@ -46,7 +58,7 @@ type View = { kind: "chain" } | { kind: "map"; digest: string; label: string };
 
 const sameGraph = (a: Graph, b: Graph) => JSON.stringify(a) === JSON.stringify(b);
 
-export function Workspace({ caseId, filters, analyses }: Props) {
+export function Workspace({ caseId, filters, analyses, evidence: initialEvidence, viewerOnly }: Props) {
   const [kase, setCase] = useState<Case | null>(null);
   const [evidence, setEvidence] = useState<Evidence[]>([]);
   const [chains, setChains] = useState<Chain[]>([]);
@@ -85,10 +97,19 @@ export function Workspace({ caseId, filters, analyses }: Props) {
   const [crop, setCrop] = useState<{ nodeId: string | null } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [collapsed, setCollapsed] = useState<{ left: boolean; right: boolean }>(() => {
+    if (viewerOnly) return { left: true, right: true };
     try {
       return JSON.parse(localStorage.getItem("panels") ?? "") as { left: boolean; right: boolean };
     } catch {
       return { left: false, right: false };
+    }
+  });
+  // Panel widths, dragged on the splitters and kept between sessions.
+  const [widths, setWidths] = useState<Widths>(() => {
+    try {
+      return clampWidths({ ...DEFAULT_WIDTHS, ...JSON.parse(localStorage.getItem("panelWidths") ?? "{}") });
+    } catch {
+      return DEFAULT_WIDTHS;
     }
   });
   // Undo / redo over the draft graph of the open chain.
@@ -128,7 +149,8 @@ export function Workspace({ caseId, filters, analyses }: Props) {
 
   useEffect(() => {
     reload().then((d) => {
-      if (d.evidence.length) selectEvidence(d.evidence[0].id, d.chains);
+      const first = d.evidence.find((e) => e.id === initialEvidence) ?? d.evidence[0];
+      if (first) selectEvidence(first.id, d.chains);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseId]);
@@ -257,18 +279,20 @@ export function Workspace({ caseId, filters, analyses }: Props) {
     const t = e.target as HTMLElement;
     if (t.closest("input, textarea, select, [contenteditable]")) return;
     const mod = e.ctrlKey || e.metaKey;
-    if (mod && (e.key === "z" || e.key === "Z") && !e.shiftKey) {
+    const k = keyOf(e);
+    if (e.altKey) return;
+    if (mod && k === "z" && !e.shiftKey) {
       e.preventDefault();
       undo();
-    } else if (mod && (e.key === "y" || e.key === "Y" || ((e.key === "z" || e.key === "Z") && e.shiftKey))) {
+    } else if (mod && (k === "y" || (k === "z" && e.shiftKey))) {
       e.preventDefault();
       redo();
-    } else if (!mod && (e.key === "c" || e.key === "C") && ev && ev.media_type !== "container") {
+    } else if (!mod && k === "c" && ev && ev.media_type !== "container") {
       startCrop(null);
-    } else if (!mod && (e.key === "m" || e.key === "M") && codecOk) {
+    } else if (!mod && k === "m" && codecOk) {
       setCodecOpen((o) => !o);
-    } else if (!mod && isVideo && frames.length && (e.key === "j" || e.key === "J" || e.key === "l" || e.key === "L")) {
-      const step = (e.key.toLowerCase() === "l" ? 1 : -1) * (e.shiftKey ? 10 : 1);
+    } else if (!mod && isVideo && frames.length && (k === "j" || k === "l")) {
+      const step = (k === "l" ? 1 : -1) * (e.shiftKey ? 10 : 1);
       seek(Math.min(frames.length - 1, Math.max(0, frame + step)));
     }
   };
@@ -285,6 +309,59 @@ export function Workspace({ caseId, filters, analyses }: Props) {
     };
   }, [codecOn, ev?.id, frame]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Menu bar commands and window-wide shortcuts (see MenuBar).
+  const commands = useRef<(c: Command) => void>(() => {});
+  commands.current = (c: Command) => {
+    const showTab = (t: Tab) => {
+      setTab(t);
+      setExtPick(null);
+      setCrop(null);
+      setCollapsed((x) => ({ ...x, right: false }));
+    };
+    switch (c) {
+      case "add-evidence":
+        chooseEvidence();
+        break;
+      case "undo":
+        undo();
+        break;
+      case "redo":
+        redo();
+        break;
+      case "crop":
+        if (ev && ev.media_type !== "container") startCrop(null);
+        break;
+      case "triage":
+        if (evidence.length && !triageBusy) runTriage();
+        break;
+      case "toggle-left":
+        setCollapsed((x) => ({ ...x, left: !x.left }));
+        break;
+      case "toggle-right":
+        setCollapsed((x) => ({ ...x, right: !x.right }));
+        break;
+      case "focus-viewer":
+        setCollapsed((x) => (x.left && x.right ? { left: false, right: false } : { left: true, right: true }));
+        break;
+      case "viewer-window":
+        openWindow(`#/case/${caseId}?ev=${evId ?? ""}&layout=viewer`, `${kase?.name ?? "Lucida"} · viewer`);
+        break;
+      case "tab-enhance":
+        showTab("enhance");
+        break;
+      case "tab-authenticate":
+        showTab("authenticate");
+        break;
+      case "tab-measure":
+        showTab("measure");
+        break;
+      case "tab-audit":
+        showTab("audit");
+        break;
+    }
+  };
+  useEffect(() => onCommand((c) => commands.current(c)), []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => keys.current(e);
     window.addEventListener("keydown", onKey);
@@ -292,28 +369,79 @@ export function Workspace({ caseId, filters, analyses }: Props) {
   }, []);
 
   useEffect(() => {
+    if (viewerOnly) return;
     try {
       localStorage.setItem("panels", JSON.stringify(collapsed));
     } catch {
       /* storage unavailable */
     }
-  }, [collapsed]);
+  }, [collapsed, viewerOnly]);
 
-  const upload = async (files: FileList | null) => {
-    if (!files) return;
+  useEffect(() => {
+    try {
+      localStorage.setItem("panelWidths", JSON.stringify(widths));
+    } catch {
+      /* storage unavailable */
+    }
+  }, [widths]);
+
+  /** Drag a splitter: the left one sets the evidence panel's width, the right one the tools panel's. */
+  const startResize = (side: "left" | "right") => (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    const x0 = e.clientX;
+    const w0 = widths;
+    const move = (m: PointerEvent) => {
+      const dx = m.clientX - x0;
+      setWidths(clampWidths(side === "left" ? { ...w0, left: w0.left + dx } : { ...w0, right: w0.right - dx }));
+    };
+    const up = () => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+  };
+
+  /** Add evidence one file at a time; `send` stores one file and returns its evidence record. */
+  const addEvidence = async (items: { name: string; send: () => Promise<Evidence> }[]) => {
+    if (!items.length) return;
     let last: Evidence | null = null;
-    for (const f of Array.from(files)) {
-      setUploading(`Hashing and storing ${f.name}…`);
+    for (const it of items) {
+      setUploading(`Hashing and storing ${it.name}…`);
       try {
-        last = await api.upload(caseId, f);
+        last = await it.send();
       } catch (e) {
-        setStatus({ kind: "bad", text: `${f.name}: ${(e as Error).message}` });
+        setStatus({ kind: "bad", text: `${it.name}: ${(e as Error).message}` });
       }
     }
     setUploading(null);
     const d = await reload();
     if (last) selectEvidence(last.id, d.chains);
     setAuditKey((k) => k + 1);
+  };
+
+  const upload = (files: FileList | null) =>
+    addEvidence(Array.from(files ?? []).map((f) => ({ name: f.name, send: () => api.upload(caseId, f) })));
+
+  /** Add evidence: the native Open dialog in the desktop app (files are read from their folder,
+   * not uploaded), the browser's file picker otherwise. */
+  const chooseEvidence = async () => {
+    const b = bridge();
+    if (!b) {
+      fileInput.current?.click();
+      return;
+    }
+    let offered: OfferedFile[] = [];
+    try {
+      offered = await b.open_evidence();
+    } catch (e) {
+      setStatus({ kind: "bad", text: `Open dialog: ${(e as Error).message}` });
+    }
+    await addEvidence(offered.map((f) => ({ name: f.name, send: () => api.ingestLocal(caseId, f.token) })));
   };
 
   const newChain = async (graph?: Graph, name?: string): Promise<Chain | null> => {
@@ -646,7 +774,16 @@ export function Workspace({ caseId, filters, analyses }: Props) {
     );
 
   return (
-    <div className={`workspace${collapsed.left ? " no-left" : ""}${collapsed.right ? " no-right" : ""}`}>
+    <div
+      className={`workspace${collapsed.left ? " no-left" : ""}${collapsed.right ? " no-right" : ""}`}
+      style={{ "--left-w": `${widths.left}px`, "--right-w": `${widths.right}px` } as React.CSSProperties}
+    >
+      {!collapsed.left && (
+        <div className="splitter split-left" onPointerDown={startResize("left")} onDoubleClick={() => setWidths((w) => ({ ...w, left: DEFAULT_WIDTHS.left }))} title="Drag to resize · double-click to reset" />
+      )}
+      {!collapsed.right && (
+        <div className="splitter split-right" onPointerDown={startResize("right")} onDoubleClick={() => setWidths((w) => ({ ...w, right: DEFAULT_WIDTHS.right }))} title="Drag to resize · double-click to reset" />
+      )}
       {collapsed.left ? (
         <button className="rail left-rail" onClick={() => setCollapsed((c) => ({ ...c, left: false }))} title="Show evidence">
           ›
@@ -671,7 +808,7 @@ export function Workspace({ caseId, filters, analyses }: Props) {
             <button onClick={runTriage} className="small-btn" disabled={triageBusy || !evidence.length} title="Smart Report on every item: where to look first">
               {triageBusy ? "Triage…" : "Triage"}
             </button>
-            <button onClick={() => fileInput.current?.click()} className="primary small-btn" title="Add images or video (or drop files here)">
+            <button onClick={chooseEvidence} className="primary small-btn" title="Add images or video (Ctrl+O, or drop files here)">
               + Add
             </button>
             <button className="icon" onClick={() => setCollapsed((c) => ({ ...c, left: true }))} title="Hide panel">
@@ -680,7 +817,7 @@ export function Workspace({ caseId, filters, analyses }: Props) {
             <input ref={fileInput} type="file" multiple hidden onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
           </div>
           {(uploading || !evidence.length || dragOver) && (
-            <div className="dropzone" onClick={() => fileInput.current?.click()}>
+            <div className="dropzone" onClick={chooseEvidence}>
               {uploading ?? "Drop images or video here"}
             </div>
           )}

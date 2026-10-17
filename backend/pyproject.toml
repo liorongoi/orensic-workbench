@@ -24,9 +24,12 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8", "httpx>=0.27", "onnx>=1.15"]
 tools = ["onnx>=1.15"]
+# The desktop window (python -m forensic.desktop); uses WebView2, built into Windows 10 and 11.
+desktop = ["pywebview>=5.3"]
 
 [project.scripts]
 forensic-mcp = "forensic.mcp_server:main"
+lucida-desktop = "forensic.desktop:main"
 
 [build-system]
 requires = ["setuptools>=68"]

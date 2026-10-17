@@ -353,8 +353,16 @@ class Workbench:
         if fr["start"] > last:
             raise FilterError(f"frame {fr['start']} is beyond the last frame ({last})")
         end = min(fr["end"], last)
-        if end - fr["start"] + 1 > 600:
+        n = end - fr["start"] + 1
+        if n > 600:
             raise FilterError("frame ranges are limited to 600 frames in this version")
+        need = n * probe["width"] * probe["height"] * 3 * 4
+        if need > compute.range_budget():
+            fit = max(1, compute.range_budget() // (probe["width"] * probe["height"] * 3 * 4))
+            raise FilterError(
+                f"{n} frames of {probe['width']}x{probe['height']} need {need / (1 << 30):.1f} GB of memory; "
+                f"this computer allows {compute.range_budget() / (1 << 30):.1f} GB per range ({fit} frames). "
+                "Shorten the range, or raise FORENSIC_RANGE_MB on a computer with more RAM")
         if use_cache:
             u8 = self.frames.frames(row["sha256"], path, self.settings, fr["start"], end, last, probe["width"], probe["height"])
         else:

@@ -486,6 +486,32 @@ def upload(case_id: str, file: UploadFile = File(...), x_examiner: str | None = 
     return wb().ingest(case_id, file.file, file.filename or "evidence", actor(x_examiner))
 
 
+class LocalFileIn(BaseModel):
+    token: str
+
+
+@app.post("/api/cases/{case_id}/evidence/local")
+def ingest_local(case_id: str, body: LocalFileIn):
+    """Add a file the examiner chose in the desktop app's Open dialog, read from where it is
+    (no upload copy). Only paths the dialog offered, by single-use token, are accepted."""
+    from .desktop import local_files
+
+    path = local_files.take(body.token)
+    if path is None:
+        raise HTTPException(404, "that file is no longer offered: choose it again")
+    if not path.is_file():
+        raise HTTPException(404, f"{path.name} is no longer there")
+    return wb().ingest_path(case_id, path, actor())
+
+
+@app.get("/api/system")
+def system():
+    """What this computer gives Lucida: cores, RAM caches, graphics card and model device."""
+    from . import compute
+
+    return compute.summary()
+
+
 @app.get("/api/evidence/{evidence_id}")
 def get_evidence(evidence_id: str):
     return wb().get_evidence(evidence_id)
