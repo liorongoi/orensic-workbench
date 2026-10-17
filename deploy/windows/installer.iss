@@ -70,7 +70,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Messages]
 WelcomeLabel2=This will install [name/ver] on your computer.%n%nLucida is an offline forensic image and video workbench. Everything it needs is inside this installer: the Python runtime, FFmpeg, the AI models, the user interface and the guides. No internet connection is needed, now or later.%n%nIt is recommended that you close all other applications before continuing.
-FinishedLabel=Setup has finished installing [name] on your computer. Start it from the Start menu or the desktop shortcut; it opens in your browser.
+FinishedLabel=Setup has finished installing [name] on your computer. Start it from the Start menu or the desktop shortcut; it opens in its own Lucida window.
 
 [Tasks]
 Name: "startmenu"; Description: "Create Start menu shortcuts"; GroupDescription: "Shortcuts:"
@@ -386,7 +386,7 @@ begin
 
   PortPage := CreateInputQueryPage(DataPage.ID,
     'Local web address', 'Which port should Lucida use on this computer?',
-    'Lucida runs in your browser at http://127.0.0.1:<port>. Unless you choose the lab-network option on a ' +
+    'Lucida serves its window (and the browser view) at http://127.0.0.1:<port>. Unless you choose the lab-network option on a ' +
     'later page, it only accepts connections from this computer. Keep 8000 unless another program already uses it.');
   PortPage.Add('Port:', False);
   PortPage.Values[0] := ParamOr('PORT', GetPreviousData('Port', '8000'));
