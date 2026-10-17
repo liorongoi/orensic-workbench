@@ -81,3 +81,33 @@ python -m forensic.validation.deblur --levin <levin dir> \
 `--save-inputs` writes the exact degraded inputs, so another method can be run on them; `--reference NAME=DIR`
 scores that method's outputs (`<case>.png` or `.npy`) with the same measures. Kernels: Levin09.mat from the KAIR or
 DPIR repository, one `.npy` per kernel. The full run takes about 75 minutes on four CPU cores.
+
+## New deblur tools (follow-up)
+
+Four kinds of blur Amped FIVE handles and Lucida did not, now added, each measured against what the app could do before.
+Raw numbers: `results-new-filters.json` next to this page in the project files.
+
+| Blur | Before (best existing option) | New tool | Score with the true blur, for reference |
+|---|---|---|---|
+| Real camera shake, a small light in view (Levin, 32 images) | 24.4 dB, closest straight line/disk/Gaussian | **30.8 dB**, light-streak blur shape (Richardson-Lucy) | 32.8 dB |
+| Real camera shake, no hint (Levin, 32 images) | 24.0 dB, app's motion estimate | **30.3 dB**, blind deblur | 32.8 dB |
+| Curved shake along random paths (Set12 and Levin photos, 88 images) | 24.8 dB, closest straight line or disk | **28.1 dB**, drawn path (10 clicks); 27.4 dB blind | 32.2 dB |
+| Camera roll, blur varies across the frame (11 images) | 27.5 dB, one uniform streak (blurred: 27.4) | **29.1 dB**, variable motion from 4 drawn streaks | |
+| Turbulence, 20 shimmering frames (11 scenes) | 26.2 dB, median of frames (one frame: 21.5) | **29.0 dB**, turbulence removal | |
+
+* **Light-streak blur** (`psf: streak` on Wiener, Richardson-Lucy and total variation): a box around the smear a small
+  light left is read as the blur kernel. On Levin's set it gets within 2 dB of the true kernel.
+* **Drawn-path blur** (`psf: path`): click along the blur's trajectory. With 10 clicks it recovers 3.3 dB over a
+  straight line on curved shake; tracing more points along sharp turns gets closer to the true-kernel score.
+* **Blind deblur** (`deblur.blind`): estimates the kernel from the image's strong edges (L0 sparse-gradient prior,
+  coarse to fine), then deconvolves. On Levin's real shake it recovers 7 dB with no input from the examiner and fails
+  (stays near the blurred score) on 2 of the 32 images. Its default edge selection (0.01) was chosen on this same set.
+* **Variable motion** (`deblur.variable`): draw two or more short streaks across the frame; the blur is interpolated
+  between them and each tile is deblurred with its own. A tile-wise *blind* version was tried first and made images
+  worse (tiles hold too few edges to estimate from), so it was dropped.
+* **Turbulence removal** (`stack.turbulence`): registers every frame onto the per-pixel median with dense optical
+  flow, fuses, then removes the residual softness. Needs a fixed camera and a static scene.
+
+The curved-shake, camera-roll and turbulence tests are synthetic (generated from the sharp images with fixed seeds),
+because the public sets with such blur (Köhler, Lai, GoPro, RealBlur) could not be downloaded here; the drawn-path and
+streak inputs emulate an examiner's clicks with up to half a pixel of error.

@@ -13,6 +13,7 @@ from .conftest import _scene, ingest
 # Non-default settings for filters whose defaults leave most of the code idle.
 EXTRA = {
     "deblur.richardson_lucy": {"psf": "defocus", "radius": 2.5, "iterations": 5, "tv": 0.004},
+    "deblur.variable": {"streaks": [[10, 10], [16, 12], [140, 100], [146, 96]], "tiles": 3},
     "geometry.rotate": {"angle": 7.3},
     "stack.integrate": {"method": "sigma_clip"},
     "stack.stabilise": {"motion": "affine"},

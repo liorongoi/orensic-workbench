@@ -507,6 +507,15 @@ deterministic; the three colour channels are independent and run in parallel.
   and bilinear splatting so non-integer lengths and angles are smooth.
 - **Defocus**: a uniform disk of a given radius, anti-aliased by 8×8 supersampling.
 - **Gaussian**: general softness of a given sigma.
+- **Path**: a curved or uneven motion the examiner draws by clicking along it; the polyline is
+  sampled at 1/16 px at constant speed and splatted bilinearly.
+- **Streak**: the smear a small light left in the image, read from a box around it: the box's
+  median is taken as background and three robust standard deviations above it as noise, faint
+  pixels and specks not joined to the brightest blob are dropped. It is the measured blur, the
+  way Levin et al. 2009 measured theirs.
+
+Path and streak PSFs are placed with their centre of mass on the middle pixel, so the result is
+not shifted.
 
 The image is padded symmetrically by the PSF size before filtering so the FFT's wrap-around
 does not ring at the borders.
@@ -563,11 +572,41 @@ The code windows the luma (Hann), computes the cepstrum, and searches every angl
 The strength reported is that depth in standard deviations; below about 4 means no clear
 linear blur. The estimate is a suggestion, never applied automatically.
 
+### 8.6 Blind deconvolution
+
+`deblur.blind` estimates a spatially uniform kernel from the image, then removes it with
+total-variation deconvolution (8.4). The estimate alternates, coarse to fine over scales
+1/√2 apart, between a sharp edges-only image (minimising `‖k ∗ x − y‖² + λ‖∇x‖₀` by
+half-quadratic splitting, Xu, Zheng and Jia 2013; Pan et al. 2014) and the least-squares kernel
+that maps that image's gradients to the evidence's, solved by FFT, made non-negative, thresholded
+at 5 % of its peak and stripped of specks. Gradients near the padded border are left out of the
+kernel fit, since the FFT's wrap-around puts edges there that are not in the scene. There is no
+random start, so a re-run gives the same kernel and image. On Levin et al.'s real camera shake it
+scores 30.3 dB against 32.8 dB with the true kernel (see `docs/validation/deblur-benchmarks.md`).
+
+### 8.7 Variable motion
+
+`deblur.variable` handles motion blur that changes across the frame (a camera roll, a turning
+vehicle). The examiner draws two or more short streaks; at each tile centre the motion vector is
+the inverse-square-distance average of the streaks (each flipped to agree in direction with the
+first), each overlapping tile is deconvolved by TV with its own straight-line PSF, and the tiles
+are blended with sin² windows that sum to one (the overlapping-patch model of Hirsch et al. 2010).
+A tile-wise blind version was tried and made images worse: tiles hold too few edges to estimate
+a kernel from.
+
+### 8.8 Turbulence removal
+
+`stack.turbulence` (multi-frame) takes the per-pixel median of the frames as a steady reference,
+warps every frame onto it with Farnebäck dense optical flow, fuses the warped frames (median by
+default) and repeats once against the fused image; it then removes the remaining softness, a
+Gaussian of the given sigma, by TV deconvolution (Zhu and Milanfar 2013 follow the same
+register-fuse-deconvolve outline).
+
 **Alternatives to known-PSF deconvolution.**
 
 | Approach | Why not used |
 |---|---|
-| Blind deconvolution (Fergus 2006, Levin 2009, Krishnan 2011) | Estimates the PSF and the image together. Results depend on initialisation and regularisation, are not unique, and are hard to defend: two runs can disagree. The cepstral estimate plus a known-PSF method gives the same benefit with a PSF the examiner can state. |
+| Randomised or learned blind deconvolution (Fergus 2006, Levin 2009, Krishnan 2011, SelfDeblur) | Results depend on a random start and can disagree between runs. The blind filter (8.6) is the deterministic L0 variant; for a PSF the examiner can state, prefer a light streak or a drawn path. |
 | Learned deblurring (DeblurGAN, MPRNet, NAFNet) | Can produce convincing but invented edges and characters; unacceptable for plates and faces without the generative-step controls. |
 | Radon-transform blur estimation | Works on the same spectral zeros as the cepstrum; the cepstrum gives length and angle in one search and is simpler to explain. |
 

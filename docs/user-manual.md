@@ -549,6 +549,15 @@ The planner's "low light" workflow now tries the low-light enhancement among its
    the result looks flat or cartoon-like.
 4. For dark, noisy footage try **Deblur (Richardson-Lucy)**, with 15 to 30 iterations and a
    total-variation weight of 0.002 to 0.01.
+5. If the blur is not a straight line (camera shake), choose blur type **streak** and pick two
+   corners of a box around the smear of a small light (a lamp, a reflection) on a dark background;
+   it is read as the blur itself. With no such light, choose **path** and click along the blur's
+   trajectory, or use **Deblur (blind, estimated kernel)** with a region that has clear edges and a
+   kernel size a little larger than the smear.
+6. If the blur changes across the frame, use **Deblur (motion that varies across the frame)** and
+   click both ends of a blur streak at two or more places.
+7. For shimmer from heat or long distances, select a frame range of a fixed camera and add
+   **Turbulence removal**.
 
 ### 8.4 Interlaced CCTV
 
@@ -1039,9 +1048,12 @@ with the lab's validation records.
 | Deblur | Deblur (Wiener) | Inverts a known motion, defocus or Gaussian blur. |
 | Deblur | Deblur (Richardson-Lucy) | Iterative deblurring, better on noisy low light. |
 | Deblur | Deblur (total-variation deconvolution) | Deblurring with little ringing or noise; good on plates and text. |
+| Deblur | Deblur (blind, estimated kernel) | Estimates an unknown blur (camera shake) from the image, then removes it. |
+| Deblur | Deblur (motion that varies across the frame) | Motion blur that changes across the image, from streaks you draw. |
 | Multi-frame | Stabilise / register frames | Aligns frames to a reference. |
 | Multi-frame | Frame integration | Averages aligned frames to cut noise. |
 | Multi-frame | Pick frame | Takes one frame from a range. |
+| Multi-frame | Turbulence removal | Steadies heat shimmer: aligns each frame locally, fuses, removes residual blur. |
 | Multi-frame | Multi-frame super resolution | Higher resolution from several shifted frames; evidential. |
 | Multi-frame | Video denoise (motion-compensated) | Averages each frame with its motion-aligned neighbours; keeps moving objects sharp. |
 | AI-assisted | AI super resolution (single image) | Enlarges with a small neural network (FSRCNN/ESPCN); generative, illustrative only. |
