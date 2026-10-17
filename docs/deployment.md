@@ -52,6 +52,45 @@ CI installs every build on a fresh Windows runner, for one user and for all user
 bundled Python from the network, runs the self-test, starts Lucida, and uninstalls
 (`deploy\windows\test-installer.ps1`).
 
+## Desktop app
+
+`python -m forensic.desktop` (or `lucida-desktop`) runs Lucida in its own window instead of a
+browser tab. It starts Lucida on 127.0.0.1 on a free port and shows it in a native WebView2
+window (Edge's engine, built into Windows 10 and 11; it needs the optional `pywebview` package,
+`pip install "lucida-forensic[desktop]"`). Without `pywebview`, or with `--browser`, it opens
+the default browser. The window adds:
+
+- a menu bar (File, Edit, View, Tools, Help) with keyboard shortcuts; F1 lists them all, and
+  letter shortcuts follow the physical key, so they work on a Hebrew or Russian layout too;
+- **Ctrl+O** opens a native Open dialog; the chosen files are hashed into the evidence store
+  straight from their folder, with no upload through the window;
+- native Save dialogs for the JSON bundle, exports and originals; HTML and PDF reports open
+  in their own window;
+- resizable evidence and tools panels (drag the edge; double-click resets), **Alt+1 / Alt+2**
+  to hide them, **Alt+3** for the viewer alone, **F11** for full screen;
+- **View > Viewer in new window** (Ctrl+Shift+N) opens a second window on the other monitor,
+  showing only the viewer for the same item;
+- **1** shows actual pixels on any monitor scaling: one image pixel on one screen pixel at
+  125 %, 150 % or 200 % Windows scaling, with no resampling.
+
+**Tools > This computer** shows the graphics card, where the models run, the CPU threads and
+the RAM caches. On a workstation with an RTX A4000 (16 GB) and 48 to 128 GB of RAM:
+
+- Learned models run on the A4000 through DirectML. Lucida asks DirectML for the
+  high-performance GPU, so the NVIDIA card is used rather than the processor's own graphics
+  (`FORENSIC_GPU_DEVICE=<n>` picks an adapter by number). Images are processed in tiles on a
+  grid fixed by the image size, so the card's memory never changes a result; at those tile
+  sizes a model run needs about a gigabyte, well within 16 GB. The models are loaded and
+  checked in the background when the window opens, so the first enhancement does not wait.
+- Classical filters stay on the CPU, on every core, because they give the same bits on every
+  machine.
+- RAM: results are cached in a quarter of RAM (12 GB at 48 GB, 32 GB at 128 GB), decoded
+  video frames in an eighth (6 GB, 16 GB). One frame range may take a sixth of RAM as 32-bit
+  frames (8 GB at 48 GB, about 21 GB at 128 GB; `FORENSIC_RANGE_MB` changes it): a range
+  that would not fit is refused with the number of frames that do, instead of pushing the
+  machine into swap. Filters on a range write into one result array, so a range needs one
+  copy in memory, not two.
+
 ## Several examiners
 
 Lucida keeps its own accounts, since the lab machine is offline. The first person to

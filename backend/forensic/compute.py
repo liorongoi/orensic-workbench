@@ -11,6 +11,14 @@ Settings (environment variables):
     FORENSIC_CACHE_MB    RAM for cached intermediate results (default: a quarter of RAM, at most 32 GB)
     FORENSIC_FRAME_CACHE_MB  RAM for decoded video frames (default: an eighth of RAM, at most 16 GB)
     FORENSIC_AI_DEVICE   auto | gpu | cpu for learned models (default auto: the GPU when one is usable)
+    FORENSIC_GPU_MEMORY_MB   graphics memory to report when the NVIDIA driver cannot be asked
+    FORENSIC_RANGE_MB    RAM one decoded video frame range may take as 32-bit frames
+                         (default: a sixth of RAM, between 2 and 24 GB)
+
+The GPU only runs learned models (through ONNX Runtime with DirectML on Windows), tile by
+tile on a grid fixed by the image size, so the card's memory never changes a result. The
+classical filters stay on the CPU: they give the same bits on every machine, which GPU
+kernels do not promise.
 """
 
 from __future__ import annotations
@@ -75,6 +83,62 @@ def frame_cache_budget() -> int:
     return _env_int("FORENSIC_FRAME_CACHE_MB", 0) * MB or max(512 * MB, min(physical_memory() // 8, 16 * GB))
 
 
+def range_budget() -> int:
+    """Bytes one decoded frame range may take as float32 frames, so a long range on a 4K video
+    is refused with a clear message instead of pushing the machine into swap."""
+    return _env_int("FORENSIC_RANGE_MB", 0) * MB or max(2 * GB, min(physical_memory() // 6, 24 * GB))
+
+
+_gpu_info: dict | None = None
+_gpu_lock = threading.Lock()
+
+
+def _nvidia_smi() -> str | None:
+    import shutil
+
+    exe = shutil.which("nvidia-smi")
+    if not exe and sys.platform == "win32":
+        p = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "nvidia-smi.exe")
+        exe = p if os.path.isfile(p) else None
+    return exe
+
+
+def gpu_info() -> dict:
+    """The graphics card the models can use: {"name", "memory_mb", "source"}.
+
+    Read once from the NVIDIA driver's nvidia-smi (installed with every NVIDIA driver, no
+    network); FORENSIC_GPU_MEMORY_MB overrides the memory figure. Name is "" when unknown.
+    """
+    global _gpu_info
+    with _gpu_lock:
+        if _gpu_info is None:
+            info = {"name": "", "memory_mb": 0, "source": "unknown"}
+            exe = _nvidia_smi()
+            if exe:
+                import subprocess
+
+                try:
+                    out = subprocess.run([exe, "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+                                         capture_output=True, text=True, timeout=10,
+                                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                    line = out.stdout.strip().splitlines()[0] if out.returncode == 0 and out.stdout.strip() else ""
+                    name, _, mem = line.rpartition(",")
+                    if name:
+                        info = {"name": name.strip(), "memory_mb": int(float(mem)), "source": "nvidia-smi"}
+                except (OSError, ValueError, subprocess.SubprocessError, IndexError):
+                    pass
+            _gpu_info = info
+        info = dict(_gpu_info)
+    override = _env_int("FORENSIC_GPU_MEMORY_MB", 0)
+    if override:
+        info.update(memory_mb=override, source="FORENSIC_GPU_MEMORY_MB")
+    return info
+
+
+def gpu_jobs() -> int:
+    return _env_int("FORENSIC_GPU_JOBS", 1)
+
+
 def ai_device() -> str:
     v = os.environ.get("FORENSIC_AI_DEVICE", "auto").strip().lower()
     return v if v in ("auto", "gpu", "cpu") else "auto"
@@ -128,9 +192,28 @@ def describe() -> str:
     """One line for the report's software environment section."""
     from . import models
 
+    g = gpu_info()
+    card = f" ({g['name']}, {g['memory_mb']} MB)" if g["name"] else ""
     return (f"{cpu_threads()} CPU threads; caches {cache_budget() // MB} MB results, "
             f"{frame_cache_budget() // MB} MB video frames of {physical_memory() // MB} MB RAM; "
-            f"learned models on {models.device_label()}")
+            f"learned models on {models.device_label()}{card}")
+
+
+def summary() -> dict:
+    """What this computer gives Lucida, for the desktop app's System dialog."""
+    from . import models
+
+    g = gpu_info()
+    return {
+        "cpu_threads": cpu_threads(),
+        "ram_mb": physical_memory() // MB,
+        "result_cache_mb": cache_budget() // MB,
+        "frame_cache_mb": frame_cache_budget() // MB,
+        "range_mb": range_budget() // MB,
+        "gpu": {"name": g["name"], "memory_mb": g["memory_mb"], "source": g["source"],
+                "provider": models.gpu_provider(), "jobs": gpu_jobs()},
+        "models_on": models.device_label(),
+    }
 
 
 def by_rows(fn: Callable, frames, out_dtype) -> np.ndarray:
