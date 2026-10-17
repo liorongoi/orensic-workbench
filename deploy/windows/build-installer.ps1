@@ -30,6 +30,9 @@ $FfmpegVersion = "7.1.1"
 $FfmpegUrl = "https://github.com/GyanD/codexffmpeg/releases/download/$FfmpegVersion/ffmpeg-$FfmpegVersion-essentials_build.zip"
 $FfmpegSha256 = "04861d3339c5ebe38b56c19a15cf2c0cc97f5de4fa8910e4d47e5e6404e4a2d4"
 $VcRedistUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+# WebView2 Evergreen Standalone Installer (x64), for the desktop window on Windows 10 machines
+# that lack the runtime. Setup copies it to a temporary folder and runs it only when needed.
+$WebView2Url = "https://go.microsoft.com/fwlink/?linkid=2124701"
 
 $Repo = (Resolve-Path "$PSScriptRoot\..\..").Path
 $Version = (Select-String -Path "$Repo\backend\pyproject.toml" -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
@@ -98,13 +101,28 @@ if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notmatch "O=Micr
 }
 Write-Host "  signed by $($sig.SignerCertificate.Subject)"
 
+Step "WebView2 runtime installer (desktop window on Windows 10)"
+$wv2Dir = "$Work\webview2"
+New-Item -ItemType Directory -Force $wv2Dir | Out-Null
+$wv2 = "$wv2Dir\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+$wv2Sha = Get-Pinned $WebView2Url $wv2 ""
+# The Evergreen installer always serves the current release, so require Microsoft's signature.
+$sig = Get-AuthenticodeSignature $wv2
+if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notmatch "O=Microsoft Corporation") {
+    throw "the WebView2 installer is not validly signed by Microsoft ($($sig.Status): $($sig.SignerCertificate.Subject))"
+}
+Write-Host "  signed by $($sig.SignerCertificate.Subject)"
+
 Step "Python dependencies (wheels for Windows x64, CPython 3.12)"
 $wheels = "$Work\wheels"
 if (Test-Path $wheels) { Remove-Item -Recurse -Force $wheels }
 & $BuildPython -m pip wheel --no-deps --wheel-dir $wheels "$Repo\backend"; Check "building the backend wheel"
 $backendWheel = (Get-ChildItem "$wheels\lucida_forensic-*.whl" | Select-Object -First 1).FullName
+# The [desktop] extra adds pywebview and its Windows dependencies (pythonnet, clr_loader, cffi,
+# bottle, proxy_tools, typing_extensions). proxy_tools is published only as source, so it alone
+# may be built here (it is pure Python); everything else must be a binary wheel.
 & $BuildPython -m pip install --no-cache-dir --disable-pip-version-check --no-warn-script-location `
-    --only-binary=:all: --target $Site $backendWheel
+    --only-binary=:all: --no-binary=proxy_tools --target $Site "$backendWheel[desktop]"
 Check "installing the dependencies"
 
 Step "FFmpeg $FfmpegVersion"
@@ -165,6 +183,7 @@ Commit:   $commit
 Python:   $PythonVersion embeddable, sha256 $pySha
 FFmpeg:   $FfmpegVersion essentials (gyan.dev), sha256 $ffSha
 VC++:     vc_redist.x64.exe, sha256 $vcSha
+WebView2: Evergreen Standalone x64 (run by Setup only if missing), sha256 $wv2Sha
 "@ | Set-Content -Encoding utf8 "$Payload\BUILDINFO.txt"
 & "$Py\python.exe" -I -c @"
 import hashlib, os, sys
@@ -201,8 +220,12 @@ try {
     Remove-Item Env:FORENSIC_DATA_DIR
 }
 
+Step "Desktop window libraries load with the private Python"
+& "$Py\python.exe" -I -c "import webview, clr, forensic.desktop; print('pywebview', webview.__version__ if hasattr(webview, '__version__') else '', '- pythonnet loaded')"
+Check "loading pywebview and pythonnet"
+
 Step "Compiling the installer"
-& $Iscc /Q "/DAppVersion=$Version" "/DPayloadDir=$Payload" "/DOutputDir=$OutDir" "$PSScriptRoot\installer.iss"
+& $Iscc /Q "/DAppVersion=$Version" "/DPayloadDir=$Payload" "/DOutputDir=$OutDir" "/DWebView2Dir=$wv2Dir" "$PSScriptRoot\installer.iss"
 Check "Inno Setup"
 $setup = "$OutDir\Lucida-$Version-Setup.exe"
 $hash = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLower()

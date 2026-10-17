@@ -32,7 +32,14 @@ The wizard then asks for:
   `net localgroup "Forensic Examiners" <account> /add`, and they sign out and in again;
 - the local port (default 8000; Lucida listens on 127.0.0.1 only, unless you tick the
   lab-network option, see [Examiners on other PCs](#examiners-on-other-pcs));
-- Start menu and desktop shortcuts (both ticked by default).
+- Start menu and desktop shortcuts (both ticked by default). **Lucida** opens the desktop
+  window (no console, no browser; see the desktop app section). **Lucida in the browser** starts
+  Lucida with a console window and opens the browser, as before. With the lab-network option,
+  both start the shared HTTPS server and open the browser.
+
+The desktop window runs on the Microsoft Edge WebView2 runtime, which Windows 11 includes. On a
+Windows 10 machine without it, Setup installs it from the copy inside the installer, offline.
+The desktop window's messages go to `<case data>\logs\desktop-<date>.txt`.
 
 A summary page shows every choice before anything is installed. The last page offers to run
 the acceptance self-test and to start Lucida straight away.
@@ -55,8 +62,9 @@ optionally `c2pa_trust_anchors`, `allowed_hosts`, the extra names browsers may u
 [Several examiners](#several-examiners)). Compute settings are
 optional too: `threads` (default every core), `cache_mb` (RAM for intermediate results, default a
 quarter of RAM up to 32 GB), `frame_cache_mb` (decoded video frames, default an eighth up to 16 GB)
-and `ai_device` (`auto`, `gpu` or `cpu`; auto uses the GPU through DirectML when it reproduces results
-bit for bit). Running a newer installer upgrades in place and keeps
+`range_mb` (RAM one video frame range may use), `ai_device` (`auto`, `gpu` or `cpu`; auto uses
+the GPU through DirectML when it reproduces results bit for bit) and `gpu_device` (the DirectML
+adapter number, if the NVIDIA card is not picked on its own). Running a newer installer upgrades in place and keeps
 these settings and the case data. Silent installation for managed rollouts:
 
 ```

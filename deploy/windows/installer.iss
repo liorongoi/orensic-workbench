@@ -10,6 +10,9 @@
 #ifndef PayloadDir
   #define PayloadDir "payload"
 #endif
+#ifndef WebView2Dir
+  #define WebView2Dir "webview2"
+#endif
 #ifndef OutputDir
   #define OutputDir "dist"
 #endif
@@ -19,6 +22,8 @@
 #define OldAppName "Forensic Workbench"
 #define AppIcon "{app}\lucida.ico"
 #define Python "{app}\python\python.exe"
+; The desktop window has no console, so it runs under pythonw.exe.
+#define PythonW "{app}\python\pythonw.exe"
 #define Launcher "{app}\launcher\workbench_launcher.py"
 
 [Setup]
@@ -85,6 +90,8 @@ Type: files; Name: "{autodesktop}\{#OldAppName}.lnk"
 [Files]
 Source: "{#PayloadDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "lucida.ico"; DestDir: "{app}"; Flags: ignoreversion
+; Only unpacked, run and deleted when this computer has no WebView2 runtime (some Windows 10).
+Source: "{#WebView2Dir}\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: NeedsWebView2
 Source: "licence.txt"; DestDir: "{app}\licences"; DestName: "Lucida-licence.txt"; Flags: ignoreversion
 
 [Dirs]
@@ -107,19 +114,21 @@ Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "job_workers"; Strin
 Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "gpu_jobs"; String: "{code:GpuJobs}"; Flags: createkeyifdoesntexist
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Start Lucida and open it in the browser"; Tasks: startmenu
+Name: "{group}\{#AppName}"; Filename: "{#PythonW}"; Parameters: "-X utf8 ""{#Launcher}"" desktop"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Open Lucida in its own window"; Tasks: startmenu
+Name: "{group}\{#AppName} in the browser"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Start Lucida with a console window and open it in the browser"; Tasks: startmenu
 Name: "{group}\Self-test"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" selftest --pause"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Check the installation and run the acceptance self-test"; Tasks: startmenu
 Name: "{group}\Case data folder"; Filename: "{code:DataDir}"; Tasks: startmenu
 Name: "{group}\User manual"; Filename: "{app}\docs\user-manual.md"; Tasks: startmenu
 Name: "{group}\Algorithm guide"; Filename: "{app}\docs\algorithms.md"; Tasks: startmenu
 Name: "{group}\Amped vs Lucida"; Filename: "{app}\docs\amped-comparison.md"; Tasks: startmenu
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"; Tasks: startmenu
-Name: "{autodesktop}\{#AppName}"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Start Lucida and open it in the browser"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}"; Filename: "{#PythonW}"; Parameters: "-X utf8 ""{#Launcher}"" desktop"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Open Lucida in its own window"; Tasks: desktopicon
 
 [Run]
+Filename: "{tmp}\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"; Parameters: "/silent /install"; StatusMsg: "Installing the Microsoft Edge WebView2 runtime for the Lucida window..."; Check: NeedsWebView2; Flags: waituntilterminated
 Filename: "{app}\vcredist\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing the Microsoft Visual C++ runtime..."; Check: NeedsVCRedist; Flags: waituntilterminated
 Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" selftest --pause"; WorkingDir: "{app}"; Description: "Run the acceptance self-test now (recommended)"; Flags: postinstall skipifsilent
-Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; Description: "Start {#AppName} now"; Flags: postinstall nowait unchecked skipifsilent
+Filename: "{#PythonW}"; Parameters: "-X utf8 ""{#Launcher}"" desktop"; WorkingDir: "{app}"; Description: "Start {#AppName} now"; Flags: postinstall nowait unchecked skipifsilent
 
 [UninstallRun]
 ; Removes the inbound rule an all-users lab-network install added (harmless when there is none).
@@ -254,6 +263,24 @@ begin
     Log('System check warnings:' + #13#10 + SysWarnings);
 end;
 
+const
+  WebView2Key = 'Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+
+function WebView2Version(): String;
+begin
+  // Per-machine runtime (32-bit registry view, WOW6432Node), else a per-user one.
+  if not RegQueryStringValue(HKLM32, 'SOFTWARE\' + WebView2Key, 'pv', Result) then
+    if not RegQueryStringValue(HKCU, 'Software\' + WebView2Key, 'pv', Result) then
+      Result := '';
+  if Result = '0.0.0.0' then
+    Result := '';
+end;
+
+function NeedsWebView2(): Boolean;
+begin
+  Result := WebView2Version() = '';
+end;
+
 function JobWorkers(Param: String): String;
 var
   N: Integer;
@@ -297,6 +324,10 @@ begin
     '  Graphics:          ' + Gpu + #13#10;
   if HasNvidia then
     Result := Result + '  NVIDIA driver:     ' + DriverText(NvidiaDriver) + #13#10;
+  if WebView2Version() <> '' then
+    Result := Result + '  WebView2 runtime:  ' + WebView2Version() + ' (for the Lucida window)' + #13#10
+  else
+    Result := Result + '  WebView2 runtime:  not installed; Setup installs it from this installer' + #13#10;
   Result := Result + #13#10 + 'Settings Lucida will use' + #13#10;
   if HasNvidia then
     Result := Result + '  Learned models:    on the NVIDIA GPU through DirectML (included), checked to give ' +
@@ -420,6 +451,7 @@ begin
     Space + 'FFmpeg and FFprobe' + NewLine +
     Space + 'AI models (super-resolution, face detection), hash-pinned' + NewLine +
     Space + 'Lucida user interface' + NewLine +
+    Space + 'Lucida desktop window (pywebview on the Microsoft Edge WebView2 runtime)' + NewLine +
     Space + 'GPU support for the learned models (DirectML; uses the NVIDIA driver, no CUDA install needed)' + NewLine + NewLine +
     'Sized for this computer (' + IntToStr(RamGB) + ' GB memory):' + NewLine +
     Space + JobWorkers('') + ' jobs at once without the GPU, ' + GpuJobs('') + ' on the GPU' + NewLine;
