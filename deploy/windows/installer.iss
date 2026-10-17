@@ -100,6 +100,11 @@ Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "import_dir"; String
 Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "host"; String: "127.0.0.1"; Flags: createkeyifdoesntexist
 Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "port"; String: "{code:Port}"
 Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "network"; String: "{code:NetworkMode}"
+; Sized from this computer by the system check (see SystemCheck below). Kept on upgrade, so a
+; lab's own tuning survives; delete a key to have the next installer size it again.
+Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "ai_device"; String: "auto"; Flags: createkeyifdoesntexist
+Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "job_workers"; String: "{code:JobWorkers}"; Flags: createkeyifdoesntexist
+Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "gpu_jobs"; String: "{code:GpuJobs}"; Flags: createkeyifdoesntexist
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Start Lucida and open it in the browser"; Tasks: startmenu
@@ -127,6 +132,181 @@ var
   DataPage: TInputDirWizardPage;
   PortPage: TInputQueryWizardPage;
 
+// ---- System check: memory, NVIDIA GPU and driver ----
+// Lucida is sized for an offline workstation with an NVIDIA RTX A4000 (16 GB) and 48 to 128 GB of
+// RAM. Learned models run on the GPU through DirectML, which is bundled and needs only the normal
+// NVIDIA display driver (no CUDA toolkit); without a usable GPU they run on the CPU. The check
+// warns but never blocks the install.
+
+const
+  MinRamGB = 48;
+  // DirectML needs a DirectX 12 driver; R470 is the oldest NVIDIA production branch that
+  // supports the RTX A4000 and still receives fixes. Any current driver is better.
+  MinNvidiaDriver = 47000;
+
+var
+  SysPage: TOutputMsgMemoWizardPage;
+  RamGB, CpuThreads, NvidiaDriver: Integer;
+  GpuNames, SysWarnings: String;
+  HasNvidia: Boolean;
+
+function GetPhysicallyInstalledSystemMemory(var KB: Int64): BOOL;
+  external 'GetPhysicallyInstalledSystemMemory@kernel32.dll stdcall delayload';
+
+function NvidiaVersion(DriverVersion: String): Integer;
+var
+  Digits: String;
+  I: Integer;
+begin
+  // Windows reports NVIDIA drivers as e.g. 31.0.15.3161; the last five digits are 531.61.
+  Digits := '';
+  for I := 1 to Length(DriverVersion) do
+    if (DriverVersion[I] >= '0') and (DriverVersion[I] <= '9') then
+      Digits := Digits + DriverVersion[I];
+  Result := 0;
+  if Length(Digits) >= 5 then
+    Result := StrToIntDef(Copy(Digits, Length(Digits) - 4, 5), 0);
+end;
+
+function DriverText(V: Integer): String;
+begin
+  Result := IntToStr(V div 100) + '.' + Copy(IntToStr(100 + V mod 100), 2, 2);
+end;
+
+procedure SystemCheck();
+var
+  KB, Bytes: Int64;
+  Locator, Wmi, Items, Item: Variant;
+  I, V: Integer;
+  Name: String;
+begin
+  RamGB := 0;
+  try
+    if GetPhysicallyInstalledSystemMemory(KB) then
+      RamGB := (KB + 524288) div 1048576;
+  except
+    Log('GetPhysicallyInstalledSystemMemory is not available');
+  end;
+  CpuThreads := StrToIntDef(GetEnv('NUMBER_OF_PROCESSORS'), 1);
+  GpuNames := '';
+  HasNvidia := False;
+  NvidiaDriver := 0;
+  try
+    Locator := CreateOleObject('WbemScripting.SWbemLocator');
+    Wmi := Locator.ConnectServer('.', 'root\CIMV2');
+    if RamGB = 0 then
+    begin
+      Items := Wmi.ExecQuery('SELECT TotalPhysicalMemory FROM Win32_ComputerSystem');
+      if Items.Count > 0 then
+      begin
+        Bytes := StrToInt64Def(Items.ItemIndex(0).TotalPhysicalMemory, 0);
+        RamGB := (Bytes + 536870912) div 1073741824;
+      end;
+    end;
+    Items := Wmi.ExecQuery('SELECT Name, DriverVersion FROM Win32_VideoController');
+    for I := 0 to Items.Count - 1 do
+    try
+      Item := Items.ItemIndex(I);
+      Name := Trim(Item.Name);
+      if Name <> '' then
+      begin
+        if GpuNames <> '' then
+          GpuNames := GpuNames + ', ';
+        GpuNames := GpuNames + Name;
+        if Pos('NVIDIA', Uppercase(Name)) > 0 then
+        begin
+          HasNvidia := True;
+          V := NvidiaVersion(Item.DriverVersion);
+          if V > NvidiaDriver then
+            NvidiaDriver := V;
+        end;
+      end;
+    except
+      Log('System check: could not read display adapter ' + IntToStr(I) + ': ' + GetExceptionMessage);
+    end;
+  except
+    Log('System check: WMI query failed: ' + GetExceptionMessage);
+  end;
+
+  SysWarnings := '';
+  if (RamGB > 0) and (RamGB < MinRamGB) then
+    SysWarnings := SysWarnings + '- This computer has ' + IntToStr(RamGB) + ' GB of memory; Lucida is sized for ' +
+      IntToStr(MinRamGB) + ' GB or more. It still works, with smaller caches and fewer jobs at once, ' +
+      'so long videos and multi-frame work are slower.' + #13#10;
+  if not HasNvidia then
+    SysWarnings := SysWarnings + '- No NVIDIA graphics card was found. Lucida works, and the learned models ' +
+      '(AI enlargement, face detection, generated-image detection) run on the CPU, more slowly.' + #13#10
+  else if (NvidiaDriver > 0) and (NvidiaDriver < MinNvidiaDriver) then
+    SysWarnings := SysWarnings + '- The NVIDIA driver is ' + DriverText(NvidiaDriver) + ', older than ' +
+      DriverText(MinNvidiaDriver) + '. Install a current NVIDIA driver (an offline installer from nvidia.com ' +
+      'carried on removable media works) so the learned models can use the GPU. Until then Lucida ' +
+      'uses the CPU whenever the GPU does not give identical results on two runs.' + #13#10;
+  Log(Format('System check: %d GB RAM, %d CPU threads, GPUs: %s, NVIDIA driver %s',
+    [RamGB, CpuThreads, GpuNames, DriverText(NvidiaDriver)]));
+  if SysWarnings <> '' then
+    Log('System check warnings:' + #13#10 + SysWarnings);
+end;
+
+function JobWorkers(Param: String): String;
+var
+  N: Integer;
+begin
+  // Jobs that do not use the GPU, run side by side: one per 16 GB of RAM (so 3 at 48 GB and
+  // 6 at 96 GB or more), at most 6 and at most half the CPU threads, at least 2.
+  N := RamGB div 16;
+  if N > 6 then N := 6;
+  if N > CpuThreads div 2 then N := CpuThreads div 2;
+  if N < 2 then N := 2;
+  Result := IntToStr(N);
+end;
+
+function GpuJobs(Param: String): String;
+begin
+  // One learned-model job at a time: the larger models and their tiles fill much of a 16 GB card.
+  Result := '1';
+end;
+
+function CacheText(Divisor, CapGB: Integer): String;
+var
+  GB: Integer;
+begin
+  // Mirrors forensic/compute.py: a share of RAM, capped.
+  GB := RamGB div Divisor;
+  if GB > CapGB then GB := CapGB;
+  if GB < 1 then
+    Result := 'under 1 GB'
+  else
+    Result := 'about ' + IntToStr(GB) + ' GB';
+end;
+
+function SystemSummary(): String;
+var
+  Gpu: String;
+begin
+  if GpuNames = '' then Gpu := 'not detected' else Gpu := GpuNames;
+  Result := 'This computer' + #13#10 +
+    '  Memory:            ' + IntToStr(RamGB) + ' GB' + #13#10 +
+    '  Processor threads: ' + IntToStr(CpuThreads) + #13#10 +
+    '  Graphics:          ' + Gpu + #13#10;
+  if HasNvidia then
+    Result := Result + '  NVIDIA driver:     ' + DriverText(NvidiaDriver) + #13#10;
+  Result := Result + #13#10 + 'Settings Lucida will use' + #13#10;
+  if HasNvidia then
+    Result := Result + '  Learned models:    on the NVIDIA GPU through DirectML (included), checked to give ' +
+      'identical results on two runs, else the CPU' + #13#10
+  else
+    Result := Result + '  Learned models:    on the CPU' + #13#10;
+  Result := Result +
+    '  Jobs at once:      ' + JobWorkers('') + ' without the GPU, ' + GpuJobs('') + ' on the GPU' + #13#10 +
+    '  Results cache:     ' + CacheText(4, 32) + ' of RAM' + #13#10 +
+    '  Video frame cache: ' + CacheText(8, 16) + ' of RAM' + #13#10 +
+    '  (change these later in workbench.ini in the installation folder)' + #13#10;
+  if SysWarnings <> '' then
+    Result := Result + #13#10 + 'Warnings' + #13#10 + SysWarnings
+  else
+    Result := Result + #13#10 + 'No problems found. This computer meets what Lucida is sized for.' + #13#10;
+end;
+
 function DefaultDataDir(): String;
 begin
   if IsAdminInstallMode then
@@ -151,6 +331,12 @@ end;
 
 procedure InitializeWizard;
 begin
+  SystemCheck();
+  SysPage := CreateOutputMsgMemoPage(wpInfoBefore,
+    'System check', 'Does this computer suit Lucida?',
+    'Lucida is sized for a workstation with an NVIDIA RTX A4000 and 48 to 128 GB of memory. ' +
+    'Warnings do not stop the installation.',
+    SystemSummary());
   DataPage := CreateInputDirPage(wpSelectDir,
     'Case data folder', 'Where should Lucida keep case data?',
     'Cases, the write-once evidence store, derived outputs, the audit log and reports are kept in this folder. ' +
@@ -226,7 +412,12 @@ begin
     Space + 'Python runtime and all libraries' + NewLine +
     Space + 'FFmpeg and FFprobe' + NewLine +
     Space + 'AI models (super-resolution, face detection), hash-pinned' + NewLine +
-    Space + 'Lucida user interface' + NewLine;
+    Space + 'Lucida user interface' + NewLine +
+    Space + 'GPU support for the learned models (DirectML; uses the NVIDIA driver, no CUDA install needed)' + NewLine + NewLine +
+    'Sized for this computer (' + IntToStr(RamGB) + ' GB memory):' + NewLine +
+    Space + JobWorkers('') + ' jobs at once without the GPU, ' + GpuJobs('') + ' on the GPU' + NewLine;
+  if SysWarnings <> '' then
+    Result := Result + NewLine + 'System check warnings:' + NewLine + SysWarnings;
   if MemoTasksInfo <> '' then
     Result := Result + NewLine + MemoTasksInfo;
 end;

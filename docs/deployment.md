@@ -12,7 +12,17 @@ Get the installer from the **Windows installer** workflow in GitHub Actions (art
 `Lucida-Windows-Setup`, with its `.sha256`), or from a release when a `v*` tag is
 pushed. Carry the `.exe` to the offline machine, check its SHA-256 if your lab requires it
 (`certutil -hashfile Lucida-0.3.0-Setup.exe SHA256`), and run it. The wizard opens with a
-welcome page, the licence agreement and a list of what is included, then asks for:
+welcome page, the licence agreement and a list of what is included, then a **system check**.
+It reads the installed memory, the graphics card and the NVIDIA driver version. Lucida is sized for
+an NVIDIA RTX A4000 (16 GB) with 48 to 128 GB of RAM. The page warns, without stopping the install,
+when memory is under 48 GB, when no NVIDIA card is found, or when the driver is older than R470.
+Learned models use the GPU through DirectML, which is in the installer and needs only the NVIDIA
+display driver (no CUDA). A model runs on the GPU only when two runs give identical output, and
+otherwise on the CPU. The check also sizes `workbench.ini`: `job_workers` is one per 16 GB of RAM
+(3 at 48 GB, 6 from 96 GB, never more than half the processor threads), `gpu_jobs = 1` and
+`ai_device = auto`. The caches size themselves from RAM when Lucida starts (a quarter, at most 32 GB,
+for results and an eighth, at most 16 GB, for video frames). An upgrade keeps values you changed.
+The wizard then asks for:
 
 - the installation folder;
 - the case data folder (cases, write-once evidence store, derived outputs, audit log, logs).

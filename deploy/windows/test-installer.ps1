@@ -35,6 +35,11 @@ $p = Start-Process -Wait -PassThru -FilePath (Resolve-Path $Installer) -Argument
     "/DIR=`"$App`"", "/DATADIR=`"$Data`"", "/PORT=$Port", "/LOG=`"$Root\install.log`"")
 if ($p.ExitCode -ne 0) { Get-Content "$Root\install.log" -Tail 40; throw "installer exited with $($p.ExitCode)" }
 Get-Content "$App\workbench.ini"
+foreach ($k in "ai_device", "job_workers", "gpu_jobs") {
+    if (-not (Select-String -Quiet -Path "$App\workbench.ini" -Pattern "^$k\s*=\s*\S")) { throw "workbench.ini has no $k (system check sizing)" }
+}
+if (-not (Select-String -Quiet -Path "$Root\install.log" -Pattern "System check: \d+ GB RAM")) { throw "the system check did not run" }
+Select-String -Path "$Root\install.log" -Pattern "System check" | ForEach-Object { $_.Line }
 foreach ($f in "python\python.exe", "ffmpeg\ffmpeg.exe", "ffmpeg\ffprobe.exe", "frontend\dist\index.html",
                "launcher\workbench_launcher.py", "SHA256SUMS", "BUILDINFO.txt", "unins000.exe") {
     if (-not (Test-Path "$App\$f")) { throw "missing after install: $f" }
