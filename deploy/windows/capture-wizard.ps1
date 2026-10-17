@@ -24,6 +24,7 @@ public static class Win {
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
 }
 "@
 [Win]::SetProcessDPIAware() | Out-Null
@@ -73,7 +74,12 @@ function Button($win, $name) {
     return $null
 }
 
-function Press($b) { $b.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
+function Press($b) {
+    # Post BM_CLICK rather than UI Automation's Invoke: Invoke waits for the button's handler,
+    # and the uninstaller's "Yes" runs the whole uninstall (including our own question box)
+    # inside it, which would deadlock this script.
+    [Win]::PostMessage([IntPtr]$b.Current.NativeWindowHandle, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+}
 
 function PageName($win) {
     # Name the file after the page heading: the first visible static text.
