@@ -272,10 +272,13 @@ Removing evidence is a human action: an AI agent cannot remove or restore eviden
   - **Flip**: one image at a time; press **T** or click the label at the bottom to switch.
 
   Hold **B** at any time to peek at the original. If the chain changed the image size, the
-  original is scaled onto the result so both line up (after a crop it is scaled to the same
-  height). The pixel bar reads the original's own pixel when the cursor is over it.
+  original is scaled onto the result so both line up. After a crop, "the original" is the same
+  cropped area of the source with no enhancement, so the comparison is always like for like. The
+  pixel bar reads the original's own pixel when the cursor is over it.
 - **▦ MB** (or key **M**, video only): how the encoder coded each block of the frame (see 6.3).
 - **⛶ Crop** (or key **C**): draw a crop box on the image (see 7.5).
+- **⤢ Full image** / **↩ Back to crop** (or key **G**, shown once the chain has a crop): look at
+  the whole frame with the crop box drawn on it, then go back to the cropped area.
 - **? shortcuts** at the bottom right lists the keyboard shortcuts when you hover it.
 
 The label at the top left says what you are looking at: the result at the selected step, the
@@ -417,9 +420,14 @@ output hash.
 1. Click **⛶ Crop** in the viewer toolbar, or press **C**.
 2. Drag a box on the image. Hold **Shift** for a square. The box's size is shown as you drag.
    **Esc** cancels.
-3. When you let go, a **Crop** step is added to the chain (a chain is created if there is none)
-   and selected. It goes after the selected step, and the box is drawn on the image as it is at
-   that point, so the crop matches what you saw.
+3. When you let go, a **Crop** step is added to the chain (a chain is created if there is none).
+   It goes as early in the chain as it can, so **every filter works on the cropped area only**:
+   in front of exposure, colour, denoise, sharpen and deblur steps, but after steps that move
+   pixels (rotate, perspective, resize, stabilise, a deblur with a path drawn on the image),
+   because the box was drawn on their output.
+4. The viewer zooms in to fill the window with the cropped area, and from then on shows only
+   that area, including the **Source** row. Click **⤢ Full image** (or press **G**) to see the
+   whole frame with the crop box on it, and **↩ Back to crop** to return.
 
 To change an existing crop, select its step and click **Draw crop on image**, then drag a new
 box; or edit **X**, **Y**, **Width** and **Height** (0 means to the edge of the image) directly.
@@ -427,7 +435,7 @@ Adding **Crop** from the filter list also starts drawing straight away.
 
 Crop is an exact copy of those pixels; nothing is resampled.
 
-Cropping early in a chain makes every later step faster, and is required before AI super
+Cropping first makes every later step faster, and is required before AI super
 resolution on large images.
 
 ### 7.6 Working with video: frames and ranges
@@ -1005,6 +1013,7 @@ with the lab's validation records.
 | Actual pixels (1:1) | **1** |
 | Show the original while held | Hold **B** |
 | Draw a crop box | **C** (or **⛶ Crop**), then drag; hold **Shift** for a square |
+| After a crop: full image / back to the crop | **G** |
 | Stop picking points, cancel a crop, close a confirmation | **Esc** |
 | Place a point | Click (without dragging) while picking |
 | Undo / redo a chain edit | **Ctrl+Z** / **Ctrl+Y** (or **Ctrl+Shift+Z**) |

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fetchPreview, urls } from "../api";
+import { cropBoxOnSource, cropPosition, framingGraph } from "../crop";
 import { bridge, keyOf, onCommand, openWindow, type Command, type OfferedFile } from "../desktop";
 import type {
   AnalysisRun,
@@ -95,6 +96,10 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
   const [showRemoved, setShowRemoved] = useState(false);
   const [confirm, setConfirm] = useState<{ kind: "evidence" | "chain"; id: string; reason: string } | null>(null);
   const [crop, setCrop] = useState<{ nodeId: string | null } | null>(null);
+  // After a crop the viewer shows only the cropped area; this shows the whole frame until clicked again.
+  const [fullImage, setFullImage] = useState(false);
+  // The cropped area of the source, untouched: what the result is compared with once the chain has a crop.
+  const [framingUrl, setFramingUrl] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [collapsed, setCollapsed] = useState<{ left: boolean; right: boolean }>(() => {
     if (viewerOnly) return { left: true, right: true };
@@ -128,6 +133,9 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
   const range = draft?.source.frames ?? null;
   const codecOk = isVideo && CODEC_VIEW_CODECS.includes(ev?.probe.codec ?? "");
   const codecOn = codecOpen && codecOk && view.kind === "chain" && !crop;
+  const framing = useMemo(() => framingGraph(filters, draft), [filters, draft]);
+  const framingKey = framing ? JSON.stringify(framing) : "";
+  const showFull = fullImage && !!framing && view.kind === "chain";
 
   const reload = useCallback(async () => {
     const d = await api.caseDetail(caseId);
@@ -235,13 +243,16 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
     const editing = picking?.nodeId ?? crop?.nodeId ?? null;
     if (!draft || (tab === "measure" && !measureOnChain)) {
       graph = { source: { frames: isVideo ? { start: frame, end: frame } : null }, nodes: [] };
+    } else if (showFull && !editing) {
+      // "Full image": the whole source frame, with the crop box drawn on it.
+      graph = { ...draft, nodes: [] };
     } else if (editing) {
       // Points and boxes are drawn on the image as it enters the step being edited.
       const idx = draft.nodes.findIndex((n) => n.id === editing);
       graph = { ...draft, nodes: draft.nodes.slice(0, Math.max(0, idx)) };
     } else if (tab === "enhance" && selected === null) {
-      // The Source row shows the source.
-      graph = { ...draft, nodes: [] };
+      // The Source row shows the source; once cropped, only the cropped area of it.
+      graph = framing ?? { ...draft, nodes: [] };
     } else {
       graph = draft;
       // Like a history panel: the viewer follows the selected step.
@@ -265,7 +276,34 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
       clearTimeout(t);
       ctrl.abort();
     };
-  }, [ev?.id, draft, frame, picking, crop, view.kind, selected, tab, measureOnChain]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ev?.id, draft, frame, picking, crop, view.kind, selected, tab, measureOnChain, showFull, framingKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The comparison image for a cropped chain: the same area of the source with no enhancement.
+  useEffect(() => {
+    if (!ev || !framing) {
+      setFramingUrl(null);
+      return;
+    }
+    const ctrl = new AbortController();
+    let url: string | null = null;
+    const offset = framing.source.frames ? Math.max(0, frame - framing.source.frames.start) : 0;
+    const t = setTimeout(() => {
+      fetchPreview(ev.id, framing, null, offset, ctrl.signal)
+        .then(({ blob }) => {
+          url = URL.createObjectURL(blob);
+          setFramingUrl(url);
+        })
+        .catch(() => undefined);
+    }, 200);
+    return () => {
+      clearTimeout(t);
+      ctrl.abort();
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [ev?.id, framingKey, frame]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A new piece of evidence, or a chain without a crop, starts on the cropped view again.
+  useEffect(() => setFullImage(false), [ev?.id, chainId, !!framing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const keys = useRef<(e: KeyboardEvent) => void>(() => {});
   keys.current = (e: KeyboardEvent) => {
@@ -289,6 +327,8 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
       redo();
     } else if (!mod && k === "c" && ev && ev.media_type !== "container") {
       startCrop(null);
+    } else if (!mod && k === "g" && framing) {
+      setFullImage((f) => !f);
     } else if (!mod && k === "m" && codecOk) {
       setCodecOpen((o) => !o);
     } else if (!mod && isVideo && frames.length && (k === "j" || k === "l")) {
@@ -327,6 +367,9 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
         break;
       case "redo":
         redo();
+        break;
+      case "full-image":
+        if (framing) setFullImage((f) => !f);
         break;
       case "crop":
         if (ev && ev.media_type !== "container") startCrop(null);
@@ -531,7 +574,8 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
     setView({ kind: "chain" });
   };
 
-  /** Crop tool: drag a box on the image. A new crop step goes after the selected step. */
+  /** Crop tool: drag a box on the image. The crop goes as early in the chain as it can, so every enhancement
+   * runs on the cropped area, and the viewer then shows only that area (G or "Full image" to see the rest). */
   const startCrop = (nodeId: string | null) => {
     if (crop && crop.nodeId === nodeId) {
       setCrop(null);
@@ -549,8 +593,17 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
     setCrop(null);
     if (!target) return;
     const params = { x, y, width, height };
+    setFullImage(false);
     if (target.nodeId && draft) {
-      edit({ ...draft, nodes: draft.nodes.map((n) => (n.id === target.nodeId ? { ...n, params: { ...n.params, ...params } } : n)) });
+      // The box was drawn on this step's input; move the crop as early as it can go so every
+      // enhancement after it works on the cropped area only.
+      const i = draft.nodes.findIndex((n) => n.id === target.nodeId);
+      if (i < 0) return;
+      const node = { ...draft.nodes[i], params: { ...draft.nodes[i].params, ...params } };
+      const rest = draft.nodes.filter((_, j) => j !== i);
+      rest.splice(cropPosition(filters, rest, i), 0, node);
+      edit({ ...draft, nodes: rest });
+      setSelected(rest[rest.length - 1].id);
       return;
     }
     const spec = filters.find((f) => f.id === "geometry.crop");
@@ -565,12 +618,15 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
     while (ids.has(`n${k}`)) k++;
     const node = { id: `n${k}`, filter: "geometry.crop", version: spec?.version, params, enabled: true };
     // The box was drawn on the output of the selected step (the source if none is selected).
-    const at = selected ? g.nodes.findIndex((n) => n.id === selected) + 1 : chain ? 0 : g.nodes.length;
+    // It goes as early as it can, so the enhancements run on the cropped area only.
+    const drawnOn = selected ? g.nodes.findIndex((n) => n.id === selected) + 1 : chain ? 0 : g.nodes.length;
+    const at = cropPosition(filters, g.nodes, drawnOn);
     const nodes = [...g.nodes];
     nodes.splice(at, 0, node);
     if (chain && draft) edit({ ...g, nodes });
     else setDraft({ ...g, nodes });
-    setSelected(node.id);
+    // Show the whole chain's result on the cropped area; new filters then go at the end.
+    setSelected(nodes[nodes.length - 1].id);
   };
 
   const save = async (): Promise<Chain | null> => {
@@ -691,6 +747,8 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
       // geometric checks are drawn as the clicked pairs (shadow to object, object to reflection, line points)
       if (k.startsWith("auth:") && pts.length) overlays.push({ points: pts, color: "#ffcf3f", mode: k.startsWith("auth:geometry.") ? "segments" : "rect", label: k.split(":")[2] });
     }
+  } else if (showFull && cropBoxOnSource(filters, draft)) {
+    overlays.push({ points: cropBoxOnSource(filters, draft)!, color: "#ffcf3f", mode: "rect", label: "crop" });
   } else if (tab === "enhance" && mpoints.plan_roi?.length) {
     overlays.push({ points: mpoints.plan_roi, color: "#3fe08a", mode: "rect", label: "planner region" });
   }
@@ -736,6 +794,10 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
       ? view.label
       : crop
         ? "Crop: drag a box"
+        : showFull
+          ? "Full image"
+        : tab === "enhance" && selIndex < 0 && framing
+          ? "Source · cropped"
         : !draft || (tab === "measure" && !measureOnChain) || (tab === "enhance" && selIndex < 0)
           ? "Source"
           : tab === "enhance" && draft.nodes.length && selIndex < draft.nodes.length - 1
@@ -918,11 +980,13 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
           compareSrc={
             codecOn && ev
               ? urls.frame(ev.id, frame)
-              : ev && !crop && (view.kind === "map" || viewerLabel !== "Source")
-                ? urls.frame(ev.id, sourceFrame)
-                : null
+              : ev && !crop && !showFull && framing && view.kind === "chain"
+                ? viewerLabel === "Source · cropped" ? null : framingUrl
+                : ev && !crop && !showFull && (view.kind === "map" || (viewerLabel !== "Source" && viewerLabel !== "Source · cropped"))
+                  ? urls.frame(ev.id, sourceFrame)
+                  : null
           }
-          compareLabel={codecOn ? "Frame" : undefined}
+          compareLabel={codecOn ? "Frame" : framing && view.kind === "chain" ? "Original (same area)" : undefined}
           label={codecOn ? `Macroblocks${codecInfo.info ? ` · ${codecInfo.info.type}-frame` : ""}` : viewerLabel}
           busy={view.kind === "chain" && !codecOn && preview.busy}
           error={codecOn ? codecInfo.error : view.kind === "chain" ? preview.error : null}
@@ -943,6 +1007,11 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
                 <button className={crop ? "active" : ""} onClick={() => startCrop(null)} title="Crop: drag a box on the image (C)">
                   ⛶ Crop
                 </button>
+                {framing && view.kind === "chain" && !crop && (
+                  <button className={showFull ? "active" : ""} onClick={() => setFullImage((f) => !f)} title="Show the whole frame, then click again to go back to the cropped area (G)">
+                    {showFull ? "↩ Back to crop" : "⤢ Full image"}
+                  </button>
+                )}
               </>
             ) : null
           }
