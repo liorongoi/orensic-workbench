@@ -18,6 +18,8 @@ interface Props {
   compareLabel?: string;
   label?: string;
   busy?: boolean;
+  /** What the busy badge says, e.g. "Applying Richardson-Lucy deblur". */
+  busyLabel?: string;
   error?: string | null;
   points?: number[][];
   pickHint?: string | null;
@@ -35,28 +37,33 @@ type CompareMode = "off" | "swipe" | "side" | "flip";
 
 interface Loaded {
   img: HTMLImageElement;
-  data: ImageData | null;
+  /** The image's pixels for the pixel readout, read on first use: copying a 4K frame takes long enough to
+   * slow every preview update down if it is done for each one. */
+  pixels: () => ImageData | null;
 }
 
 function load(src: string): Promise<Loaded> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      let data: ImageData | null = null;
-      try {
-        const c = document.createElement("canvas");
-        c.width = img.naturalWidth;
-        c.height = img.naturalHeight;
-        const cx = c.getContext("2d", { willReadFrequently: true })!;
-        cx.drawImage(img, 0, 0);
-        data = cx.getImageData(0, 0, c.width, c.height);
-      } catch {
-        data = null;
+  const img = new Image();
+  img.src = src;
+  // decode() decodes off the main thread, so a large image does not freeze the page when first drawn.
+  return img.decode().then(() => {
+    let data: ImageData | null | undefined;
+    const pixels = () => {
+      if (data === undefined) {
+        try {
+          const c = document.createElement("canvas");
+          c.width = img.naturalWidth;
+          c.height = img.naturalHeight;
+          const cx = c.getContext("2d", { willReadFrequently: true })!;
+          cx.drawImage(img, 0, 0);
+          data = cx.getImageData(0, 0, c.width, c.height);
+        } catch {
+          data = null;
+        }
       }
-      resolve({ img, data });
+      return data;
     };
-    img.onerror = () => reject(new Error("image failed to load"));
-    img.src = src;
+    return { img, pixels };
   });
 }
 
@@ -74,7 +81,7 @@ function placeOriginal(m: HTMLImageElement, c: HTMLImageElement): [number, numbe
 
 /** Pixel-exact viewer: nearest-neighbour above 100 %, wheel zoom around the cursor, drag to pan.
  * Compare modes put the original next to the result: swipe, side by side (linked zoom and pan) or flip. */
-export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", label, busy, error, points, pickHint, onPick, onRect, illustrative, tools, describe }: Props) {
+export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", label, busy, busyLabel, error, points, pickHint, onPick, onRect, illustrative, tools, describe }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [main, setMain] = useState<Loaded | null>(null);
@@ -88,6 +95,15 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
   const drag = useRef<{ sx: number; sy: number; vx: number; vy: number; moved: boolean } | null>(null);
   const [box, setBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const lastSize = useRef("");
+  // Seconds the current update has been running, so a slow filter visibly counts up instead of looking stuck.
+  const [busySecs, setBusySecs] = useState(0);
+  useEffect(() => {
+    setBusySecs(0);
+    if (!busy) return;
+    const t0 = Date.now();
+    const t = setInterval(() => setBusySecs(Math.floor((Date.now() - t0) / 1000)), 500);
+    return () => clearInterval(t);
+  }, [busy]);
 
   useEffect(() => {
     let alive = true;
@@ -446,9 +462,10 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
       return;
     }
     let rgb: number[] | null = null;
-    if (src.data) {
-      const o = (iy * src.data.width + ix) * 4;
-      rgb = [src.data.data[o], src.data.data[o + 1], src.data.data[o + 2]];
+    const d = src.pixels();
+    if (d) {
+      const o = (iy * d.width + ix) * 4;
+      rgb = [d.data[o], d.data[o + 1], d.data[o + 2]];
     }
     setCursor({ x: ix, y: iy, rgb, original: src === cmp });
   };
@@ -559,7 +576,13 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
           <div className="illustrative-overlay">ILLUSTRATIVE ONLY · AI-generated detail · not for measurement</div>
         )}
         {!src && !busy && !error && <div className="viewer-empty">No image</div>}
-        {busy && (src ? <div className="viewer-updating">Updating…</div> : <div className="viewer-busy">Processing…</div>)}
+        {busy && <div className="viewer-progress" />}
+        {busy && (
+          <div className={src ? "viewer-updating" : "viewer-busy"}>
+            <span className="spinner" /> {busyLabel ?? (src ? "Updating" : "Processing")}…{busySecs >= 1 && ` ${busySecs} s`}
+            {busySecs >= 5 && <div className="small">A heavy filter on the whole image. Crop to the area you need first and it runs much faster.</div>}
+          </div>
+        )}
         {error && <div className="viewer-error">{error}</div>}
         {pickHint && <div className="viewer-hint">{pickHint}</div>}
       </div>

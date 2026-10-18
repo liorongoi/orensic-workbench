@@ -70,7 +70,12 @@ export function ChainEditor(props: Props) {
       const recent = readRecent().map((id) => byId[id]).filter(Boolean);
       if (recent.length) m.set("Recent", recent);
     }
-    filters.filter(match).forEach((f) => m.set(f.category, [...(m.get(f.category) ?? []), f]));
+    // Filters whose name matches come first, so Enter adds what was typed ("brightness" adds Brightness and
+    // contrast, not a filter that only mentions brightness in its description).
+    const named = q ? filters.filter((f) => f.name.toLowerCase().includes(q)) : [];
+    named.sort((a, b) => Number(!a.name.toLowerCase().startsWith(q)) - Number(!b.name.toLowerCase().startsWith(q)));
+    if (named.length) m.set("Best match", named);
+    filters.filter((f) => match(f) && !named.includes(f)).forEach((f) => m.set(f.category, [...(m.get(f.category) ?? []), f]));
     return [...m.entries()];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters, byId, query, adding]);

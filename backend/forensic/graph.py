@@ -21,6 +21,7 @@ from typing import Callable
 import numpy as np
 
 from . import compute
+from .media import to_uint8
 from .db import canonical_json
 from .filters import FilterError, get_filter
 
@@ -92,7 +93,7 @@ def graph_hash(graph: dict) -> str:
 
 def pixel_hash(data: np.ndarray) -> str:
     """Hash of the 8-bit output pixels plus their shape: what an examiner would see and export."""
-    u8 = np.clip(np.rint(data * 255.0), 0, 255).astype(np.uint8)
+    u8 = to_uint8(data)
     h = hashlib.sha256(f"u8:{'x'.join(map(str, u8.shape))};".encode())
     h.update(np.ascontiguousarray(u8).tobytes())
     return h.hexdigest()
@@ -159,6 +160,25 @@ class Engine:
     def __init__(self, load_source: SourceLoader, cache_items: int = 256):
         self.load_source = load_source
         self.cache = _Cache(cache_items, None if cache_items else 0)
+        # Pixel hashes of cached results, by the same chain-prefix key: hashing a 4K frame takes
+        # longer than most filters, and a live preview would otherwise re-hash every step each time.
+        self._hashes: OrderedDict[str, str] = OrderedDict()
+        self._hash_lock = threading.Lock()
+
+    def _hash(self, key: str | None, data: np.ndarray) -> str:
+        if key is None:
+            return pixel_hash(data)
+        with self._hash_lock:
+            h = self._hashes.get(key)
+            if h is not None:
+                self._hashes.move_to_end(key)
+                return h
+        h = pixel_hash(data)
+        with self._hash_lock:
+            self._hashes[key] = h
+            while len(self._hashes) > 4096:
+                self._hashes.popitem(last=False)
+        return h
 
     def run(self, graph: dict, upto: str | None = None, use_cache: bool = True) -> RunResult:
         """Execute the chain. `upto` stops after the node with that id (for previews)."""
@@ -171,14 +191,15 @@ class Engine:
             data.setflags(write=False)
             if use_cache:
                 self.cache.put(key, data)
-        source_hash = pixel_hash(data)
+        data_key = key if use_cache else None  # chain prefix whose result `data` is
+        source_hash = self._hash(data_key, data)
         steps: list[StepResult] = []
         for node in g["nodes"]:
             f = get_filter(node["filter"])
             prefix["nodes"].append(node)
             key = graph_hash(prefix)
             if not node["enabled"]:
-                steps.append(StepResult(node["id"], f.id, f.version, pixel_hash(data), data.shape, skipped=True))
+                steps.append(StepResult(node["id"], f.id, f.version, self._hash(data_key, data), data.shape, skipped=True))
             else:
                 cached = self.cache.get(key) if use_cache else None
                 if cached is None:
@@ -187,13 +208,14 @@ class Engine:
                     if use_cache:
                         self.cache.put(key, cached)
                 data = cached
-                steps.append(StepResult(node["id"], f.id, f.version, pixel_hash(data), data.shape))
+                data_key = key if use_cache else None
+                steps.append(StepResult(node["id"], f.id, f.version, self._hash(data_key, data), data.shape))
             if upto is not None and node["id"] == upto:
                 break
         return RunResult(
             data=data,
             graph_hash=graph_hash(g),
-            output_hash=pixel_hash(data),
+            output_hash=self._hash(data_key, data),
             source_hash=source_hash,
             steps=steps,
         )

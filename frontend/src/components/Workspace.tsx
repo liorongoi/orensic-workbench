@@ -96,7 +96,7 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
   const [showRemoved, setShowRemoved] = useState(false);
   const [confirm, setConfirm] = useState<{ kind: "evidence" | "chain"; id: string; reason: string } | null>(null);
   const [crop, setCrop] = useState<{ nodeId: string | null } | null>(null);
-  // After a crop the viewer shows only the cropped area; this shows the whole frame until clicked again.
+  // After a crop the viewer shows only the cropped area; this shows the whole image until clicked again.
   const [fullImage, setFullImage] = useState(false);
   // The cropped area of the source, untouched: what the result is compared with once the chain has a crop.
   const [framingUrl, setFramingUrl] = useState<string | null>(null);
@@ -234,10 +234,51 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
     if (ev.media_type === "video") api.frames(ev.id).then(setFrames).catch(() => setFrames([]));
   }, [ev?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const previewReq = useRef<{
+    want: { evId: string; graph: Graph; upto: string | null; offset: number } | null;
+    inFlight: boolean;
+    ctrl: AbortController | null;
+    evId: string | null;
+  }>({ want: null, inFlight: false, ctrl: null, evId: null });
+  const pumpPreview = () => {
+    const r = previewReq.current;
+    if (r.inFlight || !r.want) return;
+    const job = r.want;
+    r.want = null;
+    r.inFlight = true;
+    const ctrl = new AbortController();
+    r.ctrl = ctrl;
+    fetchPreview(job.evId, job.graph, job.upto, job.offset, ctrl.signal)
+      .then(({ blob, info }) => {
+        if (job.evId !== r.evId) return;
+        setPreview((p) => {
+          if (p.url) URL.revokeObjectURL(p.url);
+          return { url: URL.createObjectURL(blob), steps: info.steps ?? [], error: null, busy: r.want !== null };
+        });
+      })
+      .catch((e) => {
+        if (e.name !== "AbortError" && job.evId === r.evId) setPreview((p) => ({ ...p, error: e.message, busy: r.want !== null }));
+      })
+      .finally(() => {
+        r.inFlight = false;
+        r.ctrl = null;
+        pumpPreview();
+      });
+  };
+
+  // Switching evidence drops the request (declared before the preview effect so it runs first) for the previous one.
+  useEffect(() => {
+    previewReq.current.evId = ev?.id ?? null;
+    return () => {
+      const r = previewReq.current;
+      r.want = null;
+      r.ctrl?.abort();
+    };
+  }, [ev?.id]);
+
   // Live preview (server side, not stored, not audited).
   useEffect(() => {
     if (!ev || view.kind !== "chain") return;
-    const ctrl = new AbortController();
     let graph: Graph;
     let upto: string | null = null;
     const editing = picking?.nodeId ?? crop?.nodeId ?? null;
@@ -259,23 +300,11 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
       if (tab === "enhance" && selected && draft.nodes.some((n) => n.id === selected)) upto = selected;
     }
     const offset = graph.source.frames ? Math.max(0, frame - graph.source.frames.start) : 0;
-    setPreview((p) => ({ ...p, busy: true }));
-    const t = setTimeout(() => {
-      fetchPreview(ev.id, graph, upto, offset, ctrl.signal)
-        .then(({ blob, info }) => {
-          setPreview((p) => {
-            if (p.url) URL.revokeObjectURL(p.url);
-            return { url: URL.createObjectURL(blob), steps: info.steps ?? [], error: null, busy: false };
-          });
-        })
-        .catch((e) => {
-          if (e.name !== "AbortError") setPreview((p) => ({ ...p, error: e.message, busy: false }));
-        });
-    }, 180);
-    return () => {
-      clearTimeout(t);
-      ctrl.abort();
-    };
+    // Latest wins: while a slider moves, one request is in flight and the newest settings wait
+    // behind it, so the image follows the slider instead of waiting until it is let go.
+    previewReq.current.want = { evId: ev.id, graph, upto, offset };
+    setPreview((p) => (p.busy ? p : { ...p, busy: true }));
+    pumpPreview();
   }, [ev?.id, draft, frame, picking, crop, view.kind, selected, tab, measureOnChain, showFull, framingKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The comparison image for a cropped chain: the same area of the source with no enhancement.
@@ -989,6 +1018,7 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
           compareLabel={codecOn ? "Frame" : framing && view.kind === "chain" ? "Original (same area)" : undefined}
           label={codecOn ? `Macroblocks${codecInfo.info ? ` · ${codecInfo.info.type}-frame` : ""}` : viewerLabel}
           busy={view.kind === "chain" && !codecOn && preview.busy}
+          busyLabel={view.kind === "chain" && tab === "enhance" && selName ? `Applying ${selName}` : undefined}
           error={codecOn ? codecInfo.error : view.kind === "chain" ? preview.error : null}
           describe={codecOn ? (x, y) => describeBlock(codecInfo.info, x, y) : undefined}
           points={picking ? pickPoints : undefined}
@@ -1008,7 +1038,7 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
                   ⛶ Crop
                 </button>
                 {framing && view.kind === "chain" && !crop && (
-                  <button className={showFull ? "active" : ""} onClick={() => setFullImage((f) => !f)} title="Show the whole frame, then click again to go back to the cropped area (G)">
+                  <button className={showFull ? "active" : ""} onClick={() => setFullImage((f) => !f)} title="Show the whole image, then click again to go back to the cropped area (G)">
                     {showFull ? "↩ Back to crop" : "⤢ Full image"}
                   </button>
                 )}
@@ -1156,9 +1186,27 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
                   graph={draft}
                   onPickRoi={() => startExtPick("plan_roi", 2, true)}
                   onClearRoi={() => setMpoints((m) => ({ ...m, plan_roi: [] }))}
-                  onPlanned={async () => {
-                    await reload();
+                  onPlanned={async (r) => {
+                    const d = await reload();
                     setAuditKey((k) => k + 1);
+                    // Open the best proposal straight away, so its Accept button is in front of the examiner.
+                    const best = r.candidates
+                      .filter((c) => c.chain_id && c.score !== null)
+                      .sort((a, b) => (b.score ?? -99) - (a.score ?? -99))[0];
+                    const c = best && d.chains.find((x) => x.id === best.chain_id);
+                    if (c) openChain(c);
+                  }}
+                  onUseChain={async (id) => {
+                    try {
+                      await api.acceptProposals(id);
+                      const d = await reload();
+                      const c = d.chains.find((x) => x.id === id);
+                      if (c) openChain(c);
+                      setAuditKey((k) => k + 1);
+                      setStatus({ kind: "ok", text: "Planner chain accepted. Its steps are now yours to adjust, render and report." });
+                    } catch (e) {
+                      setStatus({ kind: "bad", text: (e as Error).message });
+                    }
                   }}
                   onOpenChain={(id) => {
                     reload().then((d) => {
