@@ -92,6 +92,7 @@ export type Command =
   | "zoom-out"
   | "compare-swipe"
   | "compare-side"
+  | "compare-fade"
   | "compare-flip"
   | "toggle-left"
   | "toggle-right"

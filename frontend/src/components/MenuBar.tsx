@@ -194,6 +194,7 @@ export function MenuBar({ caseId, signedIn }: Props) {
       { label: "Compare: swipe", run: () => command("compare-swipe"), disabled: !inCase },
       { label: "Compare: side by side", run: () => command("compare-side"), disabled: !inCase },
       { label: "Compare: flip", keys: "T", run: () => command("compare-flip"), disabled: !inCase },
+      { label: "Compare: opacity", run: () => command("compare-fade"), disabled: !inCase },
       { separator: true, label: "" },
       { label: "Evidence panel", keys: "Alt+1", run: () => command("toggle-left"), disabled: !inCase },
       { label: "Tools panel", keys: "Alt+2", run: () => command("toggle-right"), disabled: !inCase },

@@ -92,14 +92,17 @@ export function ChainEditor(props: Props) {
     const ids = new Set(graph.nodes.map((n) => n.id));
     let k = graph.nodes.length + 1;
     while (ids.has(`n${k}`)) k++;
-    const node: ChainNode = { id: `n${k}`, filter: f.id, params: defaults(f), enabled: true };
+    // Go straight into marking on the image only where the filter cannot work without it (perspective corners,
+    // variable-blur streaks); optional marks such as a motion path or a region wait for their button.
+    const pts = f.params.find((p) => p.type === "points" && (p.count || p.name === "streaks"));
+    const params = defaults(f);
+    if (pts) params[pts.name] = [];
+    const node: ChainNode = { id: `n${k}`, filter: f.id, params, enabled: true };
     const idx = selected ? graph.nodes.findIndex((n) => n.id === selected) + 1 : graph.nodes.length;
     const nodes = [...graph.nodes];
     nodes.splice(idx, 0, node);
     update(nodes);
     props.onSelect(node.id);
-    // A filter set by drawing on the image goes straight into drawing mode.
-    const pts = f.params.find((p) => p.type === "points");
     if (f.id === "geometry.crop") props.onDrawCrop(node.id);
     else if (pts) props.onStartPick(node.id, pts);
     pushRecent(f.id);
