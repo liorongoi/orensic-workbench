@@ -29,7 +29,7 @@ npm run build
 # start
 cd ../backend
 FORENSIC_DATA_DIR=./data uvicorn forensic.api:app --port 8000
-# open http://127.0.0.1:8000; the first visit creates the administrator account
+# open http://127.0.0.1:8000; Lucida opens straight to the case list (no sign-in)
 ```
 
 For front-end development run `npm run dev` in `frontend/` (port 5173, proxies `/api`
@@ -96,7 +96,7 @@ validation run that fails if detector accuracy drops below the published floor).
 
 ## Rules the code enforces
 
-- Every API request needs a signed-in local account; actions are audited under that account's full name, and a name sent by the browser is ignored. Administrators add examiners under **Users** in the account menu.
+- There is no sign-in: every request acts as one built-in local examiner, and actions are audited under that examiner's name (click it at the top right to change it); a name sent by the browser is ignored.
 - Renders, analyses, conversions, reviews and reports run through one shared job queue, visible to everyone under **Jobs** (see [docs/deployment.md](docs/deployment.md#several-examiners)).
 - Originals are never written after ingest; all work is on derived, content-addressed outputs.
 - Live previews are not stored or audited and are never evidential. "Render result" runs the saved chain from the original and records the output hash.

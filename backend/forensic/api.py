@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from . import APP_NAME, __version__, formats, media
 from . import measure as measure_mod
-from .accounts import Accounts, AuthError, actor_for
+from .accounts import Accounts, actor_for
 from .agents import WORKFLOWS, plan_enhancement
 from .audit import Actor
 from .filters import FilterError
@@ -28,26 +28,16 @@ from .jobs import JobCancelled, JobQueue, QueueFull
 from .report import render_html, render_pdf
 from .workbench import NotFound, Workbench
 
-SESSION_COOKIE = "fw_session"
-# Requests that work without signing in: the health check and the sign-in screen itself.
-OPEN_PATHS = {"/api/health", "/api/auth/status", "/api/auth/login", "/api/auth/setup"}
 _user: contextvars.ContextVar[dict | None] = contextvars.ContextVar("user", default=None)
 
 
 async def _authenticate(request: Request) -> None:
-    """Every API request needs a signed-in examiner, except the few in OPEN_PATHS.
+    """Lucida has no sign-in: every request acts as the built-in local examiner.
 
     Runs on the event loop, so the user it sets is visible to the endpoint (FastAPI copies the
     context into the worker thread that runs a plain `def` endpoint).
     """
-    token = request.cookies.get(SESSION_COOKIE)
-    auth = request.headers.get("authorization", "")
-    if auth.lower().startswith("bearer "):
-        token = auth[7:].strip()
-    user = accounts().session_user(token)
-    _user.set(user)
-    if user is None and request.url.path.startswith("/api/") and request.url.path not in OPEN_PATHS:
-        raise HTTPException(401, "sign in to use Lucida")
+    _user.set(accounts().local_user() if request.url.path.startswith("/api/") else None)
 
 
 @asynccontextmanager
@@ -105,14 +95,11 @@ def jobs() -> JobQueue:
 
 
 def user() -> dict:
-    u = _user.get()
-    if u is None:
-        raise HTTPException(401, "sign in to use Lucida")
-    return u
+    return _user.get() or accounts().local_user()
 
 
 def actor(_legacy_name: str | None = None) -> Actor:
-    """The signed-in examiner, as recorded in the audit log. A name the browser sends is ignored."""
+    """The local examiner, as recorded in the audit log. A name the browser sends is ignored."""
     return actor_for(user())
 
 
@@ -130,11 +117,6 @@ async def _nf(_: Request, exc: NotFound):
 @app.exception_handler(PermissionError)
 async def _forbidden(_: Request, exc: PermissionError):
     return JSONResponse({"detail": str(exc)}, status_code=403)
-
-
-@app.exception_handler(AuthError)
-async def _unauth(_: Request, exc: AuthError):
-    return JSONResponse({"detail": str(exc)}, status_code=401)
 
 
 @app.exception_handler(QueueFull)
@@ -262,112 +244,26 @@ def catalogue():
     }
 
 
-# Accounts and sign-in --------------------------------------------------------------------
+# The examiner ---------------------------------------------------------------------------
 
 
-class SetupIn(BaseModel):
-    username: str
+class ExaminerIn(BaseModel):
     full_name: str
-    password: str
 
 
-class LoginIn(BaseModel):
-    username: str
-    password: str
+@app.get("/api/me")
+def me():
+    """The examiner every action is recorded under."""
+    return user()
 
 
-class UserIn(BaseModel):
-    username: str
-    full_name: str
-    password: str
-    role: str = "examiner"
-
-
-class UserUpdate(BaseModel):
-    role: str | None = None
-    disabled: bool | None = None
-    password: str | None = None
-
-
-class PasswordIn(BaseModel):
-    current: str
-    new: str
-
-
-def _signed_in(user: dict, token: str) -> JSONResponse:
-    res = JSONResponse({"user": user})
-    res.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="strict", path="/",
-                   max_age=12 * 3600, secure=os.environ.get("FORENSIC_SECURE_COOKIE") == "1")
-    return res
-
-
-def admin() -> dict:
-    u = user()
-    if u["role"] != "admin":
-        raise HTTPException(403, "only an administrator can manage accounts")
-    return u
-
-
-@app.get("/api/auth/status")
-def auth_status():
-    return {"setup_required": accounts().setup_required(), "user": _user.get()}
-
-
-@app.post("/api/auth/setup")
-def auth_setup(body: SetupIn):
-    """Create the first administrator on a fresh installation, then sign them in."""
-    acc = accounts()
-    u = acc.create_user(body.username, body.full_name, body.password, first_admin=True)
-    wb().audit.append(actor_for(u), "account.create", target=u["username"], params={"role": u["role"], "first": True})
-    token, u = acc.login(body.username, body.password)
-    return _signed_in(u, token)
-
-
-@app.post("/api/auth/login")
-def auth_login(body: LoginIn):
-    token, u = accounts().login(body.username, body.password)
-    return _signed_in(u, token)
-
-
-@app.post("/api/auth/logout")
-def auth_logout(request: Request):
-    accounts().logout(request.cookies.get(SESSION_COOKIE))
-    res = JSONResponse({"ok": True})
-    res.delete_cookie(SESSION_COOKIE, path="/")
-    return res
-
-
-@app.post("/api/auth/password")
-def change_password(body: PasswordIn):
-    u = user()
-    accounts().change_password(u["username"], body.current, body.new)
-    wb().audit.append(actor_for(u), "account.password", target=u["username"])
-    return {"ok": True}
-
-
-@app.get("/api/users")
-def list_users():
-    admin()
-    return accounts().list_users()
-
-
-@app.post("/api/users")
-def create_user(body: UserIn):
-    a = admin()
-    u = accounts().create_user(body.username, body.full_name, body.password, body.role)
-    wb().audit.append(actor_for(a), "account.create", target=u["username"], params={"role": u["role"]})
-    return u
-
-
-@app.patch("/api/users/{username}")
-def update_user(username: str, body: UserUpdate):
-    a = admin()
-    try:
-        u = accounts().update_user(username, role=body.role, disabled=body.disabled, password=body.password)
-    except LookupError as e:
-        raise HTTPException(404, str(e)) from e
-    wb().audit.append(actor_for(a), "account.update", target=u["username"],
-                      params={"role": body.role, "disabled": body.disabled, "password_reset": body.password is not None})
+@app.patch("/api/me")
+def rename_me(body: ExaminerIn):
+    before = user()
+    u = accounts().rename(body.full_name)
+    if u["full_name"] != before["full_name"]:
+        wb().audit.append(actor_for(u), "examiner.rename", target=u["username"],
+                          params={"from": before["full_name"], "to": u["full_name"]})
     return u
 
 

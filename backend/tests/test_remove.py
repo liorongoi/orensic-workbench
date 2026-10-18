@@ -27,7 +27,6 @@ def test_remove_and_restore_evidence_keeps_original(client, jpeg_path):
     ch = client.post(f"/api/cases/{case['id']}/chains", json={"evidence_id": ev["id"], "name": "c1"}, headers=H).json()
     client.post(f"/api/evidence/{ev['id']}/analyses", json={"analysis": "file.metadata", "params": {}}, headers=H)
 
-    assert TestClient(api.app).post(f"/api/evidence/{ev['id']}/remove", json={"reason": "duplicate"}).status_code == 401
     r = client.post(f"/api/evidence/{ev['id']}/remove", json={"reason": "duplicate"}, headers=H).json()
     assert r["removed"]["reason"] == "duplicate" and r["removed"]["by"] == "Test Examiner"
 

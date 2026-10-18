@@ -59,19 +59,6 @@ def test_local_ingest_needs_a_token_from_the_dialog(client, jpeg_path):
     assert client.post(f"/api/cases/{case['id']}/evidence/local", json={"token": token}).status_code == 404
 
 
-def test_local_ingest_needs_sign_in(tmp_path, jpeg_path):
-    api._wb = Workbench(load_settings(tmp_path / "data"))
-    try:
-        with TestClient(api.app) as c:
-            token = desktop.local_files.offer(jpeg_path)
-            assert c.post("/api/cases/x/evidence/local", json={"token": token}).status_code == 401
-            assert c.get("/api/system").status_code == 401
-    finally:
-        api.jobs().stop()
-        api._wb.db.close()
-        api._wb = None
-
-
 def test_system_summary(client):
     s = client.get("/api/system").json()
     assert s["cpu_threads"] >= 1 and s["ram_mb"] > 0

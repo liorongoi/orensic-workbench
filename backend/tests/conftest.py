@@ -70,11 +70,9 @@ def video_path(tmp_path_factory):
     return p
 
 
-def sign_in(client, username="examiner", full_name="Test Examiner", password="correct horse"):
-    """Create the first administrator on a fresh workbench (if needed) and sign the client in."""
-    r = client.post("/api/auth/setup", json={"username": username, "full_name": full_name, "password": password})
-    if r.status_code != 200:
-        client.post("/api/auth/login", json={"username": username, "password": password}).raise_for_status()
+def sign_in(client, full_name="Test Examiner"):
+    """Name the built-in local examiner (there is no sign-in) and return the client."""
+    client.patch("/api/me", json={"full_name": full_name}).raise_for_status()
     return client
 
 

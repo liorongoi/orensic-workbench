@@ -1664,17 +1664,14 @@ started it.
 | Celery or RQ with Redis | An extra service to install, secure and keep running on an offline machine, for one computer's workload. |
 | Strict priorities (for example urgent cases first) | Needs someone to set and police priorities; can starve low-priority work. Can be added later on the same queue table. |
 
-### 21.2 Accounts (`forensic/accounts.py`)
+### 21.2 The examiner (`forensic/accounts.py`)
 
-Lucida keeps its own accounts because the lab machine is offline and cannot reach a
-directory service. Passwords are stored as **scrypt** hashes (N = 2^14, r = 8, p = 1, about 50 ms
-per sign-in) with a random salt; scrypt was chosen over plain salted SHA-256 because it is
-deliberately slow and memory-hard, which makes guessing a stolen password file expensive, and
-over bcrypt or Argon2 because it is in Python's standard library and adds no dependency. Sessions
-last 12 hours in an HttpOnly, SameSite=Strict cookie; five wrong passwords lock a user name for a
-minute. The actor recorded in the audit log is taken from the signed-in account, never from
-anything the browser sends, so the log's "who" is as trustworthy as the sign-in. Accounts are
-disabled, not deleted, so every name in the log stays tied to a known person.
+Lucida has no sign-in. Every request acts as one built-in local examiner, stored as a single row
+in the `users` table, so the job queue and the audit log keep a stable owner and name. The
+first name is taken from `FORENSIC_EXAMINER`, else the operating-system account's full name,
+else its login name. The actor recorded in the audit log comes from that row, never from
+anything the browser sends; renaming it is itself an audited action, and earlier entries keep
+the name they were made under.
 
 ---
 

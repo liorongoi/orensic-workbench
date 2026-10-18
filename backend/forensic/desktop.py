@@ -230,7 +230,7 @@ def main(argv: list[str] | None = None) -> int:
                                         text_select=True)
     bridge._windows.append(main_window)
     data = Path(os.environ.get("FORENSIC_DATA_DIR", "./data")).resolve()
-    # A persistent profile keeps the sign-in and the panel layout between sessions.
+    # A persistent profile keeps the panel layout between sessions.
     webview.start(gui="edgechromium" if sys.platform == "win32" else None, debug=args.debug,
                   private_mode=False, storage_path=str(data / "desktop-webview"))
     server.should_exit = True

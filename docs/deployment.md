@@ -126,12 +126,10 @@ the RAM caches. On a workstation with an RTX A4000 (16 GB) and 48 to 128 GB of R
 
 ## Several examiners
 
-Lucida keeps its own accounts, since the lab machine is offline. The first person to
-open a fresh installation creates the **administrator** account; the administrator then adds
-each examiner from the account menu (top right) > **Users**, and can reset a password, make
-someone an administrator, or disable an account (which signs it out at once). Every action is
-recorded in the audit log under the account's full name. Sessions last 12 hours; five wrong
-passwords in a row lock that user name for a minute.
+Lucida has no sign-in. Every request acts as one built-in local examiner, and every action is
+recorded in the audit log under that examiner's name. The name starts as the computer account's
+full name (or `FORENSIC_EXAMINER`, if set before the first start) and is changed by clicking it
+at the top right; the change is audited.
 
 Heavy work (rendering a chain, analyses, format conversion, camera references, triage, the
 review agent and reports) goes through one shared job queue, so several examiners can start
@@ -165,8 +163,8 @@ Lucida then:
   or `certutil -addstore Root workbench-ca.crt` as administrator), after comparing its SHA-256
   fingerprint with the one Lucida window prints. A lab with its own certificate sets
   `tls_cert` and `tls_key` in `workbench.ini` instead;
-- answers only the computer's own names and addresses (the Host check), and needs a signed-in
-  Lucida account on every request; the sign-in cookie is sent over HTTPS only;
+- answers only the computer's own names and addresses (the Host check). There is no sign-in, so
+  anyone who can reach the address can use Lucida; turn this on only on a trusted lab network;
 - on an all-users install, opens its port in Windows Firewall for domain and private networks
   only (never public); uninstalling removes the rule. On a per-user install Windows asks the
   first time Lucida starts.

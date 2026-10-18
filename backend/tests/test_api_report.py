@@ -24,7 +24,6 @@ def client(tmp_path):
 def test_full_workflow(client, jpeg_path, video_path):
     assert client.post("/api/cases", json={"name": "x", "examiner": ""}, headers=H).status_code == 400
     case = client.post("/api/cases", json={"name": "Burglary 42", "examiner": "Test Examiner"}, headers=H).json()
-    assert TestClient(api.app).post(f"/api/cases/{case['id']}/evidence", files={"file": ("a.jpg", b"x")}).status_code == 401
     ev = client.post(f"/api/cases/{case['id']}/evidence", files={"file": ("scene.jpg", jpeg_path.read_bytes())}, headers=H).json()
     vid = client.post(f"/api/cases/{case['id']}/evidence", files={"file": ("clip.mp4", video_path.read_bytes())}, headers=H).json()
     assert ev["media_type"] == "image" and vid["media_type"] == "video"
