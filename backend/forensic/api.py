@@ -542,9 +542,10 @@ def frames(evidence_id: str):
 
 
 @app.get("/api/evidence/{evidence_id}/frame/{n}.png")
-def frame_png(evidence_id: str, n: int):
+def frame_png(evidence_id: str, n: int, request: Request):
     img = wb().source_frame(evidence_id, n)
-    return Response(_fast_png(img), media_type="image/png", headers={"Cache-Control": "max-age=3600"})
+    data, media_type = _display_image(img, request)
+    return Response(data, media_type=media_type, headers={"Cache-Control": "max-age=3600"})
 
 
 # The PNG route comes first: "{n}" would otherwise also match "12.png".
@@ -568,9 +569,10 @@ def original(evidence_id: str):
 
 
 @app.post("/api/evidence/{evidence_id}/preview")
-def preview(evidence_id: str, body: PreviewIn):
+def preview(evidence_id: str, body: PreviewIn, request: Request):
     img, info = wb().preview(body.graph, evidence_id, upto=body.upto, frame=body.frame)
-    return Response(_fast_png(img), media_type="image/png", headers={"X-Preview-Info": json.dumps(info)})
+    data, media_type = _display_image(img, request)
+    return Response(data, media_type=media_type, headers={"X-Preview-Info": json.dumps(info)})
 
 
 @app.post("/api/evidence/{evidence_id}/convert")
@@ -697,6 +699,20 @@ def report_pdf(case_id: str, x_examiner: str | None = Header(None), examiner: st
     w = wb()
     pdf = render_pdf(w, queued("report.build", case_id=case_id, verify=True))
     return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="report-{case_id}.pdf"'})
+
+
+_LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+
+
+def _display_image(img, request: Request) -> tuple[bytes, str]:
+    """Lossless pixels for the viewer. On this computer (the desktop window, or a browser on
+    127.0.0.1) an uncompressed BMP: a 4K frame encodes in about 15 ms instead of 0.3-1 s as PNG,
+    which is what makes a slider feel live. Over a network, a fast PNG, about a third the size."""
+    host = request.client.host if request.client else ""
+    if host in _LOOPBACK:
+        ok, buf = cv2.imencode(".bmp", cv2.cvtColor(media.to_uint8(img), cv2.COLOR_RGB2BGR))
+        return buf.tobytes(), "image/bmp"
+    return _fast_png(img), "image/png"
 
 
 def _fast_png(img) -> bytes:
