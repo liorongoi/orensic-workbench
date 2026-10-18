@@ -15,6 +15,8 @@ interface Props {
   onClearRoi: () => void;
   onPlanned: (r: PlanResult) => void;
   onOpenChain: (id: string) => void;
+  /** Accept every step of a proposed chain and open it. */
+  onUseChain: (id: string) => void;
 }
 
 function roiRect(roi: number[][] | undefined): number[] | null {
@@ -114,13 +116,20 @@ export function PlannerPanel(props: Props) {
             {result.candidates
               .slice()
               .sort((a, b) => (b.score ?? -99) - (a.score ?? -99))
-              .map((c) => (
+              .map((c, i) => (
                 <li key={c.label}>
-                  {c.label} <span className="muted">{c.score === null ? `failed: ${c.error}` : `score ${c.score}`}</span>{" "}
-                  {c.chain_id && (
-                    <button className="link" onClick={() => props.onOpenChain(c.chain_id!)}>
-                      open proposal
-                    </button>
+                  {c.label} <span className="muted">{c.score === null ? `failed: ${c.error}` : `score ${c.score}`}</span>
+                  {c.chain_id ? (
+                    <div className="row plan-actions">
+                      <button className={i === 0 ? "primary small-btn" : "small-btn"} onClick={() => props.onUseChain(c.chain_id!)} title="Accept these steps and open the chain">
+                        Use this
+                      </button>
+                      <button className="small-btn" onClick={() => props.onOpenChain(c.chain_id!)} title="Look at the result before accepting">
+                        Preview
+                      </button>
+                    </div>
+                  ) : (
+                    c.score !== null && <span className="muted"> · not kept (only the best two are saved)</span>
                   )}
                 </li>
               ))}

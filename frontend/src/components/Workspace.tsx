@@ -1186,9 +1186,27 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
                   graph={draft}
                   onPickRoi={() => startExtPick("plan_roi", 2, true)}
                   onClearRoi={() => setMpoints((m) => ({ ...m, plan_roi: [] }))}
-                  onPlanned={async () => {
-                    await reload();
+                  onPlanned={async (r) => {
+                    const d = await reload();
                     setAuditKey((k) => k + 1);
+                    // Open the best proposal straight away, so its Accept button is in front of the examiner.
+                    const best = r.candidates
+                      .filter((c) => c.chain_id && c.score !== null)
+                      .sort((a, b) => (b.score ?? -99) - (a.score ?? -99))[0];
+                    const c = best && d.chains.find((x) => x.id === best.chain_id);
+                    if (c) openChain(c);
+                  }}
+                  onUseChain={async (id) => {
+                    try {
+                      await api.acceptProposals(id);
+                      const d = await reload();
+                      const c = d.chains.find((x) => x.id === id);
+                      if (c) openChain(c);
+                      setAuditKey((k) => k + 1);
+                      setStatus({ kind: "ok", text: "Planner chain accepted. Its steps are now yours to adjust, render and report." });
+                    } catch (e) {
+                      setStatus({ kind: "bad", text: (e as Error).message });
+                    }
                   }}
                   onOpenChain={(id) => {
                     reload().then((d) => {

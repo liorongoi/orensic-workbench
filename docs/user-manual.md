@@ -466,7 +466,9 @@ The **Planner** (at the top of the Enhance tab) proposes chains for a goal:
 
 The planner tries several chains of classical filters, scores each one for sharpness, contrast,
 noise and clipping, and creates the best two as new chains named "Planner A" and "Planner B".
-Every candidate is listed with its score; click **open proposal** to open one. The score is a
+The best proposal opens straight away, with an **Accept** button above its steps. Every candidate is
+listed with its score; the best two are kept as chains, each with **Use this** (accept its steps and
+open it) and **Preview** (open it to look first, then **Accept**). The score is a
 ranking aid only (hover **ⓘ how scores work**). You judge whether a proposal is fit for purpose.
 
 Steps the planner (or any agent) adds are marked **proposed** and a banner says so. They are

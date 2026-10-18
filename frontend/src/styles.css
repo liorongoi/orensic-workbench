@@ -220,6 +220,8 @@ code.block { display: block; white-space: pre-wrap; max-height: 260px; overflow:
 .planner > input { width: 100%; margin: 8px 0 6px; }
 .planner .row, .measure-panel .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 6px 0; }
 .plan-result ol { padding-left: 18px; margin: 6px 0; }
+.plan-result li { margin-bottom: 6px; }
+.plan-actions { gap: 6px; margin-top: 3px; }
 .convert-panel { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
 .convert-panel p { margin: 0; }
 .convert-panel p.warn { color: var(--warn); }
