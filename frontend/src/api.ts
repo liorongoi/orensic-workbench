@@ -25,7 +25,7 @@ import type {
   SystemInfo,
 } from "./types";
 
-// The signed-in examiner's full name; the server records actions under the signed-in account.
+// The local examiner's full name; the server records every action under that examiner.
 let examiner = "";
 
 export function getExaminer() {
@@ -36,9 +36,6 @@ export function setExaminer(name: string) {
   examiner = name;
 }
 
-/** Fired when the server says the session has ended, so the app can show the sign-in screen. */
-export const SIGNED_OUT = "workbench-signed-out";
-
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
   let payload: BodyInit | undefined;
@@ -48,7 +45,6 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
     payload = JSON.stringify(body);
   }
   const res = await fetch(url, { method, headers, body: payload, credentials: "same-origin" });
-  if (res.status === 401 && !url.startsWith("/api/auth/")) window.dispatchEvent(new Event(SIGNED_OUT));
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -62,17 +58,8 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
 }
 
 export const api = {
-  authStatus: () => req<{ setup_required: boolean; user: User | null }>("GET", "/api/auth/status"),
-  setup: (username: string, fullName: string, password: string) =>
-    req<{ user: User }>("POST", "/api/auth/setup", { username, full_name: fullName, password }),
-  login: (username: string, password: string) => req<{ user: User }>("POST", "/api/auth/login", { username, password }),
-  logout: () => req("POST", "/api/auth/logout"),
-  changePassword: (current: string, next: string) => req("POST", "/api/auth/password", { current, new: next }),
-  users: () => req<User[]>("GET", "/api/users"),
-  createUser: (u: { username: string; full_name: string; password: string; role: string }) =>
-    req<User>("POST", "/api/users", u),
-  updateUser: (username: string, change: { role?: string; disabled?: boolean; password?: string }) =>
-    req<User>("PATCH", `/api/users/${encodeURIComponent(username)}`, change),
+  me: () => req<User>("GET", "/api/me"),
+  renameMe: (fullName: string) => req<User>("PATCH", "/api/me", { full_name: fullName }),
   jobs: () => req<JobOverview>("GET", "/api/jobs"),
   cancelJob: (id: string) => req<Job>("POST", `/api/jobs/${id}/cancel`),
   filters: () => req<FilterSchema[]>("GET", "/api/filters"),

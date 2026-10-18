@@ -75,7 +75,7 @@ FinishedLabel=Setup has finished installing [name] on your computer. Start it fr
 [Tasks]
 Name: "startmenu"; Description: "Create Start menu shortcuts"; GroupDescription: "Shortcuts:"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"
-Name: "labnetwork"; Description: "Let examiners connect from other PCs on the lab network (HTTPS, Lucida sign-in)"; GroupDescription: "Network:"; Flags: unchecked
+Name: "labnetwork"; Description: "Let examiners connect from other PCs on the lab network (HTTPS; no sign-in, anyone on the network can use it)"; GroupDescription: "Network:"; Flags: unchecked
 
 [InstallDelete]
 ; An upgrade replaces the runtime wholesale so no file from an older version lingers.

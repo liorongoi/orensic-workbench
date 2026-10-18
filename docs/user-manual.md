@@ -37,7 +37,7 @@ Five rules shape how Lucida behaves. Knowing them explains most of what you will
    read-only, and never opened for writing again. Everything you do produces new results
    linked to the original.
 2. **Everything is recorded.** Every action is written to the case's audit log under your
-   account's full name, in a hash-chained log that shows if anyone edits it.
+   examiner name, in a hash-chained log that shows if anyone edits it.
 3. **The preview is not evidence.** What you see while editing is a live preview. A result
    becomes evidence only when you **Render** it: the saved chain is run from the original and
    its output hash is recorded.
@@ -59,7 +59,7 @@ where cases are kept), and this **User manual**, the **Algorithm guide** and **A
 
 **Help inside Lucida.** Click **Help ▾** in the top bar and choose **User manual**, **Algorithm
 guide**, **Amped vs Lucida** or **Installation and settings**. The guide opens in a new browser tab, so your work stays
-as it was. The sign-in page has a **User manual** link too. The guides are built into Lucida, so
+as it was. The guides are built into Lucida, so
 they work offline and always match the installed version. On the Help page, click a guide on the
 left, type in **Find a section** to narrow its contents, and use the browser's find (Ctrl+F, or
 ⌘F on a Mac) to search the text.
@@ -67,25 +67,19 @@ left, type in **Find a section** to narrow its contents, and use the browser's f
 **From a command line or Docker**, see [deployment.md](deployment.md). Then open
 `http://127.0.0.1:8000` in Chrome, Edge or Firefox.
 
-**First run: the administrator account.** The first time anyone opens a fresh installation,
-Lucida asks for the **administrator** account: a user name (2 to 32 lower-case letters,
-digits, dots, dashes or underscores), your full name (it appears in the audit log and reports),
-and a password of at least 8 characters, typed twice. Click the button and you are signed in.
-The administrator then adds the other examiners (see 13.1).
+**No sign-in.** Lucida opens straight to the case list. There are no accounts or passwords:
+everything is done as one examiner, whose name is shown at the top right. The first time
+Lucida starts, that name is the computer account's full name (or its login name; after an update from a
+version that had accounts, the first administrator's name). Click it
+to change it to your full name as it should appear in reports. Every action is recorded in the
+audit log under that name, and a change of name is recorded too; earlier entries keep the name
+they were made under. A lab that wants a fixed name can set the `FORENSIC_EXAMINER` environment
+variable before the first start.
 
-**Signing in.** After that, Lucida opens on a sign-in page. Type your user name and
-password. A session lasts 12 hours; after that, or after **Sign out**, you sign in again. Five
-wrong passwords in a row lock that user name for one minute.
-
-**Your account.** Your full name is shown at the top right. Every action you take is recorded in
-the audit log under that name; Lucida takes it from the signed-in account, so nobody can
-act under another examiner's name. Click your name for **Change password** and **Sign out**
-(and **Users**, if you are an administrator).
-
-**Where you can sign in.** Unless the administrator turned on lab-network access, Lucida
-answers only on the computer it runs on (address `127.0.0.1`), so every examiner signs in at that
-computer. With lab-network access on, examiners can also sign in from their own PCs at
-`https://<computer name>:<port>` (see 13.4).
+**Where Lucida answers.** Unless lab-network access is turned on, Lucida answers only on the
+computer it runs on (address `127.0.0.1`). With lab-network access on, it also answers at
+`https://<computer name>:<port>` (see 13.4); since there is no sign-in, anyone who can reach that
+address can use it and acts under the same examiner name.
 
 ---
 
@@ -95,7 +89,7 @@ The case list is the first page. When you open a case the screen has four parts:
 
 ```
 +----------------------------------------------------------------------------------+
-| ◆ Lucida / Case name                   Report ▾  Help ▾  Jobs 1 2   Your name ▾  |
+| ◆ Lucida / Case name                   Report ▾  Help ▾  Jobs 1 2   Your name    |
 +--------------+-----------------------------------------------+-------------------+
 | Evidence   ‹ |  label · size · zoom   Crop  Fit  1:1  Orig.  |  Enhance |       › |
 | [Triage]     |                                               |  Authenticate |   |
@@ -111,7 +105,7 @@ The case list is the first page. When you open a case the screen has four parts:
 ```
 
 - **Top bar**: the case name, the **Report ▾** menu (see 12), the **Help ▾** menu (this manual
-  and the other guides, see 2), the **Jobs** list (see 13.2) and your account menu.
+  and the other guides, see 2), the **Jobs** list (see 13.2) and the examiner name (click it to change it, see 13.1).
 - **Left panel**: the evidence in the case, with buttons to add files and triage them all.
 - **Centre**: the viewer, with the frame strip underneath for video.
 - **Right panel**: four tabs. **Enhance** builds processing chains. **Authenticate** runs
@@ -812,29 +806,15 @@ case.
 
 ## 13. Working with several examiners
 
-Several examiners can use Lucida at the same time, each signed in to their own account.
+Several examiners can use Lucida at the same time (see 13.1 for how their names are recorded).
 Heavy work goes through one shared job queue, so the machine is never asked to do more at once
 than it can, and everyone can see what is running.
 
-### 13.1 Accounts (administrators)
+### 13.1 The examiner name
 
-Click your name at the top right, then **Users**. The list shows every account with its full
-name, user name and role.
-
-- **Add an examiner**: at the bottom, type a user name, the examiner's full name and a first
-  password (8 or more characters), choose **Examiner** or **Administrator**, and click **Add**.
-  Give the examiner the password; they can change it with **Change password**. Two accounts
-  cannot share a full name, because the audit log must tell them apart.
-- **Change a role**: pick **Examiner** or **Administrator** in the account's row. Administrators
-  can manage accounts; otherwise both roles work the same way. There must always be at least one
-  active administrator, and you cannot change your own role.
-- **Reset a password**: click **Reset password** and type the new one. The account's open
-  sessions end, so the examiner must sign in again with the new password.
-- **Disable an account**: click **Disable**. The account is signed out at once and can no longer
-  sign in. Its past actions stay in the audit log under its name. **Enable** brings it back.
-  Accounts are disabled rather than deleted so that the log always names a known person.
-
-Creating accounts and changes to them are written to the audit log.
+Lucida has no accounts. Everyone who uses it works as the one examiner named at the top right,
+so if several people share the workstation, change the name (click it) when someone else takes
+over, so the audit log says who did what.
 
 ### 13.2 The job queue
 
@@ -898,7 +878,7 @@ graphics driver; no CUDA install is needed. Before a model is first used, Lucida
 only if both runs are identical to the bit; otherwise that model runs on the CPU. The report's
 software environment section and the **Self-test** output say which device the models ran on.
 
-Case data is shared by everyone who signs in. When installed **for all users**, the case data
+Case data is shared by everyone who uses Lucida. When installed **for all users**, the case data
 folder is shared by the members of the local **Forensic Examiners** Windows group (see
 [deployment.md](deployment.md)).
 
@@ -926,7 +906,7 @@ When it starts, the Lucida window prints the lab-network address and the certifi
 fingerprint, for example:
 
 ```
-  Lab network: https://lab-ws01:8000 (examiners sign in with their Lucida accounts)
+  Lab network: https://lab-ws01:8000
   Certificate: install ...\tls\workbench-ca.crt on each examiner PC once
                (Trusted Root Certification Authorities); SHA-256 3F:9A:...
 ```
@@ -943,14 +923,14 @@ fingerprint, for example:
    certificates in the following store** > **Trusted Root Certification Authorities**. Or, as
    administrator: `certutil -addstore Root workbench-ca.crt`.
 4. Open `https://<computer name>:<port>` (the address the Lucida window prints) in Chrome, Edge or
-   Firefox and sign in with your Lucida account. Bookmark it.
+   Firefox. Bookmark it.
 
 Everything works as on the workstation itself: the same cases, the same job queue, and your actions
-recorded under your account. Uploading large videos over the network takes longer than on the
+recorded under the examiner name. Uploading large videos over the network takes longer than on the
 workstation.
 
-**What protects it.** Every request needs a signed-in Lucida account; passwords and the sign-in
-cookie travel only over HTTPS; Lucida answers only requests addressed to the computer's own names
+**What protects it.** There is no sign-in, so anyone who can reach the address can use Lucida;
+turn lab-network access on only on a trusted network. Traffic travels only over HTTPS, and Lucida answers only requests addressed to the computer's own names
 and addresses. AI agents connecting over the network need a separate secret token (see
 [deployment.md](deployment.md#examiners-on-other-pcs)).
 
@@ -993,8 +973,6 @@ is in the [README](../README.md#connecting-an-agent). What an agent can and cann
 | An examiner PC cannot reach the lab-network address at all | Check that lab-network access is on, that both PCs are on the same network, and that the network is not set to "Public" in Windows (the firewall rule covers domain and private networks only). |
 | Self-test says the models run on the CPU on a machine with a graphics card | The card failed the exact-reproduction check, or its driver is missing or too old. Update the graphics driver and run the self-test again. Results are still correct on the CPU, only slower. |
 | The preview says "Updating preview..." for a long time | Heavy steps on full frames are slow. Crop first, or switch heavy steps off while adjusting earlier ones. |
-| "too many wrong passwords; wait a minute and try again" | Wait one minute. If the password is forgotten, an administrator resets it (13.1). |
-| "this account is disabled" | Ask an administrator to enable it (13.1). |
 | A button stays busy for a long time | Your job may be waiting its turn. Open **Jobs** to see its place in line. |
 | "you already have 50 jobs waiting" | Cancel some under **Jobs**, or wait for them to run. |
 | A job failed with "Lucida was restarted while this job ran" | Start it again. |

@@ -49,13 +49,9 @@ code, .hash { font-family: var(--mono); font-size: 11px; }
 .topbar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .brand { display: inline-flex; align-items: center; gap: 8px; color: var(--text); text-decoration: none; }
 .wordmark { font-family: "Instrument Serif", Georgia, "Times New Roman", serif; font-style: italic; font-weight: 400; font-size: 22px; line-height: 1; letter-spacing: 0.2px; }
-.signin-brand { display: flex; align-items: center; gap: 12px; margin: 0 0 4px; }
-.signin-brand .wordmark { font-size: 40px; }
 .crumb { color: var(--muted); }
 .examiner { margin-left: 12px; color: var(--muted); }
 
-.signin { display: grid; place-items: center; height: 100%; }
-.signin form { display: flex; flex-direction: column; gap: 10px; width: min(360px, 90vw); }
 .case-list { padding: 24px; max-width: 900px; width: 100%; margin: 0 auto; }
 .new-case { display: flex; gap: 8px; margin-bottom: 16px; }
 .new-case input { flex: 1; }
@@ -267,15 +263,10 @@ code.block { display: block; white-space: pre-wrap; max-height: 260px; overflow:
 input[type="password"] { background: #0c0f13; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; min-width: 0; }
 .account { margin-left: 4px; }
 .account > button.link { color: var(--muted); }
-.account-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; display: flex; flex-direction: column; min-width: 160px;
-  background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 4px; }
-.account-menu button { background: none; border: none; justify-content: flex-start; }
-.account-menu button:hover { background: #232a33; }
 .modal-back { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: grid; place-items: center; z-index: 40; }
 .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; width: min(640px, 94vw);
   max-height: 85vh; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
 .stack { display: flex; flex-direction: column; gap: 8px; }
-.user-add { display: grid; grid-template-columns: 1fr 1.3fr 1fr auto auto; gap: 6px; }
 .right-align { text-align: right; white-space: nowrap; }
 .jobq-btn.busy { border-color: var(--accent); }
 .jobq-count { font-size: 10px; font-weight: 700; border-radius: 8px; padding: 0 5px; min-width: 16px; text-align: center; }
@@ -363,7 +354,6 @@ details.guide summary { cursor: pointer; font-style: normal; color: var(--muted)
 .removed-chains { margin: -2px 0 8px; }
 
 /* Help: the bundled guides */
-.signin-help { align-self: center; margin-top: 4px; }
 .help { flex: 1; display: grid; grid-template-columns: 280px 1fr; min-height: 0; }
 .help-nav { border-right: 1px solid var(--line); background: var(--panel); padding: 12px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
 .help-docs { display: flex; flex-direction: column; gap: 4px; }

@@ -137,7 +137,7 @@ def run(open_browser: bool) -> int:
     print(f"  Import from: {os.environ['FORENSIC_IMPORT_DIR']}")
     if tls:
         lan = next((n for n in tls["names"] if n != "localhost" and "." in n), None) or socket.gethostname().lower()
-        print(f"  Lab network: https://{lan}:{net['port']} (examiners sign in with their Lucida accounts)")
+        print(f"  Lab network: https://{lan}:{net['port']}")
         if tls["authority"]:
             print(f"  Certificate: install {tls['authority']} on each examiner PC once")
             print(f"               (Trusted Root Certification Authorities); SHA-256 {tls['authority_sha256']}")

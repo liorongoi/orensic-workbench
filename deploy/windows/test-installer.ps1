@@ -113,13 +113,10 @@ try {
     }
     $page = Invoke-WebRequest "$base/" -UseBasicParsing
     if ($page.Content -notmatch 'id="root"') { throw "the UI page was not served" }
-    $refused = $false
-    try { Invoke-RestMethod "$base/api/cases" | Out-Null } catch { $refused = $_.Exception.Response.StatusCode.value__ -eq 401 }
-    if (-not $refused) { throw "the API answered without a signed-in account" }
-    # First run creates the administrator; a later run (the data folder survives uninstall) signs in.
-    $acct = '{"username": "installer", "full_name": "Installer test", "password": "installer-test-pw"}'
-    try { Invoke-RestMethod -Method Post "$base/api/auth/setup" -ContentType "application/json" -Body $acct -SessionVariable web | Out-Null }
-    catch { Invoke-RestMethod -Method Post "$base/api/auth/login" -ContentType "application/json" -Body $acct -SessionVariable web | Out-Null }
+    # No sign-in: the API answers at once, as the built-in local examiner.
+    $me = Invoke-RestMethod -Method Patch "$base/api/me" -ContentType "application/json" `
+        -Body '{"full_name": "Installer test"}' -SessionVariable web
+    if ($me.full_name -ne "Installer test") { throw "the local examiner could not be named" }
     $models = Invoke-RestMethod "$base/api/models" -WebSession $web
     Write-Host "UI served; $(@($models).Count) model entries listed"
     $case = Invoke-RestMethod -Method Post "$base/api/cases" -WebSession $web `

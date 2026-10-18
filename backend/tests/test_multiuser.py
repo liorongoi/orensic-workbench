@@ -1,4 +1,4 @@
-"""Several examiners on one workbench: accounts, sign-in, and the shared job queue."""
+"""The built-in local examiner and the shared job queue."""
 
 import threading
 import time
@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from forensic import api, jobs as jobs_mod
-from forensic.accounts import Accounts, AuthError
+from forensic.accounts import Accounts
 from forensic.audit import Actor
 from forensic.config import load_settings
 from forensic.jobs import JobQueue, Kind
@@ -26,64 +26,44 @@ def client(tmp_path):
     api._wb = None
 
 
-# Accounts ----------------------------------------------------------------------------------
+# The local examiner ------------------------------------------------------------------------
 
 
-def test_everything_needs_sign_in_except_health_and_setup(client):
+def test_no_sign_in_needed(client):
     assert client.get("/api/health").status_code == 200
-    assert client.get("/api/auth/status").json() == {"setup_required": True, "user": None}
-    assert client.get("/api/cases").status_code == 401
-    # A name in a header is no longer enough to act as an examiner.
-    assert client.post("/api/cases", json={"name": "x", "examiner": "x"}, headers={"X-Examiner": "Anyone"}).status_code == 401
-    assert client.get("/api/jobs").status_code == 401
+    assert client.get("/api/cases").status_code == 200
+    assert client.get("/api/jobs").status_code == 200
+    me = client.get("/api/me").json()
+    assert me["username"] == "local" and me["role"] == "admin" and me["full_name"]
+    # The sign-in and account screens are gone.
+    for path in ("/api/auth/login", "/api/auth/setup", "/api/users"):
+        assert client.post(path, json={}).status_code in (404, 405)
 
 
-def test_first_admin_adds_examiners_and_audit_uses_the_account(client):
-    sign_in(client, "lior", "Lior Admin")
-    assert client.post("/api/auth/setup", json={"username": "eve", "full_name": "Eve", "password": "12345678"}).status_code == 403
-    assert client.get("/api/auth/status").json()["user"]["role"] == "admin"
-    r = client.post("/api/users", json={"username": "dana", "full_name": "Dana Examiner", "password": "dana-pass-1"})
-    assert r.status_code == 200 and r.json()["role"] == "examiner"
-    assert client.post("/api/users", json={"username": "dana2", "full_name": "dana examiner", "password": "12345678"}).status_code == 400
-    assert client.post("/api/users", json={"username": "x", "full_name": "Short", "password": "1"}).status_code == 400
-
-    dana = TestClient(api.app)
-    assert dana.post("/api/auth/login", json={"username": "dana", "password": "nope-nope"}).status_code == 401
-    dana.post("/api/auth/login", json={"username": "Dana", "password": "dana-pass-1"}).raise_for_status()
-    assert dana.get("/api/users").status_code == 403
-    case = dana.post("/api/cases", json={"name": "Case", "examiner": "Dana Examiner"},
-                     headers={"X-Examiner": "Someone Else"}).json()
+def test_audit_uses_the_local_examiner_not_a_header(client):
+    client.patch("/api/me", json={"full_name": "  Dana   Examiner "}).raise_for_status()
+    assert client.get("/api/me").json()["full_name"] == "Dana Examiner"
+    assert client.patch("/api/me", json={"full_name": "   "}).status_code == 400
+    case = client.post("/api/cases", json={"name": "Case", "examiner": "Dana Examiner"},
+                       headers={"X-Examiner": "Someone Else"}).json()
     actors = {e["actor"] for e in client.get(f"/api/cases/{case['id']}/audit").json()["entries"]}
     assert actors == {"Dana Examiner"}
 
-    # Disabling an account ends its sessions at once.
-    client.patch("/api/users/dana", json={"disabled": True}).raise_for_status()
-    assert dana.get("/api/cases").status_code == 401
-    assert dana.post("/api/auth/login", json={"username": "dana", "password": "dana-pass-1"}).status_code == 401
-    # The last administrator cannot lock everyone out.
-    assert client.patch("/api/users/lior", json={"role": "examiner"}).status_code == 400
 
-    client.post("/api/auth/logout").raise_for_status()
-    assert client.get("/api/cases").status_code == 401
-
-
-def test_repeated_wrong_passwords_lock_the_name(wb):
+def test_local_examiner_is_created_once_and_keeps_its_name(wb, monkeypatch):
+    monkeypatch.setenv("FORENSIC_EXAMINER", "Lior Example")
     acc = Accounts(wb.db)
-    acc.create_user("ana", "Ana", "right-password", first_admin=True)
-    for _ in range(5):
-        with pytest.raises(AuthError):
-            acc.login("ana", "wrong-password")
-    with pytest.raises(AuthError, match="wait"):
-        acc.login("ana", "right-password")
+    assert acc.local_user()["full_name"] == "Lior Example"
+    acc.rename("Someone Else")
+    monkeypatch.setenv("FORENSIC_EXAMINER", "Ignored Now")
+    assert Accounts(wb.db).local_user()["full_name"] == "Someone Else"
+    assert wb.db.one("SELECT COUNT(*) AS n FROM users")["n"] == 1
 
 
-def test_password_change(wb):
-    acc = Accounts(wb.db)
-    acc.create_user("ana", "Ana", "first-password", first_admin=True)
-    with pytest.raises(ValueError):
-        acc.change_password("ana", "not-it", "second-password")
-    acc.change_password("ana", "first-password", "second-password")
-    assert acc.login("ana", "second-password")[1]["username"] == "ana"
+def test_upgraded_installation_keeps_the_administrator_name(wb):
+    wb.db.execute("INSERT INTO users (username, full_name, role, password_hash, disabled, created_at)"
+                  " VALUES ('lior', 'Lior Admin', 'admin', 'x', 0, '2026-01-01')")
+    assert Accounts(wb.db).local_user() == {"username": "local", "full_name": "Lior Admin", "role": "admin"}
 
 
 # Job queue ----------------------------------------------------------------------------------
