@@ -24,6 +24,10 @@ export function cropPosition(filters: FilterSchema[], nodes: ChainNode[], at: nu
   return i;
 }
 
+/** Point parameters that are a box (two corners): drawn by dragging a rectangle, not by clicking points. */
+const BOX_PARAMS = new Set(["roi", "streak"]);
+export const isBoxParam = (p: { name: string; type: string } | null | undefined) => !!p && p.type === "points" && BOX_PARAMS.has(p.name);
+
 /** Index of the last enabled crop in the chain, or -1. */
 export function lastCropIndex(graph: Graph | null): number {
   if (!graph) return -1;

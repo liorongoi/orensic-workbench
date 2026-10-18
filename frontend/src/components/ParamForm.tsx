@@ -1,3 +1,4 @@
+import { isBoxParam } from "../crop";
 import type { ParamSchema } from "../types";
 
 interface Props {
@@ -86,12 +87,13 @@ function renderInput(
       );
     case "points": {
       const pts = (v as number[][]) ?? [];
+      const box = isBoxParam(p);
       return (
         <span className="param-points">
           <code>{pts.length ? pts.map(([x, y]) => `(${x}, ${y})`).join(" ") : "none"}</code>
           {onPick && (
             <button type="button" className={isPicking ? "active" : ""} disabled={disabled} onClick={(e) => { e.preventDefault(); onPick(p); }}>
-              {isPicking ? "Picking… (Esc)" : "Pick on image"}
+              {isPicking ? (box ? "Drag a box… (Esc)" : "Picking… (Esc)") : box ? "Mark area" : "Pick on image"}
             </button>
           )}
           {pts.length > 0 && !p.count && (

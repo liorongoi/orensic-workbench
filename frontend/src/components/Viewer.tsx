@@ -22,6 +22,8 @@ interface Props {
   busyLabel?: string;
   error?: string | null;
   points?: number[][];
+  /** Join the last point back to the first (four corners); otherwise the points are an open path. */
+  pointsClosed?: boolean;
   pickHint?: string | null;
   onPick?: (x: number, y: number) => void;
   /** When set, dragging on the image draws a rectangle (Shift = square) instead of panning. */
@@ -33,7 +35,7 @@ interface Props {
   describe?: (x: number, y: number) => string | null;
 }
 
-type CompareMode = "off" | "swipe" | "side" | "flip";
+type CompareMode = "off" | "swipe" | "side" | "flip" | "fade";
 
 interface Loaded {
   img: HTMLImageElement;
@@ -81,7 +83,7 @@ function placeOriginal(m: HTMLImageElement, c: HTMLImageElement): [number, numbe
 
 /** Pixel-exact viewer: nearest-neighbour above 100 %, wheel zoom around the cursor, drag to pan.
  * Compare modes put the original next to the result: swipe, side by side (linked zoom and pan) or flip. */
-export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", label, busy, busyLabel, error, points, pickHint, onPick, onRect, illustrative, tools, describe }: Props) {
+export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", label, busy, busyLabel, error, points, pointsClosed, pickHint, onPick, onRect, illustrative, tools, describe }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [main, setMain] = useState<Loaded | null>(null);
@@ -90,6 +92,8 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
   const [mode, setMode] = useState<CompareMode>("off");
   const [flipped, setFlipped] = useState(false);
   const [split, setSplit] = useState(0.5);
+  // Opacity mode: how much of the original shows over the result (0 = result only, 1 = original only).
+  const [fade, setFade] = useState(0.5);
   const [view, setView] = useState({ zoom: 1, x: 0, y: 0 });
   const [cursor, setCursor] = useState<{ x: number; y: number; rgb: number[] | null; original?: boolean } | null>(null);
   const drag = useRef<{ sx: number; sy: number; vx: number; vy: number; moved: boolean } | null>(null);
@@ -251,7 +255,7 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
           if (i === 0) cx.moveTo(sx, sy);
           else cx.lineTo(sx, sy);
         });
-        if (points.length > 2) cx.closePath();
+        if (pointsClosed && points.length > 2) cx.closePath();
         cx.stroke();
         points.forEach(([x, y], i) => {
           const sx = view.x + (x + 0.5) * view.zoom;
@@ -338,6 +342,14 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
       cx.restore();
       cx.fillStyle = "#0f1216";
       cx.fillRect(PW - 1, 0, 2, H);
+    } else if (active === "fade" && !showOriginal) {
+      paint(false);
+      cx.save();
+      cx.globalAlpha = fade;
+      paint(true);
+      cx.restore();
+      grid();
+      marks();
     } else if (active === "swipe" && !showOriginal) {
       const sx = W * split;
       paint(false);
@@ -355,7 +367,7 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
       grid();
       if (!showOriginal) marks();
     }
-  }, [shown, cmp, orig?.join(), side, active, split, showOriginal, view, points, overlays, box]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [shown, cmp, orig?.join(), side, active, split, fade, showOriginal, view, points, pointsClosed, overlays, box]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const onResize = () => setView((v) => ({ ...v }));
@@ -404,6 +416,7 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
     else if (c === "zoom-out") zoomBy(0.8);
     else if (c === "compare-swipe" && canCompare) pickMode("swipe");
     else if (c === "compare-side" && canCompare) pickMode("side");
+    else if (c === "compare-fade" && canCompare) pickMode("fade");
     else if (c === "compare-flip") flip();
   };
   useEffect(() => onCommand((c) => commands.current(c)), []);
@@ -521,6 +534,9 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
             <button className={active === "flip" ? "active" : ""} disabled={!canCompare} onClick={() => pickMode("flip")} title="Flip between the two (T)">
               Flip
             </button>
+            <button className={active === "fade" ? "active" : ""} disabled={!canCompare} onClick={() => pickMode("fade")} title="Opacity: the original over the result, with a slider">
+              Opacity
+            </button>
           </span>
         )}
       </div>
@@ -566,6 +582,14 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
             <span className="compare-tag" style={{ left: 8 }}>{compareLabel}</span>
             <span className="compare-tag" style={{ left: "calc(50% + 8px)" }}>{showOriginal ? compareLabel : label}</span>
           </>
+        )}
+        {active === "fade" && !showOriginal && (
+          <div className="compare-fade" onMouseDown={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()}>
+            <span>{label}</span>
+            <input type="range" min={0} max={1} step={0.01} value={fade} onChange={(e) => setFade(parseFloat(e.target.value))} title="Opacity of the original" />
+            <span>{compareLabel}</span>
+            <b>{Math.round(fade * 100)}%</b>
+          </div>
         )}
         {active === "flip" && (
           <button className="compare-flip" onClick={() => setFlipped((f) => !f)} onMouseDown={(e) => e.stopPropagation()} title="Flip (T)">

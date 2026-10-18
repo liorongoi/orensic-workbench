@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fetchPreview, urls } from "../api";
-import { cropBoxOnSource, cropPosition, framingGraph } from "../crop";
+import { cropBoxOnSource, cropPosition, framingGraph, isBoxParam } from "../crop";
 import { bridge, keyOf, onCommand, openWindow, type Command, type OfferedFile } from "../desktop";
 import type {
   AnalysisRun,
@@ -9,6 +9,7 @@ import type {
   Case,
   Catalogue,
   Chain,
+  ChainNode,
   CodecInfo,
   CodecSettings,
   Evidence,
@@ -96,6 +97,11 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
   const [showRemoved, setShowRemoved] = useState(false);
   const [confirm, setConfirm] = useState<{ kind: "evidence" | "chain"; id: string; reason: string } | null>(null);
   const [crop, setCrop] = useState<{ nodeId: string | null } | null>(null);
+  // Crops made by marking a region for a filter, by that filter's step id, so marking again replaces them.
+  const markedCrops = useRef<Record<string, string>>({});
+  useEffect(() => {
+    markedCrops.current = {}; // step ids repeat between chains
+  }, [evId, chainId]);
   // After a crop the viewer shows only the cropped area; this shows the whole image until clicked again.
   const [fullImage, setFullImage] = useState(false);
   // The cropped area of the source, untouched: what the result is compared with once the chain has a crop.
@@ -729,7 +735,80 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
     setView({ kind: "chain" });
     setPicking({ nodeId, param: p.name, count: p.count ?? (p.name === "roi" ? 2 : undefined) });
     setCrop(null);
-    if (draft) edit({ ...draft, nodes: draft.nodes.map((n) => (n.id === nodeId ? { ...n, params: { ...n.params, [p.name]: [] } } : n)) });
+    setFullImage(false);
+    if (!draft) return;
+    // Marking a region again starts from the image without the crop the last marking made.
+    const madeCrop = p.name === "roi" ? markedCropOf(draft, nodeId) : undefined;
+    delete markedCrops.current[nodeId];
+    edit({
+      ...draft,
+      nodes: draft.nodes
+        .filter((n) => n.id !== madeCrop)
+        .map((n) => (n.id === nodeId ? { ...n, params: { ...n.params, [p.name]: [] } } : n)),
+    });
+  };
+
+  /** The crop that marking a region for this step added, if it is still in the chain: the one remembered for it,
+   * else (after a reload) the crop next to it with its note. Never another crop. */
+  const markedCropOf = (g: Graph, nodeId: string): string | undefined => {
+    const idx = g.nodes.findIndex((n) => n.id === nodeId);
+    if (idx < 0) return undefined;
+    const name = filters.find((f) => f.id === g.nodes[idx].filter)?.name ?? g.nodes[idx].filter;
+    const isMarked = (n: ChainNode | undefined) => !!n && n.filter === "geometry.crop" && n.note === `Area marked for ${name}`;
+    const known = g.nodes.find((n) => n.id === markedCrops.current[nodeId]);
+    if (known) return isMarked(known) ? known.id : undefined;
+    if (g.nodes[idx].filter === "stack.stabilise") return isMarked(g.nodes[idx + 1]) ? g.nodes[idx + 1].id : undefined;
+    for (let i = idx - 1; i >= 0; i--) {
+      if (g.nodes[i].filter === "geometry.crop") return isMarked(g.nodes[i]) ? g.nodes[i].id : undefined;
+    }
+    return undefined;
+  };
+
+  /** A box marked on the image for a filter (a region, a light streak). A region of interest also crops the
+   * image to it, so the filter and everything after it work on that area only; "Full image" shows the rest. */
+  const applyBox = ([x, y, w, h]: [number, number, number, number]) => {
+    const target = picking;
+    setPicking(null);
+    if (!target || !draft) return;
+    const idx = draft.nodes.findIndex((n) => n.id === target.nodeId);
+    if (idx < 0) return;
+    const node = draft.nodes[idx];
+    const box = [
+      [x, y],
+      [x + w - 1, y + h - 1],
+    ];
+    if (target.param !== "roi") {
+      edit({ ...draft, nodes: draft.nodes.map((n) => (n.id === node.id ? { ...n, params: { ...n.params, [target.param]: box } } : n)) });
+      return;
+    }
+    const spec = filters.find((f) => f.id === "geometry.crop");
+    const name = filters.find((f) => f.id === node.filter)?.name ?? node.filter;
+    const ids = new Set(draft.nodes.map((n) => n.id));
+    let k = draft.nodes.length + 1;
+    while (ids.has(`n${k}`)) k++;
+    const cropNode = {
+      id: `n${k}`,
+      filter: "geometry.crop",
+      version: spec?.version,
+      params: { x, y, width: w, height: h },
+      enabled: true,
+      note: `Area marked for ${name}`,
+    };
+    let nodes;
+    if (node.filter === "stack.stabilise") {
+      // Stabilising needs the whole frame to move; it tracks the marked area, then the result is cropped to it.
+      nodes = draft.nodes.map((n) => (n.id === node.id ? { ...n, params: { ...n.params, roi: box } } : n));
+      nodes.splice(idx + 1, 0, cropNode);
+    } else {
+      // The filter then works on the marked area only: its region is the whole cropped image.
+      const others = draft.nodes.map((n) => (n.id === node.id ? { ...n, params: { ...n.params, roi: [] } } : n));
+      nodes = [...others];
+      nodes.splice(cropPosition(filters, others, idx), 0, cropNode);
+    }
+    markedCrops.current[node.id] = cropNode.id;
+    setFullImage(false);
+    edit({ ...draft, nodes });
+    setSelected(node.filter === "stack.stabilise" ? cropNode.id : node.id);
   };
 
   const startExtPick = (field: string, count: number, reset: boolean) => {
@@ -753,13 +832,17 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
     if (!picking || !draft) return;
     const node = draft.nodes.find((n) => n.id === picking.nodeId);
     if (!node) return;
-    const pts = [...((node.params[picking.param] as number[][]) ?? []), [Math.round(x), Math.round(y)]];
+    const prev = (node.params[picking.param] as number[][]) ?? [];
+    // A full set (e.g. four corners) starts again rather than growing past what the filter takes.
+    const pts = [...(picking.count && prev.length >= picking.count ? [] : prev), [Math.round(x), Math.round(y)]];
     edit({ ...draft, nodes: draft.nodes.map((n) => (n.id === node.id ? { ...n, params: { ...n.params, [picking.param]: pts } } : n)) });
     if (picking.count && pts.length >= picking.count) setPicking(null);
   };
 
   const pickNode = picking && draft?.nodes.find((n) => n.id === picking.nodeId);
   const pickPoints = (pickNode?.params[picking!.param] as number[][] | undefined) ?? undefined;
+  const pickSpec = pickNode ? filters.find((f) => f.id === pickNode.filter)?.params.find((p) => p.name === picking!.param) : undefined;
+  const pickingBox = isBoxParam(pickSpec);
 
   const evChains = useMemo(() => chains.filter((c) => c.evidence_id === evId), [chains, evId]);
   const evRemovedChains = removedChains.filter((c) => c.evidence_id === evId);
@@ -778,6 +861,14 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
     }
   } else if (showFull && cropBoxOnSource(filters, draft)) {
     overlays.push({ points: cropBoxOnSource(filters, draft)!, color: "#ffcf3f", mode: "rect", label: "crop" });
+  } else if (tab === "enhance" && !picking && draft && selected && draft.nodes.some((x) => x.id === selected)) {
+    // Boxes marked for the selected step (e.g. a light streak), drawn where they were marked.
+    const n = draft.nodes.find((x) => x.id === selected)!;
+    for (const p of filters.find((f) => f.id === n.filter)?.params ?? []) {
+      const v = n.params[p.name] as number[][] | undefined;
+      if (isBoxParam(p) && v?.length === 2) overlays.push({ points: v, color: "#ffcf3f", mode: "rect", label: p.label.replace(/\s*\(.*$/, "") });
+    }
+    if (mpoints.plan_roi?.length) overlays.push({ points: mpoints.plan_roi, color: "#3fe08a", mode: "rect", label: "planner region" });
   } else if (tab === "enhance" && mpoints.plan_roi?.length) {
     overlays.push({ points: mpoints.plan_roi, color: "#3fe08a", mode: "rect", label: "planner region" });
   }
@@ -1021,10 +1112,19 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
           busyLabel={view.kind === "chain" && tab === "enhance" && selName ? `Applying ${selName}` : undefined}
           error={codecOn ? codecInfo.error : view.kind === "chain" ? preview.error : null}
           describe={codecOn ? (x, y) => describeBlock(codecInfo.info, x, y) : undefined}
-          points={picking ? pickPoints : undefined}
-          pickHint={picking ? `Click to place points${picking.count ? ` (${pickPoints?.length ?? 0}/${picking.count})` : ""} · Esc to stop` : crop ? "Drag a box · Shift = square · Esc to cancel" : extHint}
-          onPick={picking || extPick ? onPick : undefined}
-          onRect={crop && preview.url && !preview.busy ? applyCrop : undefined}
+          points={picking && !pickingBox ? pickPoints : undefined}
+          pointsClosed={picking?.param === "points"}
+          pickHint={
+            picking
+              ? pickingBox
+                ? "Drag a box around the area · Esc to cancel"
+                : `Click to place points${picking.count ? ` (${pickPoints?.length ?? 0}/${picking.count})` : ""} · Esc to stop`
+              : crop
+                ? "Drag a box · Shift = square · Esc to cancel"
+                : extHint
+          }
+          onPick={(picking && !pickingBox) || extPick ? onPick : undefined}
+          onRect={crop && preview.url && !preview.busy ? applyCrop : pickingBox && preview.url && !preview.busy ? applyBox : undefined}
           illustrative={view.kind === "chain" && !!draft && draft.nodes.some((n) => n.enabled && filters.find((f) => f.id === n.filter)?.generative)}
           tools={
             ev && ev.media_type !== "container" ? (

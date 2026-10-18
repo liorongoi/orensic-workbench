@@ -259,11 +259,13 @@ Removing evidence is a human action: an AI agent cannot remove or restore eviden
   At 1600 % and above a pixel grid is drawn.
 - **Pixel inspector**: the bar under the image shows the x, y position and the R, G, B values
   of the pixel under the cursor, with a colour swatch.
-- **Compare with the original**: once a chain has steps, three buttons at the top right of the
+- **Compare with the original**: once a chain has steps, four buttons at the top right of the
   viewer put the original next to the result. Click the lit button again to turn it off.
   - **Swipe**: the original on the left, the result on the right; drag the yellow divider.
   - **Side by side**: two panes that zoom and pan together.
   - **Flip**: one image at a time; press **T** or click the label at the bottom to switch.
+  - **Opacity**: the original laid over the result; drag the slider at the bottom from 0 %
+    (result only) to 100 % (original only) to fade between them.
 
   Hold **B** at any time to peek at the original. If the chain changed the image size, the
   original is scaled onto the result so both line up. After a crop, "the original" is the same
@@ -381,10 +383,22 @@ resize changed it. Badges mark steps that use several frames (**multi**), run a 
 
 ### 7.3 Picking points on the image
 
-Some parameters are points: the four corners for perspective correction, a region for
-stabilisation, extra regions for face redaction. When you add such a filter, picking starts
-straight away; otherwise click **Pick on image**, then click on the viewer. The points are numbered as you place them. For a fixed number of points (four corners)
-picking stops by itself; otherwise press **Esc** when done. **Clear** removes them.
+Some parameters are points: the four corners for perspective correction, extra regions for face
+redaction, a motion path for deblurring. When a filter needs points to work (the four corners, the
+blur streaks), picking starts as soon as you add it; otherwise click **Pick on image**, then click
+on the viewer. The points are numbered as you place them. For a fixed number of points (four
+corners) picking stops by itself; otherwise press **Esc** when done. **Clear** removes them.
+
+**Marking an area.** Parameters that are an area (the region of *Deblur (blind)*, *Stabilise /
+register frames* and *Multi-frame super resolution*, the light streak box of *Deblur (Wiener)*)
+have a **Mark area** button: drag a box on the image. For a region, the image is then cropped to the box: a
+**Crop** step is added to the chain (with the note "Area marked for ..."), the viewer zooms to it
+and every filter works on that area only, as with **⛶ Crop** (see 7.5). Use **⤢ Full image** to see
+the whole image again. **Swipe**, **Side by side**, **Flip** and **Opacity** then compare the same
+area of the original. Marking again replaces that crop. *Stabilise* needs the whole frame to move, so it
+keeps the region (it tracks on it) and the crop goes after it; the other filters get the crop in
+front of them, so they work on the marked area only. The light streak box is only a sample of
+the blur and does not crop. It is drawn as a yellow box on the image while the step is selected.
 
 Points are always placed on the image as it enters that step, so the coordinates match what the
 step receives.
