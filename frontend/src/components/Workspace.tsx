@@ -96,7 +96,7 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
   const [showRemoved, setShowRemoved] = useState(false);
   const [confirm, setConfirm] = useState<{ kind: "evidence" | "chain"; id: string; reason: string } | null>(null);
   const [crop, setCrop] = useState<{ nodeId: string | null } | null>(null);
-  // After a crop the viewer shows only the cropped area; this shows the whole frame until clicked again.
+  // After a crop the viewer shows only the cropped area; this shows the whole image until clicked again.
   const [fullImage, setFullImage] = useState(false);
   // The cropped area of the source, untouched: what the result is compared with once the chain has a crop.
   const [framingUrl, setFramingUrl] = useState<string | null>(null);
@@ -1038,7 +1038,7 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
                   ⛶ Crop
                 </button>
                 {framing && view.kind === "chain" && !crop && (
-                  <button className={showFull ? "active" : ""} onClick={() => setFullImage((f) => !f)} title="Show the whole frame, then click again to go back to the cropped area (G)">
+                  <button className={showFull ? "active" : ""} onClick={() => setFullImage((f) => !f)} title="Show the whole image, then click again to go back to the cropped area (G)">
                     {showFull ? "↩ Back to crop" : "⤢ Full image"}
                   </button>
                 )}

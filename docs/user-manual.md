@@ -278,7 +278,7 @@ Removing evidence is a human action: an AI agent cannot remove or restore eviden
 - **▦ MB** (or key **M**, video only): how the encoder coded each block of the frame (see 6.3).
 - **⛶ Crop** (or key **C**): draw a crop box on the image (see 7.5).
 - **⤢ Full image** / **↩ Back to crop** (or key **G**, shown once the chain has a crop): look at
-  the whole frame with the crop box drawn on it, then go back to the cropped area.
+  the whole image with the crop box drawn on it, then go back to the cropped area.
 - **? shortcuts** at the bottom right lists the keyboard shortcuts when you hover it.
 
 The label at the top left says what you are looking at: the result at the selected step, the
@@ -427,7 +427,7 @@ output hash.
    because the box was drawn on their output.
 4. The viewer zooms in to fill the window with the cropped area, and from then on shows only
    that area, including the **Source** row. Click **⤢ Full image** (or press **G**) to see the
-   whole frame with the crop box on it, and **↩ Back to crop** to return.
+   whole image with the crop box on it, and **↩ Back to crop** to return.
 
 To change an existing crop, select its step and click **Draw crop on image**, then drag a new
 box; or edit **X**, **Y**, **Width** and **Height** (0 means to the edge of the image) directly.

@@ -580,7 +580,7 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
         {busy && (
           <div className={src ? "viewer-updating" : "viewer-busy"}>
             <span className="spinner" /> {busyLabel ?? (src ? "Updating" : "Processing")}…{busySecs >= 1 && ` ${busySecs} s`}
-            {busySecs >= 5 && <div className="small">A heavy filter on the whole frame. Crop to the area you need first and it runs much faster.</div>}
+            {busySecs >= 5 && <div className="small">A heavy filter on the whole image. Crop to the area you need first and it runs much faster.</div>}
           </div>
         )}
         {error && <div className="viewer-error">{error}</div>}
