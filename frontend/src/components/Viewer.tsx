@@ -129,7 +129,8 @@ export function Viewer({ src, overlays, compareSrc, compareLabel = "Original", l
     const pw = el.clientWidth / (side ? 2 : 1);
     const w = shown.img.naturalWidth;
     const h = shown.img.naturalHeight;
-    const z = Math.min(pw / w, el.clientHeight / h, 8) * 0.96;
+    // A small crop (a plate, a face) is blown up to fill the pane.
+    const z = Math.min(pw / w, el.clientHeight / h, 32) * 0.96;
     setView({ zoom: z, x: (pw - w * z) / 2, y: (el.clientHeight - h * z) / 2 });
   }, [shown, side]);
 

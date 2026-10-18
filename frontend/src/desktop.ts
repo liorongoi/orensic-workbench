@@ -84,6 +84,7 @@ export type Command =
   | "undo"
   | "redo"
   | "crop"
+  | "full-image"
   | "triage"
   | "fit"
   | "one-to-one"

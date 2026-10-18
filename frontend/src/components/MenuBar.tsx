@@ -42,6 +42,7 @@ export const SHORTCUTS: [string, string][] = [
   ["Ctrl+O", "Add evidence (native Open dialog in the desktop app)"],
   ["Ctrl+Z / Ctrl+Y", "Undo / redo in the chain"],
   ["C", "Crop: drag a box on the image (Shift: square)"],
+  ["G", "After a crop: show the full image, press again to go back to the cropped area"],
   ["F", "Fit the image to the viewer"],
   ["1", "Actual pixels: one image pixel per screen pixel"],
   ["+ / -", "Zoom in / out (or scroll)"],
@@ -182,6 +183,7 @@ export function MenuBar({ caseId, signedIn }: Props) {
       { label: "Redo", keys: "Ctrl+Y", run: () => command("redo"), disabled: !inCase },
       { separator: true, label: "" },
       { label: "Crop", keys: "C", run: () => command("crop"), disabled: !inCase },
+      { label: "Full image / back to crop", keys: "G", run: () => command("full-image"), disabled: !inCase },
     ],
     View: [
       { label: "Fit", keys: "F", run: () => command("fit"), disabled: !inCase },
