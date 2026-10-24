@@ -115,7 +115,39 @@ KINDS: dict[str, Kind] = {
     "report.build": Kind(
         "Report", _case, lambda wb, p, a: build_bundle(wb, p["case_id"], a, verify=p.get("verify", True)),
         _case_needs_gpu, keep_result=False),
+    # Platform operations ---------------------------------------------------------------
+    "video.clip": Kind(
+        "Extract clip", _evidence,
+        lambda wb, p, a: wb.videoops.extract_clip(p["evidence_id"], int(p["start"]), int(p["end"]), a,
+                                                  mode=p.get("mode", "lossless"), audio=p.get("audio", True))),
+    "video.render_chain": Kind(
+        "Render processed video", _chain, lambda wb, p, a: wb.videoops.render_chain_video(p["chain_id"], a, p.get("codec", "ffv1")),
+        _chain_needs_gpu),
+    "video.contact_sheet": Kind(
+        "Contact sheet", _evidence,
+        lambda wb, p, a: wb.videoops.contact_sheet(p["evidence_id"], a, frames=p.get("frames"), count=int(p.get("count", 12)))),
+    "intel.detect": Kind(
+        "Detect and track", _evidence,
+        lambda wb, p, a: wb.intel.run(p["evidence_id"], a, **{k: v for k, v in p.items() if k != "evidence_id"}),
+        lambda wb, p: True),
+    "redaction.render": Kind(
+        "Render redaction", lambda wb, p: _doc(wb, p),
+        lambda wb, p, a: wb.redaction.render(p["doc_id"], a, p.get("codec", "h264")), lambda wb, p: True),
+    "sync.correlate": Kind(
+        "Synchronise recordings", _evidence,
+        lambda wb, p, a: wb.sync.sync_correlate(p["evidence_id"], p["reference_id"], a, signal=p.get("signal", "audio"),
+                                                max_lag_s=float(p.get("max_lag_s", 30)), distance_m=p.get("distance_m"))),
+    "case.export": Kind(
+        "Export package", _case,
+        lambda wb, p, a: wb.casework.export_package(
+            p["case_id"], a, evidence_ids=p.get("evidence_ids"), chain_ids=p.get("chain_ids"),
+            include_report=p.get("include_report", False), purpose=p.get("purpose", ""), recipient=p.get("recipient", ""))[1]),
 }
+
+
+def _doc(wb, p):
+    d = wb.redaction.get(p["doc_id"])
+    return d["case_id"], d["id"], d["name"]
 
 
 def _env_int(name: str, default: int) -> int:

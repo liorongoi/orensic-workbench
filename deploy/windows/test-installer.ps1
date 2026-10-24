@@ -81,6 +81,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "self-test failed" }
     if (-not (Get-ChildItem "$Data\logs\selftest-*.txt")) { throw "self-test log not written to the case data folder" }
 
+    Step "Command line (lucida.cmd): profile and verify"
+    & "$App\lucida.cmd" profile
+    if ($LASTEXITCODE -ne 0) { throw "lucida profile failed" }
+    & "$App\lucida.cmd" verify
+    if ($LASTEXITCODE -ne 0) { throw "lucida verify failed" }
+
     Step "Starting Lucida"
     $out = "$Root\server.out.txt"; $err = "$Root\server.err.txt"
     $server = Start-Process -PassThru -FilePath $py -ArgumentList "-B", "-X", "utf8", "`"$launcher`"", "run", "--no-browser" `

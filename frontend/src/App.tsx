@@ -1,10 +1,11 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { api, setExaminer } from "./api";
+import { api, auth, setExaminer, type AuthStatus } from "./api";
 import { CaseList } from "./components/CaseList";
 import { JobQueue } from "./components/JobQueue";
 import { ExaminerMenu } from "./components/ExaminerMenu";
 import { MenuBar } from "./components/MenuBar";
 import { Workspace } from "./components/Workspace";
+import { AccountMenu, SignIn } from "./components/SignIn";
 import type { AnalysisSchema, FilterSchema, User } from "./types";
 import logo from "./assets/lucida.svg";
 import { readHelpHash } from "./help";
@@ -30,21 +31,42 @@ export default function App() {
   const [analyses, setAnalyses] = useState<AnalysisSchema[]>([]);
   const [caseName, setCaseName] = useState("");
   const [help, setHelp] = useState(readHelpHash() !== null);
+  const [authState, setAuthState] = useState<AuthStatus | null>(null);
 
   const named = (u: User) => {
     setExaminer(u.full_name);
     setMe(u);
   };
 
+  // By default there is no sign-in: the app opens straight away as the built-in local examiner.
+  // A shared server (FORENSIC_AUTH=accounts) asks people to sign in first.
+  const start = () =>
+    auth
+      .status()
+      .then((s) => {
+        setAuthState(s);
+        if (s.mode === "none") return api.me().then(named);
+        if (s.user) named(s.user);
+        else setMe(null);
+      })
+      .catch((e) => setLoadError((e as Error).message));
+
   useEffect(() => {
-    // No sign-in: the app opens straight away as the built-in local examiner.
-    api.me().then(named).catch((e) => setLoadError((e as Error).message));
+    start();
+    const signedOut = () => {
+      setMe(null);
+      start();
+    };
+    window.addEventListener("lucida-signed-out", signedOut);
     const onHash = () => {
       setCaseId(readHash());
       setHelp(readHelpHash() !== null);
     };
     window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
+    return () => {
+      window.removeEventListener("hashchange", onHash);
+      window.removeEventListener("lucida-signed-out", signedOut);
+    };
   }, []);
 
   useEffect(() => {
@@ -78,6 +100,8 @@ export default function App() {
     );
   }
 
+  if (!me && authState?.mode === "accounts")
+    return <SignIn needsSetup={!!authState.needs_setup} onSignedIn={(u) => { named(u); setAuthState({ ...authState, needs_setup: false, user: u }); }} />;
   if (!me) return <p className="loading muted">{loadError ? `Lucida could not start: ${loadError}` : "Loading…"}</p>;
 
   return (
@@ -91,7 +115,11 @@ export default function App() {
         {caseId && <span className="crumb">/ {caseName}</span>}
         <span className="spacer" />
         <JobQueue me={me} />
-        <ExaminerMenu me={me} onRenamed={named} />
+        {authState?.mode === "accounts" ? (
+          <AccountMenu me={me} onSignedOut={() => { setMe(null); start(); }} />
+        ) : (
+          <ExaminerMenu me={me} onRenamed={named} />
+        )}
       </header>
       {caseId ? (
         <Workspace key={caseId} caseId={caseId} filters={filters} analyses={analyses} {...readHashOptions()} />

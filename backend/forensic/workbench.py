@@ -41,6 +41,21 @@ class Workbench:
         self.frames = media.FrameCache(compute.frame_cache_budget())
         self._blocks: "OrderedDict[tuple[str, int], dict]" = OrderedDict()
         self._blocks_lock = threading.Lock()
+        # v0.4 services: each keeps its own tables and audits through this workbench.
+        from .casework import Casework
+        from .intel import Intelligence
+        from .redaction import Redaction
+        from .sync import MultiCamera
+        from .videoops import VideoOps
+
+        self.casework = Casework(self)
+        self.videoops = VideoOps(self)
+        self.redaction = Redaction(self)
+        self.sync = MultiCamera(self)
+        self.intel = Intelligence(self)
+        from .batch import Batch
+
+        self.batch = Batch(self)
 
     # Environment ----------------------------------------------------------
 
@@ -82,34 +97,55 @@ class Workbench:
 
     # Cases --------------------------------------------------------------------
 
-    def create_case(self, name: str, examiner: str, actor: Actor, notes: str = "") -> dict:
+    def create_case(self, name: str, examiner: str, actor: Actor, notes: str = "", *, case_number: str = "",
+                    legal_authority: str = "", description: str = "", parent_id: str | None = None) -> dict:
         name, examiner = name.strip(), examiner.strip()
         if not name or not examiner:
             raise ValueError("case name and examiner are required")
+        if parent_id:
+            self.get_case(parent_id)
+        case_number = case_number.strip()[:120]
+        if case_number and self.db.one("SELECT id FROM cases WHERE case_number = ? AND parent_id IS ?",
+                                       (case_number, parent_id)):
+            raise ValueError(f"case number {case_number} is already in use")
         cid = new_id()
         self.db.execute(
-            "INSERT INTO cases (id, name, examiner, notes, created_at) VALUES (?,?,?,?,?)",
-            (cid, name, examiner, notes, now_iso()),
+            "INSERT INTO cases (id, name, examiner, notes, created_at, case_number, legal_authority, description, parent_id)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            (cid, name, examiner, notes, now_iso(), case_number, legal_authority.strip()[:2000],
+             description.strip()[:5000], parent_id),
         )
-        self.audit.append(actor, "case.create", case_id=cid, target=cid, params={"name": name, "examiner": examiner})
+        self.audit.append(actor, "case.create", case_id=cid, target=cid,
+                          params={"name": name, "examiner": examiner, "case_number": case_number,
+                                  "legal_authority": legal_authority.strip()[:2000], "parent_id": parent_id})
         return self.get_case(cid)
 
     def list_cases(self) -> list[dict]:
-        return self.db.all(
+        rows = self.db.all(
             "SELECT c.*, (SELECT COUNT(*) FROM evidence e WHERE e.case_id = c.id AND e.removed_json IS NULL) AS evidence_count "
             "FROM cases c ORDER BY created_at DESC"
         )
+        for row in rows:
+            for k in ("legal_hold_json", "disposed_json"):
+                v = row.pop(k, None)
+                row[k[:-5]] = json.loads(v) if v else None
+        return rows
 
     def get_case(self, case_id: str) -> dict:
         row = self.db.one("SELECT * FROM cases WHERE id = ?", (case_id,))
         if not row:
             raise NotFound(f"case {case_id} not found")
+        for k in ("legal_hold_json", "disposed_json"):
+            v = row.pop(k, None)
+            row[k[:-5]] = json.loads(v) if v else None
         return row
 
     # Evidence -------------------------------------------------------------------
 
-    def ingest(self, case_id: str, src: BinaryIO, filename: str, actor: Actor) -> dict:
-        self.get_case(case_id)
+    def ingest(self, case_id: str, src: BinaryIO, filename: str, actor: Actor, source: dict | None = None) -> dict:
+        case = self.get_case(case_id)
+        if case.get("disposed"):
+            raise ValueError("this case has been disposed of; it cannot receive new evidence")
         stored = self.store.ingest(src, filename)
         with open(stored["path"], "rb") as f:
             identified = formats.sniff(f.read(1 << 16))
@@ -130,26 +166,39 @@ class Workbench:
                     "width": 0, "height": 0, "frame_count": 0, "probe_error": str(e)[-500:]}
         if info["media_type"] == "video" or info["media_type"] == "container":
             info["identified"] = identified
-        return self._insert_evidence(case_id, filename, stored, info, actor)
+        return self._insert_evidence(case_id, filename, stored, info, actor, source=source)
 
     def _insert_evidence(self, case_id: str, filename: str, stored: dict, info: dict, actor: Actor,
-                         derived_from: str | None = None, conversion: dict | None = None) -> dict:
+                         derived_from: str | None = None, conversion: dict | None = None,
+                         source: dict | None = None) -> dict:
         eid = new_id()
         self.db.execute(
             "INSERT INTO evidence (id, case_id, filename, sha256, md5, size, media_type, stored_path,"
-            " probe_json, ingested_by, ingested_at, derived_from, conversion_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " probe_json, ingested_by, ingested_at, derived_from, conversion_json, sha512, source_json)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 eid, case_id, Path(filename).name, stored["sha256"], stored["md5"], stored["size"],
                 info["media_type"], str(stored["path"]), json.dumps(info), actor.label, now_iso(),
-                derived_from, json.dumps(conversion) if conversion else None,
+                derived_from, json.dumps(conversion) if conversion else None, stored.get("sha512"),
+                canonical_json(source) if source else None,
             ),
         )
         params = {"filename": Path(filename).name, "sha256": stored["sha256"], "md5": stored["md5"], "size": stored["size"],
                   "media_type": info["media_type"]}
+        if stored.get("sha512"):
+            params["sha512"] = stored["sha512"]
+        if source:
+            params["source"] = source
         if derived_from:
             params.update(derived_from=derived_from, conversion=conversion)
         self.audit.append(actor, "evidence.convert" if derived_from else "evidence.ingest", case_id=case_id,
                           target=eid, params=params, output_hash=stored["sha256"])
+        self.casework.custody_event(case_id, eid, "derived" if derived_from else "acquired", actor,
+                                    notes=(conversion or {}).get("method", "") if derived_from else "",
+                                    details={"sha256": stored["sha256"], "sha512": stored.get("sha512"),
+                                             "size": stored["size"], "filename": Path(filename).name,
+                                             **({"source": source} if source else {}),
+                                             **({"derived_from": derived_from} if derived_from else {})})
         return self.get_evidence(eid)
 
     def convert_evidence(self, evidence_id: str, method: str, actor: Actor, frame_rate: float = 25.0,
@@ -182,9 +231,12 @@ class Workbench:
         record["output_sha256"] = stored["sha256"]
         return self._insert_evidence(row["case_id"], name, stored, info, actor, derived_from=evidence_id, conversion=record)
 
-    def ingest_path(self, case_id: str, path: Path, actor: Actor) -> dict:
+    def ingest_path(self, case_id: str, path: Path, actor: Actor, source: dict | None = None) -> dict:
+        st = path.stat()
+        src = {"kind": "local path", "path": str(path), "modified": datetime.fromtimestamp(st.st_mtime).astimezone().isoformat(),
+               **(source or {})}
         with open(path, "rb") as f:
-            return self.ingest(case_id, f, path.name, actor)
+            return self.ingest(case_id, f, path.name, actor, source=src)
 
     def _evidence_row(self, evidence_id: str) -> dict:
         row = self.db.one("SELECT * FROM evidence WHERE id = ?", (evidence_id,))
@@ -248,12 +300,25 @@ class Workbench:
 
     def verify_evidence(self, evidence_id: str, actor: Actor) -> dict:
         row = self._evidence_row(evidence_id)
-        res = self.store.verify(Path(row["stored_path"]), row["sha256"])
+        res = self.store.verify(Path(row["stored_path"]), row["sha256"], row.get("sha512"))
         res["expected_sha256"] = row["sha256"]
+        res["checked_at"] = now_iso()
         self.audit.append(
             actor, "evidence.verify", case_id=row["case_id"], target=evidence_id,
-            params={"ok": res["ok"], "read_only": res["read_only"]}, output_hash=res["sha256"],
+            params={"ok": res["ok"], "read_only": res["read_only"], "sha512_checked": bool(row.get("sha512"))},
+            output_hash=res["sha256"],
         )
+        self.casework.custody_event(row["case_id"], evidence_id, "verified", actor,
+                                    details={"ok": res["ok"], "sha256": res["sha256"]})
+        if not res["ok"]:
+            # Never silently replace or ignore: a visible alert on the item and its own audit entry.
+            alert = {"ok": False, "at": res["checked_at"], "by": actor.name, "found_sha256": res["sha256"],
+                     "expected_sha256": row["sha256"], "missing": bool(res.get("missing"))}
+            self.db.execute("UPDATE evidence SET integrity_json = ? WHERE id = ?", (canonical_json(alert), evidence_id))
+            self.audit.append(actor, "evidence.integrity_failure", case_id=row["case_id"], target=evidence_id, params=alert)
+        else:
+            self.db.execute("UPDATE evidence SET integrity_json = ? WHERE id = ?",
+                            (canonical_json({"ok": True, "at": res["checked_at"], "by": actor.name}), evidence_id))
         return res
 
     def frame_table(self, evidence_id: str) -> list[dict]:
@@ -900,6 +965,9 @@ def formats_is_jpeg(path: Path) -> bool:
 
 def _public_evidence(row: dict) -> dict:
     row["probe"] = json.loads(row.pop("probe_json"))
+    for k in ("source_json", "integrity_json"):
+        v = row.pop(k, None)
+        row[k[:-5]] = json.loads(v) if v else None
     conv = row.pop("conversion_json", None)
     row["conversion"] = json.loads(conv) if conv else None
     row.pop("stored_path")

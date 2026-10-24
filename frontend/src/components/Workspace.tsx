@@ -25,6 +25,7 @@ import { AuditPanel } from "./AuditPanel";
 import { AuthPanel } from "./AuthPanel";
 import { ChainEditor } from "./ChainEditor";
 import { ConvertPanel, RecorderTimingPanel } from "./ConvertPanel";
+import { BatchPanel, CasePanel, IntelPanel, VideoPanel } from "./PlatformPanels";
 import { CODEC_VIEW_CODECS, CodecBar, describeBlock } from "./CodecBar";
 import { FrameStrip } from "./FrameStrip";
 import { MEASURE_FIELDS, MeasurePanel, type PointFields } from "./MeasurePanel";
@@ -48,8 +49,12 @@ const clampWidths = (w: Widths): Widths => ({
   right: Math.round(Math.min(760, Math.max(280, w.right))),
 });
 
-type Tab = "enhance" | "authenticate" | "measure" | "audit";
-const TAB_LABEL: Record<Tab, string> = { enhance: "Enhance", authenticate: "Authenticate", measure: "Measure", audit: "Audit & review" };
+type Tab = "enhance" | "authenticate" | "measure" | "video" | "intel" | "case" | "audit";
+const TABS: Tab[] = ["enhance", "authenticate", "measure", "video", "intel", "case", "audit"];
+const TAB_LABEL: Record<Tab, string> = {
+  enhance: "Enhance", authenticate: "Authenticate", measure: "Measure", video: "Video & sync", intel: "Detect & redact",
+  case: "Case", audit: "Audit & review",
+};
 type ExtPick = { field: string; count: number };
 
 const PROPRIETARY = new Set([
@@ -115,6 +120,22 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
       return { left: false, right: false };
     }
   });
+  // Where the tools (algorithm) panel sits. Left is the default: examiners work from the
+  // filter and analysis lists while the evidence list stays out of the way on the right.
+  const [toolsLeft, setToolsLeft] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("toolsSide") !== "right";
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("toolsSide", toolsLeft ? "left" : "right");
+    } catch {
+      /* storage unavailable: the choice lasts for this window only */
+    }
+  }, [toolsLeft]);
   // Panel widths, dragged on the splitters and kept between sessions.
   const [widths, setWidths] = useState<Widths>(() => {
     try {
@@ -436,6 +457,15 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
       case "tab-audit":
         showTab("audit");
         break;
+      case "tab-video":
+        showTab("video");
+        break;
+      case "tab-intel":
+        showTab("intel");
+        break;
+      case "tab-case":
+        showTab("case");
+        break;
     }
   };
   useEffect(() => onCommand((c) => commands.current(c)), []);
@@ -471,7 +501,8 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
     const x0 = e.clientX;
     const w0 = widths;
     const move = (m: PointerEvent) => {
-      const dx = m.clientX - x0;
+      // With the tools panel on the left the two panels swap sides, so dragging works the other way.
+      const dx = (m.clientX - x0) * (toolsLeft ? -1 : 1);
       setWidths(clampWidths(side === "left" ? { ...w0, left: w0.left + dx } : { ...w0, right: w0.right - dx }));
     };
     const up = () => {
@@ -957,7 +988,7 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
 
   return (
     <div
-      className={`workspace${collapsed.left ? " no-left" : ""}${collapsed.right ? " no-right" : ""}`}
+      className={`workspace${toolsLeft ? " tools-left" : ""}${collapsed.left ? " no-left" : ""}${collapsed.right ? " no-right" : ""}`}
       style={{ "--left-w": `${widths.left}px`, "--right-w": `${widths.right}px` } as React.CSSProperties}
     >
       {!collapsed.left && (
@@ -968,7 +999,7 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
       )}
       {collapsed.left ? (
         <button className="rail left-rail" onClick={() => setCollapsed((c) => ({ ...c, left: false }))} title="Show evidence">
-          ›
+          {toolsLeft ? "‹" : "›"}
         </button>
       ) : (
         <aside
@@ -994,7 +1025,7 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
               + Add
             </button>
             <button className="icon" onClick={() => setCollapsed((c) => ({ ...c, left: true }))} title="Hide panel">
-              ‹
+              {toolsLeft ? "›" : "‹"}
             </button>
             <input ref={fileInput} type="file" multiple hidden onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
           </div>
@@ -1166,12 +1197,12 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
 
       {collapsed.right ? (
         <button className="rail right-rail" onClick={() => setCollapsed((c) => ({ ...c, right: false }))} title="Show tools">
-          ‹
+          {toolsLeft ? "›" : "‹"}
         </button>
       ) : (
       <aside className="right">
         <div className="tabs">
-          {(["enhance", "authenticate", "measure", "audit"] as Tab[]).map((t) => (
+          {TABS.map((t) => (
             <button
               key={t}
               className={tab === t ? "active" : ""}
@@ -1184,8 +1215,12 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
               {TAB_LABEL[t]}
             </button>
           ))}
+          <button className="icon tab-swap" onClick={() => setToolsLeft((v) => !v)}
+            title={toolsLeft ? "Move the tools panel to the right" : "Move the tools panel to the left"}>
+            ⇄
+          </button>
           <button className="icon tab-hide" onClick={() => setCollapsed((c) => ({ ...c, right: true }))} title="Hide panel">
-            ›
+            {toolsLeft ? "‹" : "›"}
           </button>
         </div>
         <div className="tab-body">
@@ -1376,8 +1411,27 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
               }}
             />
           )}
+          {(tab === "video" || tab === "intel" || tab === "case") && (() => {
+            const common = {
+              caseId, ev: ev ?? null, evidence, frame,
+              onEvidence: async (c: Evidence) => {
+                const d = await reload();
+                selectEvidence(c.id, d.chains);
+                setAuditKey((k) => k + 1);
+              },
+              onChanged: () => setAuditKey((k) => k + 1),
+            };
+            if (tab === "video") return ev && ev.media_type !== "container" ? <VideoPanel key={ev.id} {...common} /> : null;
+            if (tab === "intel") return ev && ev.media_type !== "container" ? <IntelPanel key={ev.id} {...common} /> : null;
+            return (
+              <>
+                <CasePanel {...common} />
+                <BatchPanel caseId={caseId} />
+              </>
+            );
+          })()}
           {tab === "audit" && <AuditPanel caseId={caseId} refreshKey={auditKey} onChanged={() => setAuditKey((k) => k + 1)} />}
-          {!ev && tab !== "audit" && <p className="muted">Add evidence to begin.</p>}
+          {!ev && tab !== "audit" && tab !== "case" && <p className="muted">Add evidence to begin.</p>}
           {tab !== "enhance" && status && <p className={`status ${status.kind}`}>{status.text}</p>}
         </div>
       </aside>

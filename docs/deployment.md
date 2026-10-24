@@ -1,5 +1,16 @@
 # Deployment
 
+Lucida comes in two forms, from the same code and the same installer:
+
+| | Desktop app | Web app (office server) |
+|---|---|---|
+| Who uses it | One examiner on their own workstation | Several examiners from their own PCs, in a browser |
+| How it runs | **Start > Lucida** opens Lucida in its own window; nothing listens on the network | One machine runs Lucida; examiners open `https://<server name>:<port>` in Edge or Chrome |
+| Install | The Windows installer below, defaults | The Windows installer with **Let examiners connect from other PCs** ticked, then `auth = accounts` in `workbench.ini` ([Sign-in](#sign-in-for-a-shared-server)); or the [container](#container) on a Linux server |
+| Sign-in | None: one examiner, named at the top right | Accounts with roles, and per-case membership |
+
+Both keep evidence on the machine Lucida runs on, and neither sends anything outside it.
+
 ## Windows (offline installer)
 
 `Lucida-<version>-Setup.exe` installs everything Lucida needs on a
@@ -126,8 +137,9 @@ the RAM caches. On a workstation with an RTX A4000 (16 GB) and 48 to 128 GB of R
 
 ## Several examiners
 
-Lucida has no sign-in. Every request acts as one built-in local examiner, and every action is
-recorded in the audit log under that examiner's name. The name starts as the computer account's
+By default Lucida has no sign-in (for sign-in on a shared server, see
+[Sign-in for a shared server](#sign-in-for-a-shared-server)). Every request then acts as one
+built-in local examiner, and every action is recorded in the audit log under that examiner's name. The name starts as the computer account's
 full name (or `FORENSIC_EXAMINER`, if set before the first start) and is changed by clicking it
 at the top right; the change is audited.
 
@@ -163,8 +175,9 @@ Lucida then:
   or `certutil -addstore Root workbench-ca.crt` as administrator), after comparing its SHA-256
   fingerprint with the one Lucida window prints. A lab with its own certificate sets
   `tls_cert` and `tls_key` in `workbench.ini` instead;
-- answers only the computer's own names and addresses (the Host check). There is no sign-in, so
-  anyone who can reach the address can use Lucida; turn this on only on a trusted lab network;
+- answers only the computer's own names and addresses (the Host check). Without sign-in, anyone
+  who can reach the address can use Lucida, so on a shared network also turn on
+  [sign-in](#sign-in-for-a-shared-server);
 - on an all-users install, opens its port in Windows Firewall for domain and private networks
   only (never public); uninstalling removes the rule. On a per-user install Windows asks the
   first time Lucida starts.
@@ -172,6 +185,52 @@ Lucida then:
 MCP servers started with `--http` and a `--host` other than loopback refuse to start unless
 `FORENSIC_MCP_TOKEN` holds a random secret of at least 24 characters; every agent request must
 then send `Authorization: Bearer <token>`.
+
+### Sign-in for a shared server
+
+With several people on one server, turn sign-in on: add `auth = accounts` to `workbench.ini`
+(or set `FORENSIC_AUTH=accounts` for the container) and restart Lucida. Then:
+
+1. The first person to open Lucida creates the **administrator** (user name, full name, password of
+   at least 12 characters).
+2. The administrator opens **their name > Users…** at the top right and adds each examiner with a
+   role: **admin** (everything, every case, user management), **examiner** (works on cases they are
+   a member of), **reviewer** (reads member cases and records review decisions, notes and bookmarks)
+   or **viewer** (reads member cases only).
+3. In each case, **Case > Who can open this case** lists the members; the administrator adds and
+   removes them. A case an examiner creates is theirs automatically.
+
+Sessions end after 30 minutes without use (`session_minutes` in `workbench.ini`, or
+`FORENSIC_SESSION_MINUTES`) and after 12 hours at most. Five wrong passwords lock an account for
+15 minutes; the administrator can reset a password, which also ends that person's sessions. Every
+action is recorded under the signed-in person's name, and refused requests are recorded too.
+Passwords are stored as scrypt hashes. On the lab network, Lucida only listens over HTTPS, so
+passwords never cross the network in clear.
+
+## Command line: batch conversion, verification, backup
+
+The `lucida` command works on the same data folder without the browser. On Windows it is
+`lucida.cmd` in the installation folder (it uses the installation's settings, Python and FFmpeg);
+where Lucida was installed with pip, `lucida` is on the PATH.
+
+```bash
+lucida profile                                  # hardware profile in use
+lucida batch scan D:\export                     # what each file is
+lucida batch run --input D:\export --output E:\converted --format copy
+lucida verify                                   # re-hash every original, check the audit log
+lucida backup --output F:\lucida.backup --encrypt   # password from LUCIDA_BACKUP_PASSWORD or a prompt
+lucida restore F:\lucida.backup --target D:\restored
+```
+
+Exit codes: 0 success, 1 partly succeeded, 2 usage error, 3 failed. A backup is consistent while
+Lucida runs (SQLite online backup) and lists every file's SHA-256; `--encrypt` uses AES-256-GCM with
+a key derived from the password by scrypt. A restore writes only into an empty folder and, before
+reporting success, checks every file against the backup's list, re-hashes every original and
+verifies the audit chain. Keep backups on separate media and test a restore now and then.
+
+`profile = light|standard|high` in `workbench.ini` (or `FORENSIC_PROFILE`) fixes the hardware
+profile used for detection, plate reading and batch conversion; by default it is chosen from the
+processor, memory and graphics card.
 
 ## Container
 

@@ -32,7 +32,13 @@ Contents
 19. [Built-in agents: triage, planner, reviewer](#19-built-in-agents-triage-planner-reviewer)
 20. [How detector accuracy is measured](#20-how-detector-accuracy-is-measured)
 21. [Performance, determinism and the job queue](#21-performance-determinism-and-the-job-queue)
-22. [References](#22-references)
+22. [Case work: custody, duplicates, search, export packages](#22-case-work-custody-duplicates-search-export-packages--forensiccaseworkpy)
+23. [Video operations](#23-video-operations--forensicvideoopspy)
+24. [Multi-camera synchronisation](#24-multi-camera-synchronisation--forensicsyncpy)
+25. [Detection, tracking and licence plates](#25-detection-tracking-and-licence-plates--forensicintel)
+26. [Redaction and verification](#26-redaction-and-verification--forensicredactionpy)
+27. [Batch conversion, command line, hardware profiles and sign-in](#27-batch-conversion-command-line-hardware-profiles-and-sign-in)
+28. [References](#28-references)
 
 ---
 
@@ -1675,7 +1681,229 @@ the name they were made under.
 
 ---
 
-## 22. References
+## 22. Case work: custody, duplicates, search, export packages — `forensic/casework.py`
+
+**Chain of custody.** Every acquisition, verification, transfer, access (download of an original),
+export and disposal is a custody event, kept in its own table and also written to the
+hash-chained audit log. Examiners record transfers by hand (from, to, location, note). The custody
+report for one item is therefore a plain query, and the audit log still proves it was not edited.
+
+**Exact and near duplicates.** Exact duplicates share a SHA-256. Near duplicates use a 64-bit
+DCT perceptual hash (Zauner 2010): the picture is reduced to 32×32 grey, transformed by a 2-D DCT,
+and the top-left 8×8 coefficients are compared with their median (the DC term is left out of the
+median). Two items are reported as a pair when their hashes differ in at most 8 of 64 bits; a
+video is represented by its middle frame. The hash survives rescaling and recompression but not
+cropping or rotation. A pair is a lead to compare, never a finding.
+
+**Search.** Full-text over case details, filenames, hashes, tags, bookmarks, recorder fields and
+metadata. Every search is audited, because searches over people and plates are sensitive.
+
+**Export package.** A ZIP of the chosen originals (re-verified first) and rendered outputs, with
+`manifest.json` listing every file's SHA-256 and SHA-512, its source and the operation that made
+it. Members are written sorted with fixed timestamps, so the same selection gives byte-identical
+member files; only the manifest (who and when) differs between two packages. `verify_package`
+lets the recipient check a package against its own manifest.
+
+**Retention, legal hold and disposal.** A case can carry a retention date and a legal hold.
+Disposal needs an administrator, no hold, a passed retention date, and the case number typed as
+confirmation. Originals no other case uses are deleted; rows, hashes, custody and the audit log
+are kept, so the disposal itself stays provable.
+
+**Branches and presets.** A chain can be forked at any step (the parent is recorded), and a
+chain's steps can be saved as a named preset and applied to other items; the preset's filter
+versions are pinned like any chain.
+
+| Alternative | Why not |
+|---|---|
+| Average hash or difference hash for near duplicates | Less robust to recompression than the DCT hash for the same cost. |
+| Learned image embeddings | A model to validate and pin for a triage aid; the DCT hash is explainable in one sentence. |
+| Deleting the whole case on disposal | Destroys the record that the disposal was authorised. |
+
+## 23. Video operations — `forensic/videoops.py`
+
+**Clips.** Three modes, each recorded with the frames requested and the frames delivered:
+*copy* (stream copy, cut at key frames, so the clip can start earlier than asked and the record
+says so), *lossless* (FFV1, frame-exact) and *h264* (CRF 16, frame-exact, for easy playback).
+
+**Scene changes and repeated frames.** For each pair of consecutive frames: the histogram
+distance (half the L1 distance of 64-bin grey histograms, 0–1) and the mean absolute difference
+on a 160-pixel-wide luma copy. A scene change is a distance above the threshold; a repeated frame
+is a difference below the tolerance (grey levels). Both are leads for review.
+
+**Compare.** MSE, PSNR, SSIM (Wang et al. 2004, Gaussian window σ = 1.5 on luma), histogram
+correlation and an absolute-difference map. With *align*, the second image is first registered
+to the first by ECC (affine) and the transform is reported.
+
+**Concatenate, sequence to video, processed video.** Recordings are joined by stream copy only
+when codec, size, pixel format and rate all match; otherwise each is re-encoded to FFV1 first and
+the record says so. A still sequence becomes one frame per image at a stated constant rate. A
+chain's processed frame range is encoded at the source rate; the record states whether frames
+were dropped, duplicated or generated. Timestamps and audio are never changed silently.
+
+**Audio/video timing.** Each stream's start time and duration from the container, and the
+audio-to-video start offset.
+
+## 24. Multi-camera synchronisation — `forensic/sync.py`
+
+Synchronisation never edits media. It records how a recording's own frame time maps onto one
+case timeline:
+
+    T = offset + t_local · (1 + drift_ppm · 10⁻⁶)
+
+where t_local is the frame's time measured from the recording's first frame. Every record keeps
+the method, its evidence and an uncertainty, and earlier records stay in the history.
+
+| Method | How | Uncertainty recorded |
+|---|---|---|
+| Reference | One recording anchors the timeline (optionally to a wall-clock time). | As entered. |
+| Manual | The examiner enters an offset and the basis for it. | As entered. |
+| On-screen clock | The clock time read on a frame anchors the recording. | The clock's resolution (for example ±1 s). |
+| One event | The same event (a flash, a door) on frame *a* here and frame *b* in a synchronised recording. | One frame of each recording. |
+| Two events | Two matched events give offset and drift (rate error). | One frame of each, propagated. |
+| Audio | Cross-correlation of audio envelopes (16 kHz mono, rectified, averaged to 1 ms, slow level changes removed with a 0.5 s moving average). | The 1 ms step, combined with the reference's; plus distance ÷ 343 m/s when the examiner enters a microphone distance difference. |
+| Brightness | Cross-correlation of the frame-to-frame change in mean brightness, resampled to 100 Hz on the frames' own times. | The 10 ms step, combined with the reference's. |
+
+Before correlating audio, the envelope is shifted so that sample 0 is at the first video frame's
+time, using each stream's start time from the container. Without that, a file whose audio starts
+later than its video (common) is out by that delay; the test report found an 11 ms error from
+this and it is now covered by a test.
+
+A correlation peak is *strong* when it is at least 1.5 times the next-best peak outside the main
+lobe; a weak result must be confirmed by an event. The synchronised view shows the frame of every
+camera nearest to one case time, with each camera's offset and uncertainty printed on it.
+
+| Alternative | Why not |
+|---|---|
+| Trust the recorders' clocks | DVR clocks are routinely minutes off and drift. |
+| Rewrite timestamps in the files | Changes evidence; the mapping is enough and is reversible. |
+| Generalised cross-correlation (GCC-PHAT) for audio | Sharper peaks, but more sensitive to reverberation differences between cameras; the envelope method is simpler to explain. A candidate for a later version. |
+
+## 25. Detection, tracking and licence plates — `forensic/intel/`
+
+These produce **investigative leads**. Every detection, track and plate reading is stored with
+the model, its weights hash, the settings, the hardware profile and the frame it came from, and
+starts *unreviewed*.
+
+**Detection.** YOLOX (Apache-2.0, COCO classes) through ONNX Runtime on hash-verified weights.
+The size (nano, tiny, s) and the frame sampling come from the hardware profile (§27); the run
+records which was used.
+
+**Tracking.** SORT-style tracking by detection (Bewley et al. 2016), deterministic: each track
+keeps a constant-velocity estimate of its box (alpha-beta filter, α = 0.6, β = 0.2); predicted
+boxes are matched to new detections of the same class greedily by IoU (highest first, at least
+0.25). Unmatched detections start tracks; a track unmatched for more than 8 processed frames ends;
+tracks with fewer than 3 detections are dropped. Tracking runs on video only; a still image gives
+detections without tracks. A track number is not an identity: the examiner merges and splits
+tracks and can add boxes by hand.
+
+**Licence plates.**
+
+1. *Localise*: two proposers, character grouping (character-sized components lined up
+   horizontally, dark-on-light and light-on-dark) and the morphological black-hat + horizontal
+   gradient + closing finder. Candidates are scored on character count and aspect ratio. In a
+   detection run, plates are searched in the lower part of each vehicle box (from 30 % of its
+   height down), on the frames where that vehicle is largest, upscaled to the profile's size.
+   A plate the finder misses can be marked by hand (four corners) and is read the same way.
+2. *Rectify*: the four corners are mapped to a fronto-parallel rectangle 64 px high.
+3. *Read*: Tesseract on several binarisations and scales; every distinct reading is kept with its
+   confidence and how many variants produced it. No character whitelist.
+4. *Format rules*: readings are checked against per-country regular expressions. A reading that
+   fits only after swapping commonly confused characters (0/O, 1/I, 5/S, 8/B, 2/Z, 6/G) is added
+   as a separate, lower-confidence, *format-adjusted* candidate.
+
+Nothing confirms a plate except an examiner: confirm, correct (the machine reading is kept) or
+reject. Plate search accepts `*` and `?` wildcards and matches the reviewed text, the machine's
+best reading and the alternatives, and says which one matched. In the test report a clear
+synthetic plate was read correctly; a real UK plate about 60 px wide and a motion-blurred plate
+were not, and stayed in the review queue.
+
+| Alternative | Why not |
+|---|---|
+| A cloud ALPR service | Sends plates and case material outside the lab. |
+| Accepting the top OCR reading automatically | Turns an uncertain reading into a "fact"; the review step is the point. |
+| Kalman filter and Hungarian matching | Little gain at CCTV frame rates for this purpose; greedy matching is simpler to explain and fully deterministic. |
+
+## 26. Redaction and verification — `forensic/redaction.py`
+
+A redaction is a document (regions with keyframes, methods, audio choice) kept apart from the
+pixels. Rendering makes a new, linked evidence item; the original is untouched.
+
+- *Regions*: rectangles or ellipses with keyframes, linearly interpolated; or regions that follow
+  a track (one keyframe per tracked box). For vehicles, `part = plate_zone` covers only the band
+  where a plate normally sits: the middle 70 % of the box width and the lower 45 % of its height.
+  This is a fixed geometric approximation, not a detection.
+- *Methods*: solid mask, Gaussian blur, pixelation.
+- *Automatic*: faces (YuNet) and plates (the plate finder at score ≥ 0.45) on every frame.
+- *Audio*: keep, mute (silence of the same length) or remove.
+- Every video frame is encoded (`-frames:v` equal to the source count; audio is trimmed or padded
+  to the video), so a shorter audio track can no longer drop the last frame.
+
+**Verification**, run on the decoded output, frame by frame:
+
+- frame count in equals frame count out;
+- each region is obscured: a solid mask must be near-uniform and dark; for blur and pixelation,
+  the correlation between the fine detail of source and output (high-pass: image minus a Gaussian
+  blur with σ = 1.5) must be at most 0.3. Flat areas, with nothing to hide, are skipped;
+- the face detector (score ≥ 0.7) and the plate finder (score ≥ 0.6) run again on the output;
+  any hit less than 80 % covered by a region is reported as a possible miss;
+- tracked regions have no gap longer than the limit;
+- the audio is what was asked for (a muted track must have peak sample 0).
+
+The verification is a check, not a guarantee. In the test report the automatic plate finder
+missed a car's plate and the verifier, which uses the same kind of detector, did not flag it;
+adding the plate zone of the tracked vehicles covered it. The verifier also flags road markings
+and existing pixelation as possible plates; it reports them rather than hiding them, so a person
+reviews the copy before release.
+
+| Alternative | Why not |
+|---|---|
+| Edge energy as the "obscured" test | Pixelation creates new block edges, so correctly pixelated regions failed. |
+| Trusting the render without decoding it | The encoder can drop or duplicate frames; only the decoded output shows what a recipient sees. |
+
+## 27. Batch conversion, command line, hardware profiles and sign-in
+
+**Batch conversion** (`forensic/batch.py`). Every file under a folder is identified from its
+bytes (the same signatures as §18), converted with one profile and checked. Method *auto*: the
+recorder parser when there is one; no conversion for MP4/MOV, Matroska and ASF, which play as
+they are; FFmpeg stream copy when the container family is known; carving when only a codec is
+found. Output *copy* (compressed frames kept), *h264* (CRF 16) or *ffv1* (lossless); optional
+segments. Each item records the input's SHA-256 before and after (a file that changed during
+conversion is reported), what was detected, the exact command, each output's hash and frame
+count, a frame-count check, and on failure a class (`unsupported_format`, `output_exists`, …).
+Outputs are never overwritten; identical inputs are converted once. `manifest.json`,
+`manifest.csv` and `manifest.json.sha256` are written at the end.
+
+**Command line** (`forensic/cli.py`, installed as `lucida`): `profile`, `batch scan`,
+`batch run`, `verify`, `backup`, `restore`. Exit codes 0 success, 1 partial, 2 usage, 3 failure.
+A backup copies the database with SQLite's online backup API (consistent while Lucida runs) and
+the data folder into a tar with a manifest of SHA-256s. With `--encrypt` it is AES-256-GCM in
+4 MB chunks, each authenticated with its index and a last-chunk flag (so chunks cannot be
+reordered, dropped or truncated unnoticed), with the key from the password by scrypt. A restore
+goes only into an empty folder, checks every file against the manifest, then re-hashes every
+original and verifies the audit chain.
+
+**Hardware profiles** (`forensic/compute.py`). Detection, tracking, plate reading and batch
+conversion scale with the machine; classical filters do not (their results are bit-identical
+everywhere).
+
+| Profile | Chosen when | Detector | Every n-th frame | Max frames | Parallel conversions | Plate upscale |
+|---|---|---|---|---|---|---|
+| light | fewer than 4 threads or 8 GB | YOLOX nano | 4 | 1 500 | 1 | 480 px |
+| standard | 4+ threads and 8+ GB | YOLOX tiny | 2 | 6 000 | 2 | 640 px |
+| high | a usable GPU, or 12+ threads and 24+ GB | YOLOX s | 1 | 20 000 | 4 | 800 px |
+
+`FORENSIC_PROFILE` forces one. Each run records the profile and the settings it used, so a result
+can be repeated on another machine by forcing the same profile.
+
+**Optional sign-in** (`forensic/security.py`, `FORENSIC_AUTH=accounts`). Off by default. When on:
+scrypt password hashes (n = 2¹⁵, r = 8, p = 1, 16-byte salt, at least 12 characters); five wrong
+passwords lock an account for 15 minutes; sessions end after 30 idle minutes
+(`FORENSIC_SESSION_MINUTES`) and after 12 hours at most; roles admin, examiner, reviewer and
+viewer; each case lists its members, and a refused request is audited.
+
+---
+
+## 28. References
 
 Standards and guidelines
 

@@ -5,6 +5,7 @@ Runs with the Python bundled in the installation (<app>\\python\\python.exe):
     workbench_launcher.py desktop              start Lucida in its own window (pythonw.exe, no console)
     workbench_launcher.py run [--no-browser]   start Lucida with a console and open it in the browser
     workbench_launcher.py selftest [--pause]   check the installed files, then the acceptance self-test
+    workbench_launcher.py cli ARGS...          the `lucida` command line (lucida.cmd in the install folder)
 
 Settings come from <app>\\workbench.ini (written by the installer); environment
 variables of the same name (FORENSIC_DATA_DIR, ...) override it. Nothing here
@@ -56,7 +57,10 @@ def configure() -> dict:
     # Compute settings (see forensic/compute.py); unset means use every core, a share of RAM and the GPU.
     for key, var in (("threads", "FORENSIC_THREADS"), ("cache_mb", "FORENSIC_CACHE_MB"),
                      ("frame_cache_mb", "FORENSIC_FRAME_CACHE_MB"), ("range_mb", "FORENSIC_RANGE_MB"),
-                     ("ai_device", "FORENSIC_AI_DEVICE"), ("gpu_device", "FORENSIC_GPU_DEVICE")):
+                     ("ai_device", "FORENSIC_AI_DEVICE"), ("gpu_device", "FORENSIC_GPU_DEVICE"),
+                     # Hardware profile for detection and batch work, and sign-in for a shared server.
+                     ("profile", "FORENSIC_PROFILE"), ("auth", "FORENSIC_AUTH"),
+                     ("session_minutes", "FORENSIC_SESSION_MINUTES")):
         if cfg.get(key):
             env[var] = cfg[key]
     for k, v in env.items():
@@ -66,7 +70,7 @@ def configure() -> dict:
     for d in (os.environ["FORENSIC_DATA_DIR"], os.environ["FORENSIC_IMPORT_DIR"]):
         Path(d).mkdir(parents=True, exist_ok=True)
     # network = local (default): only this computer. network = lab: examiners' PCs on the lab
-    # network connect over HTTPS, signed in with their workbench accounts.
+    # network connect over HTTPS. Add auth = accounts for sign-in, roles and case membership.
     lab = (os.environ.get("FORENSIC_NETWORK") or cfg.get("network") or "local").strip().lower() == "lab"
     host = os.environ.get("FORENSIC_HOST") or ("0.0.0.0" if lab else cfg.get("host") or "127.0.0.1")
     # The API answers only host names it is told about; add a configured lab address and any
@@ -265,6 +269,13 @@ def selftest(pause: bool) -> int:
 
 
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["cli"]:
+        # Batch conversion, verify, backup and restore with this installation's settings and FFmpeg.
+        configure()
+        from forensic import cli
+
+        return cli.main(argv[1:])
     ap = argparse.ArgumentParser(prog="workbench_launcher")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("desktop")

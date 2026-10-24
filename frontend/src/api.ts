@@ -45,6 +45,10 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
     payload = JSON.stringify(body);
   }
   const res = await fetch(url, { method, headers, body: payload, credentials: "same-origin" });
+  if (res.status === 401 && !url.startsWith("/api/auth/")) {
+    // Sign-in is on and the session ended (idle timeout or signed out elsewhere).
+    window.dispatchEvent(new Event("lucida-signed-out"));
+  }
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -56,6 +60,49 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   }
   return res.json() as Promise<T>;
 }
+
+/** Plain JSON request for the platform panels. */
+export const http = req;
+
+export interface AuthStatus {
+  mode: "none" | "accounts";
+  needs_setup?: boolean;
+  user?: User | null;
+  idle_minutes?: number;
+}
+
+export interface Account {
+  username: string;
+  full_name: string;
+  role: string;
+  disabled: number | boolean;
+  created_at: string;
+  locked_until: string | null;
+}
+
+export interface Member {
+  username: string;
+  full_name: string;
+  role: string;
+  added_at: string;
+}
+
+export const auth = {
+  status: () => req<AuthStatus>("GET", "/api/auth/status"),
+  setup: (username: string, full_name: string, password: string) =>
+    req<User>("POST", "/api/auth/setup", { username, full_name, password }),
+  login: (username: string, password: string) => req<User>("POST", "/api/auth/login", { username, password }),
+  logout: () => req<{ ok: boolean }>("POST", "/api/auth/logout"),
+  users: () => req<Account[]>("GET", "/api/users"),
+  createUser: (u: { username: string; full_name: string; role: string; password: string }) => req<Account>("POST", "/api/users", u),
+  updateUser: (username: string, change: { role?: string; disabled?: boolean; password?: string }) =>
+    req<Account>("PATCH", `/api/users/${encodeURIComponent(username)}`, change),
+  members: (caseId: string) => req<Member[]>("GET", `/api/cases/${caseId}/members`),
+  addMember: (caseId: string, username: string, role: string) =>
+    req<Member[]>("POST", `/api/cases/${caseId}/members`, { username, role }),
+  removeMember: (caseId: string, username: string) =>
+    req<Member[]>("DELETE", `/api/cases/${caseId}/members/${encodeURIComponent(username)}`),
+};
 
 export const api = {
   me: () => req<User>("GET", "/api/me"),
