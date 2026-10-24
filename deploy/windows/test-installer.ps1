@@ -39,6 +39,15 @@ foreach ($k in "ai_device", "job_workers", "gpu_jobs") {
     if (-not (Select-String -Quiet -Path "$App\workbench.ini" -Pattern "^$k\s*=\s*\S")) { throw "workbench.ini has no $k (system check sizing)" }
 }
 if (-not (Select-String -Quiet -Path "$Root\install.log" -Pattern "System check: \d+ GB RAM")) { throw "the system check did not run" }
+function Assert-FilesChecked($log) {
+    # Setup re-hashes every installed file right after copying it.
+    if (-not (Select-String -Quiet -Path $log -Pattern "Installed files check: PASS")) {
+        Select-String -Path $log -Pattern "Installed files check" | ForEach-Object { $_.Line }
+        throw "Setup's installed-files check did not pass"
+    }
+    Select-String -Path $log -Pattern "Installed files check" | ForEach-Object { $_.Line }
+}
+Assert-FilesChecked "$Root\install.log"
 Select-String -Path "$Root\install.log" -Pattern "System check" | ForEach-Object { $_.Line }
 foreach ($f in "python\python.exe", "python\pythonw.exe", "ffmpeg\ffmpeg.exe", "ffmpeg\ffprobe.exe", "frontend\dist\index.html",
                "launcher\workbench_launcher.py", "SHA256SUMS", "BUILDINFO.txt", "unins000.exe") {
@@ -146,7 +155,17 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "pywebview or pythonnet does not load in the installation" }
     $wv = Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" -ErrorAction SilentlyContinue
     Write-Host "WebView2 runtime: $(if ($wv) { $wv.pv } else { 'per-user or missing' })"
-    Stop-Process -Id $server.Id -Force
+
+    Step "Installing again over the running Lucida"
+    # Setup has to close the running server itself and replace the runtime, compiled caches included.
+    $p = Start-Process -Wait -PassThru -FilePath (Resolve-Path $Installer) -ArgumentList @(
+        "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", $mode, "/DIR=`"$App`"", "/LOG=`"$Root\reinstall.log`"")
+    if ($p.ExitCode -ne 0) { Get-Content "$Root\reinstall.log" -Tail 40; throw "installing over the running Lucida exited with $($p.ExitCode)" }
+    Assert-FilesChecked "$Root\reinstall.log"
+    if (-not (Select-String -Quiet -Path "$Root\reinstall.log" -Pattern "Lucida process\(es\) running")) { throw "Setup did not see the running Lucida" }
+    if (-not $server.WaitForExit(10000)) { throw "Setup did not close the running Lucida" }
+    if (-not (Test-Path "$Data\forensic.sqlite3")) { throw "reinstalling lost the case database" }
+    Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
 } finally {
     Remove-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue
@@ -171,4 +190,21 @@ if (Test-Path "$programs\Lucida") { throw "Start menu folder was not removed" }
 if ($LabNetwork -and $AllUsers -and (Get-NetFirewallRule -DisplayName "Lucida" -ErrorAction SilentlyContinue)) {
     throw "uninstall left the firewall rule behind"
 }
+foreach ($d in "python", "launcher", "frontend", "ffmpeg") {
+    if (Test-Path "$App\$d") { Get-ChildItem -Recurse "$App\$d" | Select-Object -First 10 | Out-Host; throw "uninstall left $d behind" }
+}
+
+Step "Installing again after uninstalling, over damaged leftovers"
+# Leftover runtime files, including one that is truncated, must not survive into the new install.
+New-Item -ItemType Directory -Force "$App\python\Lib\__pycache__", "$App\launcher" | Out-Null
+Set-Content "$App\python\python.exe" "truncated"
+Set-Content "$App\python\Lib\__pycache__\stale.cpython-312.pyc" "stale"
+Set-Content "$App\launcher\workbench_launcher.py" "# old"
+$p = Start-Process -Wait -PassThru -FilePath (Resolve-Path $Installer) -ArgumentList @(
+    "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", $mode, "/DIR=`"$App`"", "/DATADIR=`"$Data`"", "/LOG=`"$Root\install2.log`"")
+if ($p.ExitCode -ne 0) { Get-Content "$Root\install2.log" -Tail 40; throw "installing after uninstall exited with $($p.ExitCode)" }
+Assert-FilesChecked "$Root\install2.log"
+if (Test-Path "$App\python\Lib\__pycache__\stale.cpython-312.pyc") { throw "Setup kept a leftover file from before" }
+$u = Start-Process -Wait -PassThru -FilePath "$App\unins000.exe" -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
+if ($u.ExitCode -ne 0) { throw "second uninstall exited with $($u.ExitCode)" }
 Write-Host "`nInstaller test passed ($mode$(if ($LabNetwork) { ', lab network' }))." -ForegroundColor Green

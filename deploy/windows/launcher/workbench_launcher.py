@@ -5,6 +5,7 @@ Runs with the Python bundled in the installation (<app>\\python\\python.exe):
     workbench_launcher.py desktop              start Lucida in its own window (pythonw.exe, no console)
     workbench_launcher.py run [--no-browser]   start Lucida with a console and open it in the browser
     workbench_launcher.py selftest [--pause]   check the installed files, then the acceptance self-test
+    workbench_launcher.py verify [--report F]  check the installed files against the installer's SHA256SUMS
     workbench_launcher.py cli ARGS...          the `lucida` command line (lucida.cmd in the install folder)
 
 Settings come from <app>\\workbench.ini (written by the installer); environment
@@ -202,30 +203,88 @@ def desktop() -> int:
     return shell.main(["--port", str(net["port"])])
 
 
-def verify_installation() -> tuple[bool, str]:
-    """Re-hash every installed file against the SHA256SUMS written when the installer was built."""
+def _sha256(p: Path) -> str:
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        while chunk := f.read(1 << 20):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _check_files(entries: list[tuple[str, str]], sizes: dict[str, int]) -> list[dict]:
+    bad = []
+    for digest, rel in entries:
+        p = APP / rel.replace("/", os.sep)
+        want = sizes.get(rel)
+        try:
+            got_size = p.stat().st_size
+            if want is not None and got_size != want:
+                bad.append({"file": rel, "problem": "size", "expected": want, "found": got_size})
+            elif _sha256(p) != digest:
+                bad.append({"file": rel, "problem": "content", "expected": want, "found": got_size})
+        except FileNotFoundError:
+            bad.append({"file": rel, "problem": "missing", "expected": want, "found": None})
+        except OSError as e:
+            bad.append({"file": rel, "problem": f"unreadable ({e.strerror or e})", "expected": want, "found": None})
+    return bad
+
+
+def _describe(b: dict) -> str:
+    if b["problem"] == "size":
+        return f"{b['file']}: {b['found']} bytes, expected {b['expected']}"
+    if b["problem"] == "content":
+        return f"{b['file']}: same size, different content"
+    if b["problem"] == "missing":
+        return f"{b['file']}: missing"
+    return f"{b['file']}: {b['problem']}"
+
+
+def verify_installation(retries: int = 3, wait_s: float = 5.0) -> tuple[bool, str]:
+    """Re-hash every installed file against the SHA256SUMS written when the installer was built.
+
+    Files that differ are checked again a few times: antivirus software can hold or scan a file for
+    some seconds just after it is written. A file that still differs is reported with its expected
+    and actual size, which usually tells why (truncated copy, quarantined or replaced file).
+    """
     sums = APP / "SHA256SUMS"
     if not sums.is_file():
         return False, f"{sums} is missing"
-    bad, n = [], 0
+    entries = []
     for line in sums.read_text(encoding="utf-8").splitlines():
         digest, _, rel = line.partition("  ")
-        if not rel:
-            continue
-        n += 1
-        p = APP / rel.lstrip("*").replace("/", os.sep)
-        try:
-            h = hashlib.sha256()
-            with open(p, "rb") as f:
-                while chunk := f.read(1 << 20):
-                    h.update(chunk)
-            if h.hexdigest() != digest:
-                bad.append(f"changed: {rel}")
-        except OSError:
-            bad.append(f"missing: {rel}")
+        if rel:
+            entries.append((digest, rel.lstrip("*")))
+    sizes: dict[str, int] = {}
+    size_file = APP / "FILESIZES"
+    if size_file.is_file():
+        for line in size_file.read_text(encoding="utf-8").splitlines():
+            n, _, rel = line.partition("  ")
+            if rel and n.isdigit():
+                sizes[rel] = int(n)
+    bad = _check_files(entries, sizes)
+    for _ in range(retries):
+        if not bad:
+            break
+        time.sleep(wait_s)
+        recheck = {b["file"] for b in bad}
+        bad = _check_files([e for e in entries if e[1] in recheck], sizes)
+    n = len(entries)
     if bad:
-        return False, f"{len(bad)} of {n} file(s) differ from the installer: " + "; ".join(bad[:10])
+        hint = ("Usually antivirus software removed or changed these files while Setup copied them (add the "
+                "installation folder to its exclusions, then run Setup again), or the Setup file itself was not "
+                "copied completely (compare its SHA-256 with the .sha256 file that came with it).")
+        return False, f"{len(bad)} of {n} file(s) differ from the installer: " + "; ".join(_describe(b) for b in bad[:10]) + ". " + hint
     return True, f"{n} file(s) match the installer's SHA256SUMS"
+
+
+def verify(report: str | None) -> int:
+    """Check the installed files only (used by Setup right after copying them)."""
+    ok, detail = verify_installation()
+    text = f"{'PASS' if ok else 'FAIL'}  installed files: {detail}"
+    print(text)
+    if report:
+        Path(report).write_text(text + "\n", encoding="utf-8")
+    return 0 if ok else 1
 
 
 class _Tee:
@@ -283,7 +342,11 @@ def main(argv=None) -> int:
     r.add_argument("--no-browser", action="store_true")
     s = sub.add_parser("selftest")
     s.add_argument("--pause", action="store_true")
+    v = sub.add_parser("verify")
+    v.add_argument("--report", default=None)
     a = ap.parse_args(argv)
+    if a.cmd == "verify":
+        return verify(a.report)
     try:
         if a.cmd == "desktop":
             code = desktop()

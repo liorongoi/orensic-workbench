@@ -189,20 +189,24 @@ WebView2: Evergreen Standalone x64 (run by Setup only if missing), sha256 $wv2Sh
 & "$Py\python.exe" -I -c @"
 import hashlib, os, sys
 root = sys.argv[1]
-lines = []
+lines, sizes = [], []
 for d, _, files in os.walk(root):
     for f in files:
         p = os.path.join(d, f)
         rel = os.path.relpath(p, root).replace(os.sep, '/')
-        if rel == 'SHA256SUMS':
+        if rel in ('SHA256SUMS', 'FILESIZES'):
             continue
         h = hashlib.sha256()
         with open(p, 'rb') as fh:
             for chunk in iter(lambda: fh.read(1 << 20), b''):
                 h.update(chunk)
         lines.append(f'{h.hexdigest()}  {rel}')
+        sizes.append(f'{os.path.getsize(p)}  {rel}')
 lines.sort(key=lambda l: l.split('  ', 1)[1])
+sizes.sort(key=lambda l: l.split('  ', 1)[1])
 open(os.path.join(root, 'SHA256SUMS'), 'w', encoding='utf-8', newline='\n').write('\n'.join(lines) + '\n')
+# Sizes let the installation check say how a file differs (truncated, emptied, replaced).
+open(os.path.join(root, 'FILESIZES'), 'w', encoding='utf-8', newline='\n').write('\n'.join(sizes) + '\n')
 print(f'{len(lines)} files hashed')
 "@ $Payload
 Check "writing SHA256SUMS"
