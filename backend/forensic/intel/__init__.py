@@ -120,6 +120,8 @@ class Intelligence:
         if (end - start) // step + 1 > prof["max_frames"]:
             raise ValueError(f"{(end - start) // step + 1} frames is more than this computer's profile allows in one run "
                              f"({prof['max_frames']}); raise the frame step or split the range")
+        if ev["media_type"] != "video":
+            track = False  # one frame: nothing to track
         det = self.detector(model)
         times = {f["n"]: f["time"] for f in self.wb.frame_table(evidence_id)} if ev["media_type"] == "video" else {0: 0.0}
         tracker = Tracker(max_missed=max(2, 8 // step))
@@ -185,8 +187,7 @@ class Intelligence:
     def _read_plates(self, run_id, ev, best, track_ids, kept, country, per_track, times, prof) -> int:
         count = 0
         for tn, sizes in best.items():
-            if tn > 0 and tn not in kept:
-                continue
+            # Vehicles whose track was too short to keep are still read, without a track.
             frames = [n for _, n in sorted(sizes, key=lambda x: (-x[0], x[1]))[:per_track]]
             for n in sorted(frames):
                 bgr = self.frame_bgr(ev["id"], n)

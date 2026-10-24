@@ -419,3 +419,15 @@ def test_hardware_profile_override(monkeypatch):
     assert p["name"] == "light" and p["detector"] == "detect.yolox_nano" and p["overridden"]
     monkeypatch.setenv("FORENSIC_PROFILE", "bogus")
     assert compute.hardware_profile()["name"] in compute.PROFILES
+
+
+@pytest.mark.skipif(not (MEDIA / "synth_plate_car.jpg").exists(), reason="synthetic plate car sample not available")
+def test_plate_read_on_still_image_is_not_skipped(wb, case):
+    """A still image has no tracks; its vehicles must still be searched for plates."""
+    if not lpr.TesseractOcr().available():
+        pytest.skip("tesseract not installed")
+    ev = ingest(wb, case, MEDIA / "synth_plate_car.jpg")
+    run = wb.intel.run(ev["id"], EXAMINER, plates=True, country="IL")
+    assert run["stats"]["tracks"] == 0 and run["stats"]["plates"] >= 1
+    p = wb.intel.review_queue(case["id"])[0]
+    assert p["best_text"] == "1234567" and p["status"] == "unreviewed"

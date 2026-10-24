@@ -380,7 +380,11 @@ def timeline(case_id: str):
 
 @router.post("/cases/{case_id}/synchronized-frames")
 def synchronized_frames(case_id: str, body: dict = Body(...)):
-    return core.wb().sync.synchronized_frames(case_id, _req(body, "case_time", float), core.actor(), body.get("evidence_ids"))
+    if body.get("evidence_id") and body.get("case_time") is None:
+        T, _ = core.wb().sync.global_time(body["evidence_id"], int(body.get("frame", 0)))
+    else:
+        T = _req(body, "case_time", float)
+    return core.wb().sync.synchronized_frames(case_id, T, core.actor(), body.get("evidence_ids"))
 
 
 # Detection, tracking and plates --------------------------------------------------------------------------

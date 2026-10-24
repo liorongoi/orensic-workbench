@@ -25,6 +25,7 @@ import { AuditPanel } from "./AuditPanel";
 import { AuthPanel } from "./AuthPanel";
 import { ChainEditor } from "./ChainEditor";
 import { ConvertPanel, RecorderTimingPanel } from "./ConvertPanel";
+import { BatchPanel, CasePanel, IntelPanel, VideoPanel } from "./PlatformPanels";
 import { CODEC_VIEW_CODECS, CodecBar, describeBlock } from "./CodecBar";
 import { FrameStrip } from "./FrameStrip";
 import { MEASURE_FIELDS, MeasurePanel, type PointFields } from "./MeasurePanel";
@@ -48,8 +49,12 @@ const clampWidths = (w: Widths): Widths => ({
   right: Math.round(Math.min(760, Math.max(280, w.right))),
 });
 
-type Tab = "enhance" | "authenticate" | "measure" | "audit";
-const TAB_LABEL: Record<Tab, string> = { enhance: "Enhance", authenticate: "Authenticate", measure: "Measure", audit: "Audit & review" };
+type Tab = "enhance" | "authenticate" | "measure" | "video" | "intel" | "case" | "audit";
+const TABS: Tab[] = ["enhance", "authenticate", "measure", "video", "intel", "case", "audit"];
+const TAB_LABEL: Record<Tab, string> = {
+  enhance: "Enhance", authenticate: "Authenticate", measure: "Measure", video: "Video & sync", intel: "Detect & redact",
+  case: "Case", audit: "Audit & review",
+};
 type ExtPick = { field: string; count: number };
 
 const PROPRIETARY = new Set([
@@ -1188,7 +1193,7 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
       ) : (
       <aside className="right">
         <div className="tabs">
-          {(["enhance", "authenticate", "measure", "audit"] as Tab[]).map((t) => (
+          {TABS.map((t) => (
             <button
               key={t}
               className={tab === t ? "active" : ""}
@@ -1397,8 +1402,27 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
               }}
             />
           )}
+          {(tab === "video" || tab === "intel" || tab === "case") && (() => {
+            const common = {
+              caseId, ev: ev ?? null, evidence, frame,
+              onEvidence: async (c: Evidence) => {
+                const d = await reload();
+                selectEvidence(c.id, d.chains);
+                setAuditKey((k) => k + 1);
+              },
+              onChanged: () => setAuditKey((k) => k + 1),
+            };
+            if (tab === "video") return ev && ev.media_type !== "container" ? <VideoPanel key={ev.id} {...common} /> : null;
+            if (tab === "intel") return ev && ev.media_type !== "container" ? <IntelPanel key={ev.id} {...common} /> : null;
+            return (
+              <>
+                <CasePanel {...common} />
+                <BatchPanel caseId={caseId} />
+              </>
+            );
+          })()}
           {tab === "audit" && <AuditPanel caseId={caseId} refreshKey={auditKey} onChanged={() => setAuditKey((k) => k + 1)} />}
-          {!ev && tab !== "audit" && <p className="muted">Add evidence to begin.</p>}
+          {!ev && tab !== "audit" && tab !== "case" && <p className="muted">Add evidence to begin.</p>}
           {tab !== "enhance" && status && <p className={`status ${status.kind}`}>{status.text}</p>}
         </div>
       </aside>

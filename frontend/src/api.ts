@@ -57,6 +57,9 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** Plain JSON request for the platform panels. */
+export const http = req;
+
 export const api = {
   me: () => req<User>("GET", "/api/me"),
   renameMe: (fullName: string) => req<User>("PATCH", "/api/me", { full_name: fullName }),
