@@ -95,6 +95,29 @@ def obscure(img: np.ndarray, box, method: str, shape: str = "rect", margin: floa
         region[:] = new
 
 
+def plate_zone(box: list[float]) -> list[float]:
+    """The part of a vehicle box [x, y, w, h] where its registration plate normally is."""
+    x, y, w, h = box
+    return [round(x + 0.15 * w, 1), round(y + 0.55 * h, 1), round(0.7 * w, 1), round(0.45 * h, 1)]
+
+
+def fine_detail_retained(src_gray: np.ndarray, out_gray: np.ndarray, sigma: float = 1.5) -> float:
+    """Correlation (0-1) between the fine detail (high-pass: image minus a Gaussian blur of `sigma`)
+    of the source region and of the output region. About 1 when the region is unchanged (even after
+    lossy encoding); near 0 when blur, pixelation or a solid mask removed the original detail: the
+    new edges that pixelation makes are not correlated with the original texture."""
+    s = src_gray.astype(np.float32)
+    o = out_gray.astype(np.float32)
+    s = s - cv2.GaussianBlur(s, (0, 0), sigma)
+    o = o - cv2.GaussianBlur(o, (0, 0), sigma)
+    den = float(np.sqrt((s * s).sum() * (o * o).sum()))
+    return max(0.0, float((s * o).sum()) / den) if den > 1e-6 else 0.0
+
+
+FINE_DETAIL_LIMIT = 0.3
+CHECK_PLATE_SCORE = 0.6
+
+
 def _detail(gray: np.ndarray) -> float:
     if gray.size < 16:
         return 0.0
@@ -193,15 +216,24 @@ class Redaction:
         q = "SELECT id FROM annotations WHERE case_id = ?" + (" AND evidence_id = ?" if evidence_id else "") + " ORDER BY created_at"
         return [self.get(r["id"]) for r in self.db.all(q, (case_id, evidence_id) if evidence_id else (case_id,))]
 
-    def track_regions(self, evidence_id: str, track_ids: list[str], method: str = "pixelate") -> list[dict]:
-        """Redaction regions that follow tracked objects (one keyframe per tracked box)."""
+    def track_regions(self, evidence_id: str, track_ids: list[str], method: str = "pixelate", part: str = "whole") -> list[dict]:
+        """Redaction regions that follow tracked objects (one keyframe per tracked box).
+
+        part="plate_zone" covers only the band of a vehicle box where a registration plate normally sits
+        (middle 70 % of the width, lower 45 % of the height). It is a fixed geometric approximation, not a
+        plate detection: the examiner must check the redacted copy, for example when a car is seen side-on.
+        """
+        if part not in ("whole", "plate_zone"):
+            raise ValueError("part must be whole or plate_zone")
         out = []
         for tid in track_ids:
             t = self.wb.intel.get_track(tid)
             if t["evidence_id"] != evidence_id:
                 raise ValueError("that track is in another recording")
-            out.append({"id": f"track-{t['number']}", "label": f"{t['cls']} #{t['number']}", "method": method,
-                        "shape": "rect", "track_id": tid, "keyframes": [{"frame": b["frame"], "box": b["box"]} for b in t["boxes"]]})
+            boxes = [{"frame": b["frame"], "box": b["box"] if part == "whole" else plate_zone(b["box"])} for b in t["boxes"]]
+            label = f"{t['cls']} #{t['number']}" + (" plate zone" if part == "plate_zone" else "")
+            out.append({"id": f"track-{t['number']}" + ("-plate" if part == "plate_zone" else ""), "label": label,
+                        "method": method, "shape": "rect", "track_id": tid, "keyframes": boxes})
         return out
 
     # Rendering --------------------------------------------------------------------------------------
@@ -214,7 +246,7 @@ class Redaction:
                 out.append((r, b))
         return out
 
-    def _auto_boxes(self, doc: dict, rgb: np.ndarray) -> list[tuple[str, list[float]]]:
+    def _auto_boxes(self, doc: dict, rgb: np.ndarray, plate_score: float = 0.45) -> list[tuple[str, list[float]]]:
         boxes = []
         if doc["auto"]["faces"]:
             from .filters.ai import detect_faces
@@ -225,7 +257,7 @@ class Redaction:
             from .intel import lpr
 
             for c in lpr.localise(cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), max_candidates=4):
-                if c.score >= 0.45:
+                if c.score >= plate_score:
                     xs = [p[0] for p in c.corners]
                     ys = [p[1] for p in c.corners]
                     boxes.append(("plate", [min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)]))
@@ -283,13 +315,18 @@ class Redaction:
                 dest = Path(tmp) / f"redacted.{ext}"
                 cmd = [self.wb.settings.ffmpeg, "-v", "error", "-nostdin", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
                        "-s", f"{w}x{h}", "-r", str(rate), "-i", "pipe:0"]
+                n_frames = int(probe["frame_count"])
                 if has_audio and doc["audio"] != "remove":
-                    cmd += ["-i", row["stored_path"], "-map", "0:v:0", "-map", "1:a:0"]
-                    cmd += ["-af", "volume=0"] if doc["audio"] == "mute" else []
+                    # The audio is cut at the video's duration; every video frame is kept (no -shortest,
+                    # which would drop the last frames when the audio track is a little shorter).
+                    dur = float(n_frames / rate)
+                    cmd += ["-i", row["stored_path"], "-map", "0:v:0", "-map", "1:a:0",
+                            "-af", f"atrim=end={dur:.6f}" + (",volume=0" if doc["audio"] == "mute" else "")]
                     cmd += ["-c:a", "aac" if codec == "h264" else "flac"]
                 else:
                     cmd += ["-map", "0:v:0"]
-                cmd += [*vargs, *(["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2"] if codec == "h264" else []), "-shortest", str(dest)]
+                cmd += [*vargs, *(["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2"] if codec == "h264" else []),
+                        "-frames:v", str(n_frames), str(dest)]
                 enc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
                 try:
                     for n, bgr in self.wb.intel.frames(ev["id"], 0, probe["frame_count"] - 1, 1):
@@ -338,18 +375,20 @@ class Redaction:
             rs, ro = gs[y0 + iy:y1 - iy, x0 + ix:x1 - ix], go[y0 + iy:y1 - iy, x0 + ix:x1 - ix]
             if rs.size < 16:
                 continue
-            ds, do = _detail(rs), _detail(ro)
+            if _detail(rs) < 4.0:
+                continue  # nothing to hide here (flat area): no measurable detail
+            kept = fine_detail_retained(rs, ro)
             if a["method"] == "solid":
                 ok = float(ro.std()) < 6 and float(ro.mean()) < 24
             else:
-                ok = do <= max(0.15 * ds, 4.0)
+                ok = kept <= FINE_DETAIL_LIMIT
             if not ok:
-                problems.append({"region": a["region"], "box": a["box"], "detail_source": round(ds, 1),
-                                 "detail_output": round(do, 1), "problem": "region not obscured enough"})
+                problems.append({"region": a["region"], "box": a["box"], "fine_detail_retained": round(kept, 3),
+                                 "problem": "region not obscured enough"})
         # Detectors on the output: anything not covered by an applied region is a possible miss.
         covered = [_clip_box(a["box"], w, h, a.get("margin", 0.0)) for a in applied]
         check_doc = {"auto": {"faces": True, "plates": doc["auto"]["plates"], "min_score": 0.7}}
-        for kind, b in self._auto_boxes(check_doc, out):
+        for kind, b in self._auto_boxes(check_doc, out, plate_score=CHECK_PLATE_SCORE):
             bx0, by0, bx1, by1 = _clip_box(b, w, h)
             area = max(1, (bx1 - bx0) * (by1 - by0))
             cov = max((max(0, min(bx1, c[2]) - max(bx0, c[0])) * max(0, min(by1, c[3]) - max(by0, c[1]))) / area

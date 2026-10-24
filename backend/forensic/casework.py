@@ -429,8 +429,9 @@ class Casework:
         """A ZIP for delivery: chosen originals (verified first), rendered chain outputs and a
         manifest listing every file with SHA-256 and SHA-512, its source and the operation that made it.
 
-        The ZIP is built deterministically (fixed timestamps, sorted entries) so the same selection
-        gives the same package hash."""
+        ZIP entries carry fixed timestamps and are sorted, so the same selection always gives
+        byte-identical member files; only manifest.json (which records who made the package and
+        when) differs between two packages of the same selection."""
         case = self.wb.get_case(case_id)
         ev_ids = evidence_ids if evidence_ids is not None else [e["id"] for e in self.wb.list_evidence(case_id)]
         files: list[tuple[str, bytes, dict]] = []
@@ -460,7 +461,7 @@ class Casework:
             from .report import build_bundle, render_pdf
 
             bundle = build_bundle(self.wb, case_id, actor, verify=False)
-            files.append(("report/report.pdf", render_pdf(bundle), {"kind": "report"}))
+            files.append(("report/report.pdf", render_pdf(self.wb, bundle), {"kind": "report"}))
         entries = []
         for name, data, meta in sorted(files, key=lambda f: f[0]):
             entries.append({"path": name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),

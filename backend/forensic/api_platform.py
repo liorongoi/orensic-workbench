@@ -512,7 +512,7 @@ def get_document(doc_id: str):
 
 @router.post("/evidence/{evidence_id}/track-regions")
 def track_regions(evidence_id: str, body: dict = Body(...)):
-    return core.wb().redaction.track_regions(evidence_id, _req(body, "track_ids"), body.get("method", "pixelate"))
+    return core.wb().redaction.track_regions(evidence_id, _req(body, "track_ids"), body.get("method", "pixelate"), body.get("part", "whole"))
 
 
 @router.post("/evidence/{evidence_id}/redaction-preview/{n}.png")

@@ -431,3 +431,69 @@ def test_plate_read_on_still_image_is_not_skipped(wb, case):
     assert run["stats"]["tracks"] == 0 and run["stats"]["plates"] >= 1
     p = wb.intel.review_queue(case["id"])[0]
     assert p["best_text"] == "1234567" and p["status"] == "unreviewed"
+
+
+def test_export_package_with_report(wb, case, jpeg_path):
+    ingest(wb, case, jpeg_path)
+    pkg, info = wb.casework.export_package(case["id"], EXAMINER, include_report=True)
+    with zipfile.ZipFile(io.BytesIO(pkg)) as z:
+        assert z.read("report/report.pdf")[:4] == b"%PDF"
+    assert wb.casework.verify_package(pkg)["ok"]
+
+
+def test_fine_detail_metric_separates_obscured_from_unchanged():
+    from forensic.redaction import FINE_DETAIL_LIMIT, fine_detail_retained
+
+    rng = np.random.default_rng(3)
+    tex = cv2.GaussianBlur((rng.random((80, 120)) * 255).astype(np.float32), (0, 0), 0.8)
+    img = np.dstack([tex] * 3).astype(np.uint8)
+    # Unchanged but lossy-compressed: detail kept.
+    jpg = cv2.imdecode(cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 60])[1], cv2.IMREAD_COLOR)
+    g = lambda a: cv2.cvtColor(a, cv2.COLOR_BGR2GRAY)  # noqa: E731
+    assert fine_detail_retained(g(img), g(jpg)) > 0.6
+    for method in ("blur", "pixelate"):
+        out = img.copy()
+        obscure(out, [0, 0, 120, 80], method)
+        assert fine_detail_retained(g(img), g(out)) < FINE_DETAIL_LIMIT, method
+
+
+def test_redaction_keeps_every_frame_when_audio_is_shorter(wb, case, tmp_path):
+    p = tmp_path / "short_audio.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=160x120:rate=10", "-f", "lavfi",
+                    "-i", "sine=frequency=500:sample_rate=16000:duration=2.85", "-t", "3", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", str(p)], check=True)
+    ev = ingest(wb, case, p)
+    n = ev["probe"]["frame_count"]
+    doc = wb.redaction.save(ev["id"], "redaction", "r", {"regions": [{"keyframes": [{"frame": 0, "box": [20, 20, 60, 50]}],
+                                                                       "hold": True, "method": "pixelate"}], "audio": "mute"}, EXAMINER)
+    out = wb.redaction.render(doc["id"], EXAMINER, codec="h264")
+    v = out["conversion"]["verification"]
+    assert v["frames_in"] == v["frames_out"] == n, v
+    assert v["ok"], v
+
+
+def test_plate_zone_follows_the_lower_middle_of_a_vehicle_box():
+    from forensic.redaction import plate_zone
+
+    x, y, w, h = plate_zone([100, 50, 200, 100])
+    assert (x, y, w, h) == (130.0, 105.0, 140.0, 45.0)
+    assert x + w <= 300 and y + h <= 150
+
+
+def test_audio_sync_accounts_for_audio_starting_after_video(wb, case, tmp_path):
+    # Same click track in both files; in the second, the container starts the audio 0.2 s after the
+    # first video frame. Measured against video time, the two recordings are therefore 0.2 s apart.
+    clicks = "aevalsrc='if(lt(mod(t\\,0.7)\\,0.01)\\,0.9\\,0)':s=16000:d=4"
+    paths = []
+    for name, delay in (("a.mkv", 0.0), ("b.mkv", 0.2)):
+        p = tmp_path / name
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=96x64:rate=25:d=4",
+                        "-itsoffset", str(delay), "-f", "lavfi", "-i", clicks, "-map", "0:v", "-map", "1:a",
+                        "-c:v", "ffv1", "-c:a", "pcm_s16le", str(p)], check=True)
+        paths.append(p)
+    a, b = ingest(wb, case, paths[0]), ingest(wb, case, paths[1])
+    assert abs(wb.sync._audio_lead_s(wb.evidence_path(b["id"])) - 0.2) < 0.005
+    wb.sync.set_reference(a["id"], EXAMINER, "2026-03-01T10:00:00+00:00")
+    r = wb.sync.sync_correlate(b["id"], a["id"], EXAMINER, signal="audio", max_lag_s=1)
+    ref = wb.sync.current(a["id"])
+    assert abs((r["offset_s"] - ref["offset_s"]) - (-0.2)) < 0.005, r["offset_s"] - ref["offset_s"]

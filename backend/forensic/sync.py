@@ -228,8 +228,29 @@ class MultiCamera:
         env = np.abs(x)
         k = 16000 // rate
         env = env[: len(env) // k * k].reshape(-1, k).mean(axis=1)
+        # Containers can start the audio later (or earlier) than the first video frame; decoding ignores
+        # that, so shift the envelope to put sample 0 at the first frame's time, like the frame clock.
+        lead = round(self._audio_lead_s(path) * rate)
+        if lead > 0:
+            env = np.concatenate([np.zeros(lead, env.dtype), env])
+        elif lead < 0:
+            env = env[-lead:]
         w = max(3, rate // 2)  # remove level changes slower than about half a second
         return env - np.convolve(env, np.ones(w) / w, mode="same")
+
+    def _audio_lead_s(self, path) -> float:
+        """Audio stream start minus video stream start, in seconds (0 when either is unknown)."""
+        cmd = [self.wb.settings.ffprobe, "-v", "error", "-show_entries", "stream=codec_type,start_time", "-of", "json", str(path)]
+        try:
+            info = json.loads(subprocess.run(cmd, capture_output=True, check=True, timeout=60).stdout or b"{}")
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return 0.0
+        start = {}
+        for st in info.get("streams", []):
+            t = st.get("start_time")
+            if st.get("codec_type") in ("audio", "video") and st["codec_type"] not in start and t not in (None, "N/A"):
+                start[st["codec_type"]] = float(t)
+        return start["audio"] - start["video"] if len(start) == 2 else 0.0
 
     def _brightness(self, evidence_id: str, rate: int = 100) -> np.ndarray:
         path = self.wb.evidence_path(evidence_id)
