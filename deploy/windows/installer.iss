@@ -135,7 +135,12 @@ Filename: "{#PythonW}"; Parameters: "-X utf8 ""{#Launcher}"" desktop"; WorkingDi
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Lucida"""; Flags: runhidden; RunOnceId: "DelFirewallRule"; Check: IsAdminInstallMode
 
 [UninstallDelete]
-Type: filesandordirs; Name: "{app}\launcher\__pycache__"
+; Files Python writes while Lucida runs (compiled caches) are not in the uninstall list, so remove
+; the runtime folders whole. Case data lives elsewhere and is never touched here.
+Type: filesandordirs; Name: "{app}\python"
+Type: filesandordirs; Name: "{app}\launcher"
+Type: filesandordirs; Name: "{app}\frontend"
+Type: filesandordirs; Name: "{app}\ffmpeg"
 
 [Code]
 var
@@ -504,12 +509,128 @@ begin
       'protocol=TCP localport=' + Port('') + ' profile=domain,private', False);
 end;
 
+// ---- Before copying: close a running Lucida and remove the old runtime ----
+// A Lucida window or server still running from the install folder (for example started by a
+// scheduled task, or under another account) keeps Python files open, and Windows cannot replace
+// an open file. Setup closes those processes and deletes the old runtime folders itself, so the
+// new files are always copied into empty folders.
+
+function LucidaProcesses(AppDir: String; StopThem: Boolean): Integer;
+var
+  Cmd, Dir: String;
+  Code: Integer;
+begin
+  // The folder goes into a PowerShell single-quoted string, where a quote is written twice.
+  Dir := AddBackslash(AppDir) + 'python\';
+  StringChangeEx(Dir, '''', '''''', True);
+  Cmd := '$p = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith(''' +
+    Dir + ''', [StringComparison]::OrdinalIgnoreCase) });';
+  if StopThem then
+    Cmd := Cmd + ' $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 2;';
+  Cmd := Cmd + ' exit $p.Count';
+  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+              '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + Cmd + '"',
+              '', SW_HIDE, ewWaitUntilTerminated, Code) then
+    Code := 0;
+  Result := Code;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  AppDir: String;
+  Running, I: Integer;
+  Old: array[0..3] of String;
+begin
+  Result := '';
+  AppDir := ExpandConstant('{app}');
+  if not DirExists(AppDir + '\python') and not DirExists(AppDir + '\launcher') then
+    Exit;
+  Running := LucidaProcesses(AppDir, False);
+  if Running > 0 then
+  begin
+    Log(Format('%d Lucida process(es) running from %s', [Running, AppDir]));
+    if not WizardSilent then
+      if MsgBox('Lucida is still running from ' + AppDir + '. Setup will close it now. Cases and audit records are saved as ' +
+                'you work, so nothing is lost.', mbConfirmation, MB_OKCANCEL) <> IDOK then
+      begin
+        Result := 'Close Lucida (the window, and any "Lucida in the browser" console), then run Setup again.';
+        Exit;
+      end;
+    LucidaProcesses(AppDir, True);
+  end;
+  Old[0] := 'python'; Old[1] := 'launcher'; Old[2] := 'frontend'; Old[3] := 'ffmpeg';
+  for I := 0 to 3 do
+    if DirExists(AppDir + '\' + Old[I]) then
+    begin
+      DelTree(AppDir + '\' + Old[I], True, True, True);
+      if DirExists(AppDir + '\' + Old[I]) then
+      begin
+        Log('Could not remove the old ' + AppDir + '\' + Old[I]);
+        Result := 'Setup could not remove the old Lucida files in ' + AppDir + '\' + Old[I] + '. A program still has them open ' +
+          '(Lucida under another Windows account, an antivirus scan, or an Explorer window in that folder). ' +
+          'Restart the computer, or delete that folder yourself, then run Setup again.';
+        Exit;
+      end
+      else
+        Log('Removed the old ' + AppDir + '\' + Old[I]);
+    end;
+end;
+
+function CheckInstalledFiles(var Report: String): Boolean;
+var
+  Code: Integer;
+  ReportFile: String;
+  Lines: TArrayOfString;
+  I: Integer;
+begin
+  // Re-hash every installed file against the installer's SHA256SUMS straight after copying, so a
+  // file that antivirus software removed or changed, or a damaged copy of Setup, is caught now and
+  // named, instead of failing later when Lucida starts.
+  ReportFile := ExpandConstant('{tmp}\lucida-verify.txt');
+  DeleteFile(ReportFile);
+  Report := '';
+  if not Exec(ExpandConstant('{#Python}'), '-B -X utf8 "' + ExpandConstant('{#Launcher}') + '" verify --report "' + ReportFile + '"',
+              ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, Code) then
+  begin
+    Report := 'The bundled Python could not be started: ' + SysErrorMessage(Code) + '. Antivirus software may have blocked or removed it.';
+    Result := False;
+    Exit;
+  end;
+  if LoadStringsFromFile(ReportFile, Lines) then
+    for I := 0 to GetArrayLength(Lines) - 1 do
+      Report := Report + Lines[I] + #13#10;
+  Result := Code = 0;
+end;
+
+procedure VerifyInstalledFiles();
+var
+  Report: String;
+begin
+  WizardForm.StatusLabel.Caption := 'Checking every installed file against this Setup...';
+  while not CheckInstalledFiles(Report) do
+  begin
+    Log('Installed files check failed: ' + Report);
+    if WizardSilent then
+      Exit;
+    if MsgBox('Some installed files are not the ones in this Setup:' + #13#10#13#10 + Report + #13#10 +
+              'Click Retry to check again (for example after pausing the antivirus scan or adding the installation ' +
+              'folder to its exclusions), or Cancel to finish anyway. Lucida may not start until the files are right; ' +
+              'running Setup again replaces them.', mbError, MB_RETRYCANCEL) <> IDRETRY then
+      Exit;
+  end;
+  Log('Installed files check: ' + Report);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if (CurStep = ssPostInstall) and IsAdminInstallMode then
+  if CurStep = ssPostInstall then
   begin
-    RestrictDataDir();
-    OpenFirewall();
+    VerifyInstalledFiles();
+    if IsAdminInstallMode then
+    begin
+      RestrictDataDir();
+      OpenFirewall();
+    end;
   end;
 end;
 
