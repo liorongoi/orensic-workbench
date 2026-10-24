@@ -118,5 +118,10 @@ Interfaces between subsystems:
 7. **Intelligence** — detection, tracking, LPR with review queue, searchable index.
 8. **Reporting, security, operations** — templates, lab-mode accounts and roles, backup/restore, API v1 + SSE.
 9. **Validation and showcase report** — tests per milestone and the algorithm-effects PDF.
+10. **Still-image traffic detection** (v0.5, [traffic.md](traffic.md)) — per-image database with local
+    time, day/night lighting, polygon scan areas and masks, ensemble of learned detector + vehicle
+    lamps + background change, learned scenery lights, review and corrections, training from
+    corrections with notifications and re-run of unedited images only, Excel export, report and
+    charts from text. Gate: `tests/test_traffic.py`.
 
 Every milestone ends with the test suite passing and the front end building.

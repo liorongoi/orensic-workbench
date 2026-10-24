@@ -36,7 +36,7 @@ export function setExaminer(name: string) {
   examiner = name;
 }
 
-async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
+export async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
   let payload: BodyInit | undefined;
   if (body instanceof FormData) payload = body;
@@ -109,6 +109,7 @@ export const api = {
   renameMe: (fullName: string) => req<User>("PATCH", "/api/me", { full_name: fullName }),
   jobs: () => req<JobOverview>("GET", "/api/jobs"),
   cancelJob: (id: string) => req<Job>("POST", `/api/jobs/${id}/cancel`),
+  job: (id: string) => req<Job>("GET", `/api/jobs/${id}`),
   filters: () => req<FilterSchema[]>("GET", "/api/filters"),
   analyses: () => req<AnalysisSchema[]>("GET", "/api/analyses"),
   cases: () => req<Case[]>("GET", "/api/cases"),

@@ -1,6 +1,7 @@
 /** The guides shown under Help. Their text is loaded with the Help page, not with the app. */
 export const HELP_DOCS = [
   { id: "user-manual", title: "User manual", file: "user-manual.md" },
+  { id: "traffic", title: "Traffic detection", file: "traffic.md" },
   { id: "algorithms", title: "Algorithm guide", file: "algorithms.md" },
   { id: "amped-comparison", title: "Amped vs Lucida", file: "amped-comparison.md" },
   { id: "deployment", title: "Installation and settings", file: "deployment.md" },

@@ -471,3 +471,58 @@ kbd { font-family: var(--mono); font-size: 11px; color: var(--muted); border: 1p
 .account { position: relative; }
 .account-menu { position: absolute; right: 0; top: 100%; z-index: 50; display: flex; flex-direction: column; gap: 6px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; min-width: 140px; }
+
+/* Still-image traffic detection page ------------------------------------------------------------ */
+.traffic { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(300px, 380px) 1fr; }
+.traffic-side { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+.traffic-cam { padding: 10px 12px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.traffic .row { display: flex; align-items: center; gap: 6px; }
+.traffic .row.wrap { flex-wrap: wrap; }
+.traffic details summary { cursor: pointer; color: var(--muted); }
+.traffic details[open] { display: flex; flex-direction: column; gap: 4px; }
+.traffic-list-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
+.traffic-list { overflow: auto; flex: 1; padding: 0 4px 12px; }
+.table.compact th, .table.compact td { padding: 4px 6px; font-size: 12px; }
+.table.compact tr { cursor: pointer; }
+.table.compact tr.sel td { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.table.compact tbody tr:hover td { background: var(--panel-2); }
+.ellipsis { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pill { font-size: 10.5px; border-radius: 9px; padding: 1px 7px; border: 1px solid var(--line); white-space: nowrap; }
+.pill.pending { color: var(--muted); }
+.pill.detected { color: var(--accent); border-color: var(--accent); }
+.pill.edited { color: var(--warn); border-color: var(--warn); }
+.pill.approved { color: var(--ok); border-color: var(--ok); }
+.traffic-main { overflow: auto; padding: 10px 16px 24px; min-width: 0; }
+.traffic-main .pad { padding: 24px 0; }
+.notices { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.notice { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel-2); }
+.notice span { flex: 1; }
+.notice.training_done, .notice.rerun_done { border-color: var(--ok); }
+.notice.training_started { border-color: var(--accent); }
+.review { display: flex; flex-direction: column; gap: 8px; }
+.review-head { display: flex; align-items: baseline; gap: 10px; }
+.toolbar .seg { display: inline-flex; gap: 2px; }
+.review-canvas { overflow: auto; max-height: 70vh; background: #000; border: 1px solid var(--line); border-radius: 6px; }
+.review-canvas svg { display: block; touch-action: none; user-select: none; }
+.review-canvas svg.tool-add, .review-canvas svg.tool-region { cursor: crosshair; }
+.det { fill: transparent; cursor: move; }
+.det.auto { stroke: #ffa94d; }
+.det.manual { stroke: #ffd43b; }
+.det.on { stroke: #3e9bff; fill: color-mix(in srgb, #3e9bff 12%, transparent); }
+.det.below { stroke: #8b95a3; stroke-dasharray: 4 3; pointer-events: none; }
+.det-label { fill: #fff; paint-order: stroke; stroke: #000; stroke-width: 3px; pointer-events: none; font-family: inherit; }
+.handle { fill: #3e9bff; stroke: #fff; cursor: nwse-resize; }
+.region { fill: transparent; pointer-events: none; }
+.region.include { stroke: #46c27a; fill: color-mix(in srgb, #46c27a 8%, transparent); }
+.region.exclude { stroke: #ff6b6b; fill: color-mix(in srgb, #ff6b6b 14%, transparent); }
+.region.draft { stroke-dasharray: 6 4; fill: none; }
+.review-info { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.review-info .run-line { width: 100%; }
+.traffic-charts { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 6px; }
+.chart-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 12px; }
+.chart { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.chart figcaption { margin-bottom: 4px; }
+.chart-svg { width: 100%; height: auto; }
+.chart-text { fill: var(--text); font-size: 11px; }
+.chart-svg .grid { stroke: var(--line); }
+@media (max-width: 900px) { .traffic { grid-template-columns: 1fr; } .traffic-side { max-height: 45vh; } }

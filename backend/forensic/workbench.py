@@ -53,6 +53,9 @@ class Workbench:
         self.redaction = Redaction(self)
         self.sync = MultiCamera(self)
         self.intel = Intelligence(self)
+        from .traffic import Traffic
+
+        self.traffic = Traffic(self)
         from .batch import Batch
 
         self.batch = Batch(self)

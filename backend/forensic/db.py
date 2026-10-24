@@ -348,6 +348,135 @@ CREATE TABLE IF NOT EXISTS case_members (
     added_at TEXT NOT NULL,
     PRIMARY KEY (case_id, username)
 );
+-- v0.5: still-image traffic detection ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS traffic_config (
+    camera_id TEXT PRIMARY KEY REFERENCES cameras(id),
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    utc_offset_hours REAL NOT NULL DEFAULT 0,
+    regions_json TEXT NOT NULL DEFAULT '[]',
+    settings_json TEXT NOT NULL DEFAULT '{}',
+    static_lights_json TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS traffic_images (
+    evidence_id TEXT PRIMARY KEY REFERENCES evidence(id),
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    camera_id TEXT,
+    image_name TEXT NOT NULL,
+    capture_utc TEXT,
+    time_source TEXT NOT NULL DEFAULT 'unknown',
+    lighting TEXT,
+    lighting_override TEXT,
+    scene_json TEXT NOT NULL DEFAULT '{}',
+    regions_json TEXT,
+    detection_count INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    run_id TEXT,
+    approved_by TEXT,
+    approved_at TEXT,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS traffic_images_case ON traffic_images(case_id, camera_id, status);
+CREATE TABLE IF NOT EXISTS traffic_runs (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    evidence_id TEXT NOT NULL REFERENCES evidence(id),
+    camera_id TEXT,
+    profile_id TEXT,
+    params_json TEXT NOT NULL,
+    models_json TEXT NOT NULL,
+    scene_json TEXT NOT NULL,
+    members_json TEXT NOT NULL,
+    output_hash TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS traffic_objects (
+    run_id TEXT NOT NULL REFERENCES traffic_runs(id),
+    idx INTEGER NOT NULL,
+    cls TEXT NOT NULL,
+    x REAL NOT NULL, y REAL NOT NULL, w REAL NOT NULL, h REAL NOT NULL,
+    fused_score REAL NOT NULL,
+    score REAL NOT NULL,
+    members_json TEXT NOT NULL,
+    features_json TEXT NOT NULL,
+    in_region INTEGER NOT NULL,
+    kept INTEGER NOT NULL,
+    PRIMARY KEY (run_id, idx)
+);
+CREATE TABLE IF NOT EXISTS traffic_detections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id TEXT NOT NULL,
+    evidence_id TEXT NOT NULL REFERENCES evidence(id),
+    run_id TEXT,
+    object_idx INTEGER,
+    cls TEXT NOT NULL,
+    score REAL,
+    x REAL NOT NULL, y REAL NOT NULL, w REAL NOT NULL, h REAL NOT NULL,
+    origin TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'active',
+    members_json TEXT NOT NULL DEFAULT '{}',
+    original_json TEXT,
+    note TEXT NOT NULL DEFAULT '',
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS traffic_detections_ev ON traffic_detections(evidence_id, state);
+CREATE TABLE IF NOT EXISTS traffic_feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id TEXT NOT NULL,
+    camera_id TEXT,
+    evidence_id TEXT NOT NULL,
+    detection_id INTEGER,
+    kind TEXT NOT NULL,
+    cls TEXT,
+    box_json TEXT,
+    before_json TEXT,
+    crop_sha256 TEXT,
+    lighting TEXT,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS traffic_feedback_cam ON traffic_feedback(case_id, camera_id, created_at);
+CREATE TABLE IF NOT EXISTS traffic_backgrounds (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL,
+    camera_id TEXT NOT NULL,
+    lighting TEXT NOT NULL,
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    evidence_json TEXT NOT NULL,
+    image_sha256 TEXT NOT NULL,
+    lights_sha256 TEXT,
+    stats_json TEXT NOT NULL,
+    current INTEGER NOT NULL DEFAULT 1,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS traffic_profiles (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL,
+    camera_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    parent_id TEXT,
+    profile_json TEXT NOT NULL,
+    metrics_json TEXT NOT NULL,
+    training_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    status TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS traffic_notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    message TEXT NOT NULL,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    read_at TEXT
+);
 """
 
 # Columns added after the first release; applied to existing databases on open.
