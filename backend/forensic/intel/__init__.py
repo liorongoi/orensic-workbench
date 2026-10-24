@@ -534,8 +534,10 @@ class Intelligence:
         results = []
         scope = f"case_id IN ({','.join('?' * len(case_ids))})"
         if plate:
-            pat = lpr.normalise_text(plate.replace("*", "\x00").replace("?", "\x01")).replace("\x00", "*").replace("\x01", "?")
-            pat = plate.upper().replace(" ", "").replace("-", "") if not pat else pat
+            # Normalise the text between wildcards; keep * and ? themselves.
+            pat = "".join(ch if ch in "*?" else lpr.normalise_text(ch) for ch in plate)
+            if not pat.strip("*?"):
+                raise ValueError("give at least one letter or digit to search for")
             for p in self.db.all(f"SELECT * FROM plates WHERE {scope}", tuple(case_ids)):
                 pp = self._public_plate(p)
                 if reviewed_only and pp["status"] not in ("confirmed", "corrected"):

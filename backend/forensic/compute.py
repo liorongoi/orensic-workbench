@@ -231,7 +231,7 @@ def hardware_profile() -> dict:
         name, why = "light", f"{cores} CPU threads and {ram // GB} GB RAM"
     p = dict(PROFILES[name])
     p["batch_workers"] = max(1, min(p["batch_workers"], cores // 2 or 1))
-    return {"name": name, "reason": why, **p}
+    return {"name": name, "reason": why, "overridden": forced in PROFILES, **p}
 
 
 def summary() -> dict:
