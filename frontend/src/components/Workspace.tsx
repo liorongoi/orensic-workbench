@@ -457,6 +457,15 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
       case "tab-audit":
         showTab("audit");
         break;
+      case "tab-video":
+        showTab("video");
+        break;
+      case "tab-intel":
+        showTab("intel");
+        break;
+      case "tab-case":
+        showTab("case");
+        break;
     }
   };
   useEffect(() => onCommand((c) => commands.current(c)), []);

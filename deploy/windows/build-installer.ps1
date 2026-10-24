@@ -148,6 +148,7 @@ Copy-Item -Recurse "$Repo\frontend\dist" "$Payload\frontend\dist"
 Step "Launcher, docs and licences"
 New-Item -ItemType Directory -Force "$Payload\launcher", "$Payload\docs", "$Payload\licences" | Out-Null
 Copy-Item "$PSScriptRoot\launcher\workbench_launcher.py" "$Payload\launcher"
+Copy-Item "$PSScriptRoot\launcher\lucida.cmd" "$Payload"
 Copy-Item "$Repo\README.md" "$Payload\docs"
 Copy-Item -Recurse "$Repo\docs\*" "$Payload\docs"
 Copy-Item "$PSScriptRoot\install-notes.txt" "$Payload\docs\INSTALL-NOTES.txt"

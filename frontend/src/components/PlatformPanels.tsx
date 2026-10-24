@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { http, urls } from "../api";
+import { auth, http, urls, type AuthStatus } from "../api";
+import { CaseMembers } from "./SignIn";
 import type { Evidence } from "../types";
 
 /* Panels for the platform services: case management (custody, tags, bookmarks, search,
@@ -69,6 +70,10 @@ export function CasePanel({ caseId, ev, frame, onChanged }: Common) {
   const [hits, setHits] = useState<J | null>(null);
   const [dups, setDups] = useState<J | null>(null);
   const [exp, setExp] = useState({ purpose: "", recipient: "", include_report: false });
+  const [authed, setAuthed] = useState<AuthStatus | null>(null);
+  useEffect(() => {
+    auth.status().then(setAuthed).catch(() => {});
+  }, []);
   const [exports, setExports] = useState<J[]>([]);
   const [hold, setHold] = useState("");
   const [until, setUntil] = useState("");
@@ -157,6 +162,11 @@ export function CasePanel({ caseId, ev, frame, onChanged }: Common) {
           </div>
         )}
       </Section>
+      {authed?.mode === "accounts" && authed.user && (
+        <Section title="Who can open this case">
+          <CaseMembers caseId={caseId} me={authed.user} />
+        </Section>
+      )}
       <Section title="Search all cases">
         <div className="row">
           <input value={q} placeholder="file name, hash, tag, bookmark, metadata…" onChange={(e) => setQ(e.target.value)}
@@ -508,6 +518,12 @@ export function IntelPanel({ caseId, ev, frame, onEvidence, onChanged }: Common)
                       const r = await run("Loading", () => http<J[]>("POST", `/api/evidence/${ev.id}/track-regions`, { track_ids: [t.id], method }));
                       if (r) setRegions((x) => [...x, ...r]);
                     }}>▦</button>
+                    {["car", "truck", "bus", "motorcycle"].includes(t.cls) && (
+                      <button className="link small" title="add this vehicle's plate zone to the redaction (lower middle of its box; check the result)" onClick={async () => {
+                        const r = await run("Loading", () => http<J[]>("POST", `/api/evidence/${ev.id}/track-regions`, { track_ids: [t.id], method, part: "plate_zone" }));
+                        if (r) setRegions((x) => [...x, ...r]);
+                      }}>▭</button>
+                    )}
                   </td>
                 </tr>
               ))}

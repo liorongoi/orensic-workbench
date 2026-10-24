@@ -328,7 +328,7 @@ export interface Review {
 export interface User {
   username: string;
   full_name: string;
-  role: "admin" | "examiner";
+  role: "admin" | "examiner" | "reviewer" | "viewer";
   disabled?: boolean;
   created_at?: string;
 }

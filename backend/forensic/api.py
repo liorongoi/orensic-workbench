@@ -288,6 +288,8 @@ def me():
 
 @app.patch("/api/me")
 def rename_me(body: ExaminerIn):
+    if security.enabled():
+        raise HTTPException(409, "with sign-in on, an administrator sets each person's name")
     before = user()
     u = accounts().rename(body.full_name)
     if u["full_name"] != before["full_name"]:
@@ -345,7 +347,14 @@ def list_cases():
 
 @app.post("/api/cases")
 def create_case(body: CaseIn, x_examiner: str | None = Header(None)):
-    return wb().create_case(body.name, body.examiner, actor(x_examiner or body.examiner), body.notes)
+    u = user()
+    if security.enabled() and u["role"] == "viewer":
+        raise HTTPException(403, "viewers cannot create cases")
+    c = wb().create_case(body.name, body.examiner, actor(x_examiner or body.examiner), body.notes)
+    if security.enabled() and u["role"] != "admin":
+        # Whoever opens a case works on it; an administrator adds anyone else.
+        security.Security(wb().db, wb().audit).add_member(c["id"], u["username"], u["role"], actor())
+    return c
 
 
 @app.get("/api/cases/{case_id}")

@@ -102,6 +102,9 @@ export type Command =
   | "tab-authenticate"
   | "tab-measure"
   | "tab-audit"
+  | "tab-video"
+  | "tab-intel"
+  | "tab-case"
   | "frame-prev"
   | "frame-next";
 

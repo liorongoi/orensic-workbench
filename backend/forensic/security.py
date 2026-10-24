@@ -265,7 +265,7 @@ class Security:
                 self.audit.append(Actor(user["full_name"], "human"), "auth.denied", case_id=case_id,
                                   params={"path": path[:200], "method": method})
             raise AuthError("you are not a member of this case")
-        if write and path.endswith("/members") and role != "admin":
+        if write and ("/members" in path) and role != "admin":
             raise AuthError("only an administrator can change case members")
         if write and role == "viewer":
             raise AuthError("viewers cannot change anything")

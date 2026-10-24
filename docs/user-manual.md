@@ -20,12 +20,16 @@ Contents
 10. [Measure](#10-measure)
 11. [Audit and independent review](#11-audit-and-independent-review)
 12. [Reports](#12-reports)
-13. [Working with several examiners](#13-working-with-several-examiners)
-14. [Connecting an AI agent](#14-connecting-an-ai-agent)
-15. [Limits and troubleshooting](#15-limits-and-troubleshooting)
-16. [Keyboard and mouse reference](#16-keyboard-and-mouse-reference)
-17. [Filter and analysis reference](#17-filter-and-analysis-reference)
-18. [Glossary](#18-glossary)
+13. [Video and synchronisation](#13-video-and-synchronisation)
+14. [Detection, plates and redaction](#14-detection-plates-and-redaction)
+15. [Case management](#15-case-management)
+16. [Batch conversion and the command line](#16-batch-conversion-and-the-command-line)
+17. [Working with several examiners](#17-working-with-several-examiners)
+18. [Connecting an AI agent](#18-connecting-an-ai-agent)
+19. [Limits and troubleshooting](#19-limits-and-troubleshooting)
+20. [Keyboard and mouse reference](#20-keyboard-and-mouse-reference)
+21. [Filter and analysis reference](#21-filter-and-analysis-reference)
+22. [Glossary](#22-glossary)
 
 ---
 
@@ -57,7 +61,7 @@ Keep the console window open while you work; closing it stops Lucida. The Start 
 also has **Self-test** (checks the installation), **Case data folder** (opens the folder
 where cases are kept), and this **User manual**, the **Algorithm guide** and **Amped vs Lucida**, a tool-by-tool comparison with Amped FIVE and Authenticate.
 
-**Help inside Lucida.** Click **Help ▾** in the top bar and choose **User manual**, **Algorithm
+**Help inside Lucida.** Open the **Help** menu and choose **User manual**, **Algorithm
 guide**, **Amped vs Lucida** or **Installation and settings**. The guide opens in a new browser tab, so your work stays
 as it was. The guides are built into Lucida, so
 they work offline and always match the installed version. On the Help page, click a guide on the
@@ -78,7 +82,7 @@ variable before the first start.
 
 **Where Lucida answers.** Unless lab-network access is turned on, Lucida answers only on the
 computer it runs on (address `127.0.0.1`). With lab-network access on, it also answers at
-`https://<computer name>:<port>` (see 13.4); since there is no sign-in, anyone who can reach that
+`https://<computer name>:<port>` (see 17.4); since there is no sign-in, anyone who can reach that
 address can use it and acts under the same examiner name.
 
 ---
@@ -89,32 +93,35 @@ The case list is the first page. When you open a case the screen has four parts:
 
 ```
 +----------------------------------------------------------------------------------+
-| ◆ Lucida / Case name                   Report ▾  Help ▾  Jobs 1 2   Your name    |
-+--------------+-----------------------------------------------+-------------------+
-| Evidence   ‹ |  label · size · zoom   Crop  Fit  1:1  Orig.  |  Enhance |       › |
-| [Triage]     |                                               |  Authenticate |   |
-| [+ Add]      |                                               |  Measure | Audit  |
-|              |              image or video frame             |                   |
-| drop zone    |                                               |  tools for the    |
-| evidence     |                                               |  selected tab     |
-| list         |                                               |                   |
-|              |  x, y · R G B                                 |                   |
-| ✓ Verify     |  Frame strip (video only)                     |                   |
-| ⤓ Original   |                                               |                   |
-+--------------+-----------------------------------------------+-------------------+
+| ◆ Lucida  File Edit View Tools Help  / Case name               Jobs   Your name  |
++-----------------------------+----------------------------------+-----------------+
+| Enhance  Authenticate       |  label · size · zoom  Crop Fit 1:1 | Evidence  › |
+| Measure  Video & sync       |                                  | [Triage][+ Add]|
+| Detect & redact  Case       |                                  |                 |
+| Audit & review        ⇄  ‹  |        image or video frame      | evidence list   |
+|                             |                                  |                 |
+| tools for the selected tab  |                                  | ✓ Verify        |
+|                             |  Frame strip (video only)        | ⤓ Original      |
++-----------------------------+----------------------------------+-----------------+
 ```
 
-- **Top bar**: the case name, the **Report ▾** menu (see 12), the **Help ▾** menu (this manual
-  and the other guides, see 2), the **Jobs** list (see 13.2) and the examiner name (click it to change it, see 13.1).
-- **Left panel**: the evidence in the case, with buttons to add files and triage them all.
+- **Menu bar**: **File** (cases, add evidence, the HTML and PDF reports and the JSON bundle, see
+  12), **Edit** (undo, redo, crop), **View** (zoom, compare modes, panels, full screen), **Tools**
+  (jump to a tab, triage, this computer's hardware), **Help** (this manual and the other guides,
+  see 2). On the right: the **Jobs** list (see 17.2) and the examiner name (click it to change it,
+  see 17.1).
+- **Tools panel** (on the left by default): seven tabs. **Enhance** builds processing chains.
+  **Authenticate** runs analyses. **Measure** takes heights, distances and speeds. **Video & sync**
+  extracts clips and synchronises cameras (see 13). **Detect & redact** finds objects and plates
+  and makes redacted copies (see 14). **Case** holds case details, custody, search, export
+  packages and batch conversion (see 15 and 16). **Audit & review** shows the log and runs the
+  independent review. Click **⇄** to move the tools panel to the other side; Lucida remembers
+  your choice.
 - **Centre**: the viewer, with the frame strip underneath for video.
-- **Right panel**: four tabs. **Enhance** builds processing chains. **Authenticate** runs
-  analyses. **Measure** takes heights, distances and speeds. **Audit** shows the log and runs
-  the independent review.
+- **Evidence panel**: the evidence in the case, with buttons to add files and triage them all.
 
-To make room for the image, hide a side panel with **‹** (left) or **›** (right) at its top
-corner. A thin bar stays at the edge; click it to bring the panel back. Lucida remembers
-which panels you hid.
+To make room for the image, hide a side panel with **‹** or **›** at its top corner. A thin bar
+stays at the edge; click it to bring the panel back. Lucida remembers which panels you hid.
 
 Many buttons are icons or short words. Hover any button to see what it does, and hover the **ⓘ**
 marks for explanations.
@@ -511,7 +518,7 @@ and edges in its output may be wrong, so treat them as suggestions and never rea
 **Network** "full" gives the best quality; "compact" is about ten times faster. The older **AI
 super resolution (single image)** (FSRCNN or ESPCN) is milder and invents less. Both need the image
 cropped to the region of interest first (the network's 4× result may not exceed 8192 pixels on a
-side), and both run on the graphics card when it reproduces results exactly (see 13.3).
+side), and both run on the graphics card when it reproduces results exactly (see 17.3).
 
 **Redact detected faces** finds faces and pixelates, blurs or blanks them for disclosure copies.
 It misses small, turned and covered faces: add manual regions for those with **Extra regions**,
@@ -799,7 +806,7 @@ The **Audit** tab shows:
 
 ## 12. Reports
 
-Click **Report ▾** in the top bar of an open case and choose one. Each opens in a new browser
+Open the **File** menu in an open case and choose a report. Each opens in a new browser
 tab.
 
 - **HTML report**: the report for reading on screen.
@@ -818,19 +825,180 @@ case.
 
 ---
 
-## 13. Working with several examiners
+## 13. Video and synchronisation
 
-Several examiners can use Lucida at the same time (see 13.1 for how their names are recorded).
+Open the **Video & sync** tab with a video selected.
+
+### 13.1 Clips, frames and contact sheets
+
+- **Extract clip**: choose the first and last frame and a mode. *Copy* keeps the original
+  compressed frames but can only cut at key frames, so the clip may start earlier than asked; the
+  record shows the frames you asked for and the frames you got. *Lossless* (FFV1) and *H.264*
+  cut exactly. The clip is new evidence linked to the original.
+- **Frames as PNG**: every frame of a range as lossless PNG files in a ZIP, with a manifest of
+  frame numbers, times and hashes.
+- **Scene changes, repeated frames, contact sheet**: lists frames where the picture changes
+  sharply and frames that repeat the one before (possible recorder duplicates), and builds a
+  contact sheet of evenly spaced frames. These are leads to look at, not findings.
+- **Compare with another item**: MSE, PSNR, SSIM and a difference map between this frame and a
+  frame of another item, optionally after aligning them.
+
+### 13.2 Synchronising cameras
+
+Each recording keeps its own timestamps. Synchronising records how its time maps onto one case
+timeline, with the method and an uncertainty; nothing in the file changes.
+
+1. Select the recording you trust most and choose **this is the reference recording**. Give its
+   start time if you know it (an ISO time with a time zone).
+2. Select each other recording and choose a method:
+   - **on-screen clock**: go to a frame where the burnt-in clock is readable, type the time it
+     shows and how far you trust the clock (± seconds);
+   - **same event**: go to a frame showing an event (a flash, a door closing) and give the
+     reference frame showing the same moment;
+   - **audio** or **brightness cross-correlation**: Lucida finds the best match automatically.
+     A *weak* match must be confirmed with an event;
+   - **manual offset**: type the offset and what you based it on.
+3. Click **Record synchronisation**. The result shows the method and its uncertainty. Earlier
+   records stay in the history.
+
+The timeline shows every synchronised recording on the case clock. **Show all cameras at this
+moment** builds one image with the frame of every camera nearest to the current moment, each
+labelled with its offset and uncertainty.
+
+Audio from cameras at different distances from a sound arrives at different times (about 3 ms per
+metre). If the distances differ a lot, prefer an event or the brightness method.
+
+---
+
+## 14. Detection, plates and redaction
+
+Open the **Detect & redact** tab. Everything here runs on this computer; nothing is sent out.
+The line at the top shows the hardware profile, which decides the detector size and how many
+frames are examined (see 16.3).
+
+### 14.1 Detecting and tracking objects
+
+Choose the classes (for example `car,person`), the minimum score and whether to read plates, and
+click **Run detection**. On video, detections are joined into tracks. **Show boxes at frame**
+draws them on the current frame.
+
+A track number only means the boxes overlapped from frame to frame. Mark each track **✓**
+(confirmed) or **✕** (rejected); tracks can be merged and split through the API when the tracker
+swapped or split them. **⤓ CSV** exports the tracks.
+
+### 14.2 Reviewing plate readings
+
+Each plate reading appears in the **Plate review queue** with the rectified plate image, the
+machine's best reading, its confidence and the alternatives. Nothing counts until you act:
+
+- **Confirm** if the reading is right;
+- type the right text and **Correct** (the machine reading is kept in the record);
+- **Reject** if the plate cannot be read.
+
+The queue shows the selected item; tick **show every item in the case** to see all. Search plates
+with `*` (any characters) and `?` (one character), for example `12*67`; each hit says whether it
+matched the reviewed text or a machine reading. Small or blurred plates are often unreadable by
+the machine; read them yourself or reject them.
+
+### 14.3 Redacting a video or image
+
+1. Add regions: **+ Box** adds a rectangle held from the current frame; **▦** next to a track
+   adds a region that follows that track; **▭** next to a vehicle track covers only its plate
+   zone (the lower middle of the vehicle box). Tick **faces (auto)** and **plates (auto)** to
+   find faces and plates on every frame.
+2. Choose the method (pixelate, blur or solid) and, for video, the audio (keep, mute or remove).
+3. **Preview frame** shows the current frame redacted.
+4. **Render redacted copy** makes a new, linked item and checks every frame of it: that no frame
+   was lost, that each region is really obscured, that the face and plate detectors find nothing
+   uncovered, and that the audio is as asked.
+
+The check reports problems; it does not prove the copy is safe. Detectors miss small or turned
+faces and some plates, and they also flag things that are not plates (road markings). Always play
+the redacted copy through before release. The **▭** plate zone is a fixed estimate; check it on
+vehicles seen from the side.
+
+---
+
+## 15. Case management
+
+Open the **Case** tab.
+
+- **Case details**: case number, legal authority (warrant, order), description and status. A case
+  can also have sub-cases (created through the API with a parent case).
+- **Tags and bookmarks**: tag items, and bookmark a frame or a range of frames with a note.
+- **Chain of custody**: every acquisition, verification, download of an original, export and
+  disposal is recorded automatically; record transfers yourself (from, to, location, note).
+- **Search all cases**: names, filenames, hashes, tags, bookmarks and metadata. Searches are
+  recorded in the audit log.
+- **Duplicates** (click **Find duplicates**): identical files (same SHA-256) and near duplicates (pictures that look the same
+  after resizing or recompression). A near duplicate is a lead to compare, not a finding.
+- **Export package**: a ZIP of the chosen originals and results with a manifest of SHA-256 and
+  SHA-512 hashes, optionally with the PDF report, the purpose and the recipient. The recipient
+  can check the package against its manifest.
+- **Integrity, legal hold and retention**: verify every original in the case, set a legal hold
+  and a retention date. A case can be disposed of only by an administrator, only without a legal
+  hold and after the retention date, and only by typing its case number; the record of the
+  disposal is kept.
+
+---
+
+## 16. Batch conversion and the command line
+
+### 16.1 Converting a whole recorder export
+
+In the **Case** tab, under **Batch conversion**, give the folder with the recorder's files and an
+empty output folder, then **Scan** to see what each file is (read from its contents, not its
+name). Choose the method (*auto* is right in most cases) and the output (*copy* keeps the
+recorder's compressed frames; *H.264* plays everywhere; *FFV1* is lossless), optionally a segment
+length, and whether to add the originals and outputs to this case. Click **Convert all**; under
+**Batches** you can pause, resume, cancel and retry failed files.
+
+The input files are only read, never changed; outputs are never overwritten; identical files are
+converted once. Each file gets a status, the method used, the output's hash and frame count, and
+on failure a reason (for example a self-playing `.exe` export is `unsupported_format`: export
+again from the recorder in its native format). `manifest.json`, `manifest.csv` and
+`manifest.json.sha256` are written in the output folder at the end.
+
+### 16.2 The command line
+
+The `lucida` command does the same without the browser, for large or unattended jobs:
+
+```
+lucida batch scan D:\export
+lucida batch run --input D:\export --output E:\converted --format copy
+lucida verify                        re-hash every original and check the audit log
+lucida backup --output F:\lucida.backup --encrypt
+lucida restore F:\lucida.backup --target D:\restored
+```
+
+Exit codes: 0 success, 1 some files failed, 2 wrong command, 3 failed. An encrypted backup asks for
+a password of at least 12 characters (or reads `LUCIDA_BACKUP_PASSWORD`). A restore only goes into
+an empty folder, and checks every file, every original's hash and the audit log before it reports
+success.
+
+### 16.3 Hardware profile
+
+Detection, plate reading and batch conversion adapt to the computer: **light**, **standard** or
+**high**, chosen from the processor, memory and graphics card. The profile only changes how much
+work is done (detector size, how many frames are examined, how many files are converted at once).
+It is recorded with every run. An administrator can force one with `FORENSIC_PROFILE`. Image
+filters do not depend on the profile: they give the same result on every computer.
+
+---
+
+## 17. Working with several examiners
+
+Several examiners can use Lucida at the same time (see 17.1 for how their names are recorded).
 Heavy work goes through one shared job queue, so the machine is never asked to do more at once
 than it can, and everyone can see what is running.
 
-### 13.1 The examiner name
+### 17.1 The examiner name
 
 Lucida has no accounts. Everyone who uses it works as the one examiner named at the top right,
 so if several people share the workstation, change the name (click it) when someone else takes
 over, so the audit log says who did what.
 
-### 13.2 The job queue
+### 17.2 The job queue
 
 These operations are queued: rendering and verifying a chain, every analysis, converting a
 recorder export, the Smart Report, Triage, building a camera reference, the independent review,
@@ -863,7 +1031,7 @@ jobs waiting at a time.
 **If Lucida is restarted**, jobs that were running are marked failed (start them again)
 and jobs that were waiting run when it is back.
 
-### 13.3 Settings for the administrator
+### 17.3 Settings for the administrator
 
 How many jobs run at once is set in `workbench.ini` in the installation folder:
 
@@ -898,7 +1066,7 @@ folder is shared by the members of the local **Forensic Examiners** Windows grou
 
 ---
 
-### 13.4 Using Lucida from other PCs on the lab network
+### 17.4 Using Lucida from other PCs on the lab network
 
 Lucida can let examiners work from their own PCs, so the workstation does the heavy work while
 each examiner uses a browser at their desk.
@@ -950,7 +1118,7 @@ and addresses. AI agents connecting over the network need a separate secret toke
 
 ---
 
-## 14. Connecting an AI agent
+## 18. Connecting an AI agent
 
 An AI assistant (for example Claude Desktop, or a self-hosted model with an MCP client) can drive
 Lucida through its MCP servers: evidence, enhance, authenticate, measure and case. Configuration
@@ -966,7 +1134,7 @@ is in the [README](../README.md#connecting-an-agent). What an agent can and cann
 
 ---
 
-## 15. Limits and troubleshooting
+## 19. Limits and troubleshooting
 
 | Situation | What to do |
 |---|---|
@@ -997,7 +1165,7 @@ with the lab's validation records.
 
 ---
 
-## 16. Keyboard and mouse reference
+## 20. Keyboard and mouse reference
 
 | Action | Key or mouse |
 |---|---|
@@ -1018,7 +1186,7 @@ with the lab's validation records.
 
 ---
 
-## 17. Filter and analysis reference
+## 21. Filter and analysis reference
 
 ### Filters
 
@@ -1069,7 +1237,7 @@ See the table in section 9.3.
 
 ---
 
-## 18. Glossary
+## 22. Glossary
 
 - **Chain**: an ordered list of enhancement steps applied to a source.
 - **Render**: run a saved chain from the original, store the result and record its hash.

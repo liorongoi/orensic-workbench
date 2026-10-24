@@ -109,6 +109,11 @@ def test_accounts_mode(client, monkeypatch, jpeg_path):
     assert c.put(f"/api/evidence/{ev['id']}/tags", json={"tags": ["a"]}).status_code == 200
     assert c.get("/api/users").status_code == 403
     assert c.post("/api/batches", json={"output_dir": "/tmp/x", "input_dir": "/tmp"}).status_code == 403
+    # A case an examiner opens is theirs to work on; members are still the administrator's to change.
+    mine = c.post("/api/cases", json={"name": "Ann's case", "examiner": "x"}).json()
+    assert mine["id"] in [x["id"] for x in c.get("/api/cases").json()]
+    assert c.delete(f"/api/cases/{case['id']}/members/vic").status_code == 403
+    assert c.patch("/api/me", json={"full_name": "Someone Else"}).status_code == 409
     # The audit log names the signed-in person.
     entries = api.wb().audit.entries(case["id"])
     assert any(e["actor"].startswith("Ann") for e in entries)

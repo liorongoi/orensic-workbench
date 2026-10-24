@@ -7,9 +7,9 @@ footage and photos) and **Authenticate** (check whether an image is what it clai
 to be), on one audited processing core. This is Phase 0 (foundations), Phase 1
 (MVP), Phase 2 (depth) and Phase 3 (AI, deepfake checks, full parity) of the build plan *Forensic Image & Video Platform: Build Plan*.
 
-Assumed user: a general forensic examiner working alone on one machine (the plan's
-open question about target users is not answered yet). Multi-user access control,
-SSO and object storage come with the lab deployment.
+Assumed user: a forensic examiner on their own workstation (the desktop app), or a small lab
+sharing one server (the web app, with optional sign-in, roles and per-case membership). SSO and
+object storage are not built yet.
 
 ## Run it
 
@@ -42,8 +42,18 @@ Windows (offline installer), Docker and air-gapped installation: see
 [docs/deployment.md](docs/deployment.md). After any
 installation, `python -m forensic.selftest` checks the tools, models and a full case end to end.
 
-Tests: `cd backend && pytest` (about 60 tests, a couple of minutes; includes a quick
+**Desktop or web.** The same installer gives both: the **desktop app** (Lucida in its own window,
+one examiner, nothing on the network) and the **web app** for an office server (examiners use a
+browser on their own PCs over HTTPS, with optional sign-in, roles and per-case membership). See the
+table at the top of [docs/deployment.md](docs/deployment.md).
+
+Tests: `cd backend && pytest` (about 225 tests, about five minutes; includes a quick
 validation run that fails if detector accuracy drops below the published floor).
+
+Tested examples of every algorithm and workflow: `cd backend && python -m tools.showcase.run
+--media <OpenCV sample images> --work <dir> && python -m tools.showcase.pdf --work <dir> --out
+report.pdf` runs each one through the application and writes a PDF with before/after images,
+parameters and measurements against known ground truth.
 
 ## What is in it
 
@@ -94,9 +104,27 @@ validation run that fails if detector accuracy drops below the published floor).
 | Air-gapped deployment | `Dockerfile`, `docker-compose.yml`, `deploy/airgap/`, `forensic/selftest.py` | A container on an internal-only network, or an offline bundle (wheels, UI, models, `SHA256SUMS`) installed with `pip --no-index` and accepted by the self-test. Nothing calls out at run time; an LLM agent connects through MCP, so a self-hosted model works. |
 | Validation | `forensic/validation/phase3.py` | Cards for camera traces, face consistency, double encoding and frame integrity, with the conditions where each fails. |
 
+**Investigation platform (case work, video, intelligence, batch)**
+
+| Area | Where | How |
+|---|---|---|
+| Case management | `forensic/casework.py` | Case details and sub-cases, chain of custody per item, tags and bookmarks, full-text search (audited), exact and near duplicates (DCT perceptual hash), export packages with SHA-256/SHA-512 manifests that the recipient can verify, legal hold, retention and controlled disposal, chain branches and presets. |
+| Video operations | `forensic/videoops.py` | Clips (copy, lossless FFV1, H.264) with requested-versus-delivered frames recorded, PNG frame export, scene changes and repeated frames, contact sheets, compare (PSNR, SSIM, aligned difference map), concatenate, image sequence to video, processed-chain video, audio/video timing. |
+| Multi-camera sync | `forensic/sync.py` | Reference, manual, on-screen clock, one event, two events (offset and drift), audio and brightness cross-correlation; each record keeps its method, evidence and uncertainty; media are never edited. A synchronised view shows every camera at one case time. |
+| Detection, tracking, plates | `forensic/intel/` | YOLOX (ONNX, hash-verified), deterministic SORT-style tracking, plate localisation, rectification, Tesseract with alternatives and per-country format rules. Every reading starts unreviewed; an examiner confirms, corrects or rejects it. Wildcard plate search across cases. |
+| Redaction | `forensic/redaction.py` | Keyframed and track-following regions (whole object or a vehicle's plate zone), automatic faces and plates, audio keep/mute/remove; the rendered copy is new linked evidence and every decoded frame is checked. |
+| Batch conversion | `forensic/batch.py` | Whole recorder exports identified by content and converted with one profile, never overwriting, with duplicate detection, frame-count checks and JSON/CSV/SHA-256 manifests. |
+| Command line | `forensic/cli.py` (`lucida`, `lucida.cmd` on Windows) | Batch scan and run, verify, backup (optionally AES-256-GCM) and verified restore; exit codes for scripts. |
+| Hardware profiles | `forensic/compute.py` | light / standard / high from cores, RAM and GPU decide detector size, frame sampling and parallel conversions; recorded with every run. Classical filters are unaffected. |
+| Optional sign-in | `forensic/security.py` | `FORENSIC_AUTH=accounts` (or `auth = accounts` in `workbench.ini`): scrypt passwords, lockout, idle timeout, roles admin / examiner / reviewer / viewer, per-case membership, refusals audited. |
+| API | `forensic/api_platform.py` | Every feature above over HTTP, also under `/api/v1`, with job progress as server-sent events at `/api/jobs-stream`. |
+
+How each of these works and why: sections 22 to 27 of [docs/algorithms.md](docs/algorithms.md).
+
 ## Rules the code enforces
 
-- There is no sign-in: every request acts as one built-in local examiner, and actions are audited under that examiner's name (click it at the top right to change it); a name sent by the browser is ignored.
+- By default there is no sign-in: every request acts as one built-in local examiner, and actions are audited under that examiner's name (click it at the top right to change it); a name sent by the browser is ignored. A shared server turns on sign-in (`FORENSIC_AUTH=accounts`), and then every action is audited under the signed-in person.
+- Plate readings, tracks and detections are leads: none becomes a confirmed result until an examiner confirms or corrects it, and every search over people and plates is audited.
 - Renders, analyses, conversions, reviews and reports run through one shared job queue, visible to everyone under **Jobs** (see [docs/deployment.md](docs/deployment.md#several-examiners)).
 - Originals are never written after ingest; all work is on derived, content-addressed outputs.
 - Live previews are not stored or audited and are never evidential. "Render result" runs the saved chain from the original and records the output hash.
@@ -130,7 +158,8 @@ Set `FORENSIC_AGENT_NAME` and `FORENSIC_AGENT_MODEL` so the audit log records wh
 
 - One learned generated-image detector is bundled (`synthetic.generated`: Community Forensics, CVPR 2025, MIT licence); it scores whole images for GAN and diffusion generation. A second slot (`synthetic.learned`) takes a detector the lab licenses and validates itself.
 - Every detector is so far validated on synthetic data only, including the phase 3 checks; no real photographs, real face swaps or recorder footage have been run. Run the validation with real material before relying on a detector in casework.
-- Clone detection, OCR, multi-view triangulation, native parsers for vendor formats FFmpeg cannot demux (they are carved instead), Postgres + S3 Object Lock, SSO, MCP agents sharing the API's job queue, and sandboxed parsers. Chains are linear; branching graphs use the same document format later.
+- Multi-view triangulation, native parsers for vendor formats FFmpeg cannot demux (they are carved instead), Postgres + S3 Object Lock, SSO, MCP agents sharing the API's job queue, and sandboxed parsers. Chains are linear (they can be forked into branches).
+- Plate reading works on clear plates; small (about 60 px wide) or motion-blurred real plates are usually not read and go to human review. Detection, tracking and plate reading have not yet been validated on a lab's own footage.
 
 ## Layout
 
@@ -158,6 +187,15 @@ backend/
     audit.py        hash-chained audit log
     report.py       bundle, HTML and PDF reports
     mcp_server.py   MCP servers for agents
+    api_platform.py HTTP API for case work, video, sync, intelligence, redaction and batches
+    casework.py     custody, tags, bookmarks, search, duplicates, export packages, retention
+    videoops.py     clips, frame export, scene changes, compare, concatenate
+    sync.py         multi-camera synchronisation and timelines
+    intel/          object detection, tracking and licence-plate recognition
+    redaction.py    redaction, verification and annotated exhibits
+    batch.py        batch conversion of recorder exports
+    cli.py          the `lucida` command line (batch, verify, backup, restore)
+    security.py     optional sign-in, roles and case membership
   tools/            model conversion (source graphs to ONNX)
   tests/
 deploy/airgap/      offline bundle build and install scripts
