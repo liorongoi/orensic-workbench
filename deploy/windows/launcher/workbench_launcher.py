@@ -319,6 +319,7 @@ def selftest(pause: bool) -> int:
             code = st.main()
             if not ok:
                 code = code or 1
+                print("Self-test FAILED: the installed files differ from the installer (see the first line).")
             print(f"\nLog saved to {log_path}")
         finally:
             sys.stdout = out

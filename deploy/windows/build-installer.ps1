@@ -172,8 +172,28 @@ Check "listing the package licences"
 Copy-Item "$Py\LICENSE.txt" "$Payload\licences\python-LICENSE.txt" -ErrorAction SilentlyContinue
 
 Step "Pre-compiling Python modules (the installation folder may be read-only for users)"
-& "$Py\python.exe" -I -m compileall -q -j 0 --invalidation-mode unchecked-hash $Site | Out-Null
+# -f recompiles the .pyc files pip already wrote. Those are timestamp-based, and Python rewrites a
+# timestamp-based .pyc when the source's time does not match, which changed installed files after
+# the first start on some PCs. An unchecked-hash .pyc is never rewritten.
+& "$Py\python.exe" -I -m compileall -f -q -j 0 --invalidation-mode unchecked-hash $Site | Out-Null
 if ($LASTEXITCODE -ne 0) { Write-Warning "some third-party files did not compile (usually Python 2 test files); they are not imported" }
+& "$Py\python.exe" -I -c @"
+import pathlib, sys
+site = pathlib.Path(sys.argv[1])
+stale = []
+for pyc in site.rglob('__pycache__/*.pyc'):
+    if not (pyc.parent.parent / (pyc.name.split('.')[0] + '.py')).is_file():
+        continue  # shipped without its source, so Python never rewrites it
+    head = pyc.read_bytes()[:8]
+    # PEP 552: flags 0b01 marks an unchecked hash-based .pyc; anything else can be rewritten.
+    if int.from_bytes(head[4:8], 'little') != 1:
+        stale.append(str(pyc.relative_to(site)))
+print(f'{len(stale)} .pyc file(s) Python could rewrite after install')
+for s in stale[:20]:
+    print('  ' + s)
+sys.exit(1 if stale else 0)
+"@ $Site
+Check "checking every .pyc is unchecked-hash"
 
 Step "Build record and SHA256SUMS"
 $commit = (git -C $Repo rev-parse HEAD 2>$null)
