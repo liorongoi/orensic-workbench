@@ -18,6 +18,7 @@ The data folder is FORENSIC_DATA_DIR (or --data-dir). The examiner name for the 
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import getpass
 import hashlib
 import io
@@ -206,7 +207,8 @@ def cmd_backup(args) -> int:
     with tempfile.TemporaryDirectory() as tmp:
         snap = Path(tmp) / "forensic.sqlite3"
         # Consistent copy of the live database (SQLite online backup).
-        with sqlite3.connect(str(s.db_path)) as live, sqlite3.connect(str(snap)) as copy:
+        # Close both explicitly: Windows cannot delete a file SQLite still holds open.
+        with closing(sqlite3.connect(str(s.db_path))) as live, closing(sqlite3.connect(str(snap))) as copy:
             live.backup(copy)
         entries = []
         raw = Path(tmp) / "backup.tar"
@@ -216,8 +218,8 @@ def cmd_backup(args) -> int:
                 with open(p, "rb") as f:
                     for c in iter(lambda: f.read(1 << 20), b""):
                         h.update(c)
-                entries.append({"path": str(rel), "size": p.stat().st_size, "sha256": h.hexdigest()})
-                info = tar.gettarinfo(str(p), arcname=f"data/{rel}")
+                entries.append({"path": rel.as_posix(), "size": p.stat().st_size, "sha256": h.hexdigest()})
+                info = tar.gettarinfo(str(p), arcname=f"data/{rel.as_posix()}")
                 info.uid = info.gid = 0
                 info.uname = info.gname = ""
                 with open(p, "rb") as f:
@@ -289,7 +291,7 @@ def cmd_restore(args) -> int:
                     problems.append(f"unexpected entry {m.name}")
                     continue
                 data = tar.extractfile(m).read()
-                e = want.pop(str(rel), None)
+                e = want.pop(rel.as_posix(), None)
                 if not e or hashlib.sha256(data).hexdigest() != e["sha256"]:
                     problems.append(f"{rel} does not match the manifest")
                     continue
@@ -316,6 +318,7 @@ def cmd_restore(args) -> int:
     problems += [f"evidence {b} fails its hash" for b in bad]
     wb.audit.append(Actor(args.examiner or os.environ.get("FORENSIC_EXAMINER") or getpass.getuser() or "examiner"),
                     "system.restore", params={"backup": src.name, "files": len(manifest["files"]), "problems": problems})
+    wb.db.close()
     _print(args, {"ok": not problems, "files": len(manifest["files"]), "problems": problems},
            f"restored {len(manifest['files'])} files into {target}; audit chain intact, " if not problems else
            "restore problems:\n" + "\n".join(problems))

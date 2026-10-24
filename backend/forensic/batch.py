@@ -119,7 +119,7 @@ class Batch:
         for p in sorted(it):
             if not p.is_file() or p.is_symlink():
                 continue
-            rel = str(p.relative_to(folder))
+            rel = p.relative_to(folder).as_posix()
             if not fnmatch.fnmatch(p.name.lower(), include.lower()):
                 continue
             skip = any(fnmatch.fnmatch(p.name.lower(), s) for s in SKIP)
