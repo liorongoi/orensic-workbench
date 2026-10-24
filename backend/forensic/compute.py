@@ -199,6 +199,41 @@ def describe() -> str:
             f"learned models on {models.device_label()}{card}")
 
 
+PROFILES = {
+    # Settings for heavy, sampling-based work (detection, tracking, plate reading, batch
+    # conversion). Classical filters are not affected: their results are bit-identical on any
+    # machine. Each run records the profile and the exact settings it used.
+    "light": {"detector": "detect.yolox_nano", "frame_step": 4, "max_frames": 1500, "batch_workers": 1,
+              "plate_upscale": 480, "description": "few cores, little RAM, no usable GPU"},
+    "standard": {"detector": "detect.yolox_tiny", "frame_step": 2, "max_frames": 6000, "batch_workers": 2,
+                 "plate_upscale": 640, "description": "a typical examiner workstation"},
+    "high": {"detector": "detect.yolox_s", "frame_step": 1, "max_frames": 20000, "batch_workers": 4,
+             "plate_upscale": 800, "description": "many cores and plenty of RAM, or a usable GPU"},
+}
+
+
+def hardware_profile() -> dict:
+    """Pick the profile for this computer from its cores, RAM and graphics card.
+
+    FORENSIC_PROFILE=light|standard|high overrides the choice."""
+    from . import models
+
+    forced = os.environ.get("FORENSIC_PROFILE", "").strip().lower()
+    cores, ram = cpu_threads(), physical_memory()
+    gpu = bool(models.gpu_provider()) and ai_device() != "cpu"
+    if forced in PROFILES:
+        name, why = forced, "set by FORENSIC_PROFILE"
+    elif gpu or (cores >= 12 and ram >= 24 * GB):
+        name, why = "high", ("usable GPU" if gpu else f"{cores} CPU threads and {ram // GB} GB RAM")
+    elif cores >= 4 and ram >= 8 * GB:
+        name, why = "standard", f"{cores} CPU threads and {ram // GB} GB RAM"
+    else:
+        name, why = "light", f"{cores} CPU threads and {ram // GB} GB RAM"
+    p = dict(PROFILES[name])
+    p["batch_workers"] = max(1, min(p["batch_workers"], cores // 2 or 1))
+    return {"name": name, "reason": why, **p}
+
+
 def summary() -> dict:
     """What this computer gives Lucida, for the desktop app's System dialog."""
     from . import models
@@ -213,6 +248,7 @@ def summary() -> dict:
         "gpu": {"name": g["name"], "memory_mb": g["memory_mb"], "source": g["source"],
                 "provider": models.gpu_provider(), "jobs": gpu_jobs()},
         "models_on": models.device_label(),
+        "profile": hardware_profile(),
     }
 
 

@@ -152,6 +152,202 @@ CREATE TABLE IF NOT EXISTS jobs (
     finished_at TEXT
 );
 CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status, created_at);
+-- v0.4: evidence management, multi-camera, intelligence, redaction, batch conversion ----------
+CREATE TABLE IF NOT EXISTS custody (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    evidence_id TEXT REFERENCES evidence(id),
+    ts TEXT NOT NULL,
+    event TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    from_party TEXT NOT NULL DEFAULT '',
+    to_party TEXT NOT NULL DEFAULT '',
+    location TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    details_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS custody_evidence ON custody(evidence_id, ts);
+CREATE TABLE IF NOT EXISTS evidence_tags (
+    evidence_id TEXT NOT NULL REFERENCES evidence(id),
+    tag TEXT NOT NULL,
+    PRIMARY KEY (evidence_id, tag)
+);
+CREATE INDEX IF NOT EXISTS tags_tag ON evidence_tags(tag);
+CREATE TABLE IF NOT EXISTS bookmarks (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    evidence_id TEXT NOT NULL REFERENCES evidence(id),
+    frame INTEGER NOT NULL DEFAULT 0,
+    end_frame INTEGER,
+    label TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT 'bookmark',
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS bookmarks_evidence ON bookmarks(evidence_id, frame);
+CREATE TABLE IF NOT EXISTS exports (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    purpose TEXT NOT NULL DEFAULT '',
+    recipient TEXT NOT NULL DEFAULT '',
+    manifest_json TEXT NOT NULL,
+    package_sha256 TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS presets (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    nodes_json TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS cameras (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    label TEXT NOT NULL,
+    location TEXT NOT NULL DEFAULT '',
+    latitude REAL,
+    longitude REAL,
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sync_records (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    evidence_id TEXT NOT NULL REFERENCES evidence(id),
+    reference_evidence_id TEXT,
+    offset_s REAL NOT NULL,
+    drift_ppm REAL NOT NULL DEFAULT 0,
+    uncertainty_s REAL,
+    method TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    current INTEGER NOT NULL DEFAULT 1,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS sync_evidence ON sync_records(evidence_id, current);
+CREATE TABLE IF NOT EXISTS annotations (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    evidence_id TEXT NOT NULL REFERENCES evidence(id),
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL,
+    doc_json TEXT NOT NULL,
+    doc_hash TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS detection_runs (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    evidence_id TEXT NOT NULL REFERENCES evidence(id),
+    kind TEXT NOT NULL,
+    params_json TEXT NOT NULL,
+    models_json TEXT NOT NULL,
+    stats_json TEXT NOT NULL,
+    output_hash TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS detections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES detection_runs(id),
+    case_id TEXT NOT NULL,
+    evidence_id TEXT NOT NULL,
+    frame INTEGER NOT NULL,
+    time REAL,
+    cls TEXT NOT NULL,
+    score REAL NOT NULL,
+    x REAL NOT NULL, y REAL NOT NULL, w REAL NOT NULL, h REAL NOT NULL,
+    track_id TEXT
+);
+CREATE INDEX IF NOT EXISTS detections_lookup ON detections(case_id, cls, evidence_id, frame);
+CREATE TABLE IF NOT EXISTS tracks (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES detection_runs(id),
+    case_id TEXT NOT NULL,
+    evidence_id TEXT NOT NULL,
+    number INTEGER NOT NULL,
+    cls TEXT NOT NULL,
+    start_frame INTEGER NOT NULL,
+    end_frame INTEGER NOT NULL,
+    start_time REAL,
+    end_time REAL,
+    mean_score REAL NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'machine',
+    merged_into TEXT,
+    boxes_json TEXT NOT NULL,
+    attributes_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS tracks_lookup ON tracks(case_id, cls, evidence_id);
+CREATE TABLE IF NOT EXISTS plates (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES detection_runs(id),
+    case_id TEXT NOT NULL,
+    evidence_id TEXT NOT NULL,
+    frame INTEGER NOT NULL,
+    time REAL,
+    corners_json TEXT NOT NULL,
+    score REAL NOT NULL,
+    crop_sha256 TEXT NOT NULL,
+    rectified_sha256 TEXT NOT NULL,
+    candidates_json TEXT NOT NULL,
+    best_text TEXT NOT NULL DEFAULT '',
+    best_confidence REAL NOT NULL DEFAULT 0,
+    format_match TEXT,
+    vehicle_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'unreviewed',
+    reviewed_text TEXT,
+    reviewer TEXT,
+    reviewed_at TEXT,
+    track_id TEXT
+);
+CREATE INDEX IF NOT EXISTS plates_lookup ON plates(case_id, status, best_text);
+CREATE TABLE IF NOT EXISTS batch_jobs (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    case_id TEXT,
+    profile_json TEXT NOT NULL,
+    output_dir TEXT NOT NULL,
+    concurrency INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    finished_at TEXT,
+    manifest_sha256 TEXT
+);
+CREATE TABLE IF NOT EXISTS batch_items (
+    id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL REFERENCES batch_jobs(id),
+    seq INTEGER NOT NULL,
+    input_path TEXT NOT NULL,
+    input_sha256 TEXT,
+    input_size INTEGER,
+    detected_json TEXT,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    mode TEXT,
+    outputs_json TEXT,
+    checks_json TEXT,
+    log TEXT NOT NULL DEFAULT '',
+    error_class TEXT,
+    error TEXT,
+    started_at TEXT,
+    finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS batch_items_batch ON batch_items(batch_id, seq);
+CREATE TABLE IF NOT EXISTS case_members (
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    username TEXT NOT NULL REFERENCES users(username),
+    role TEXT NOT NULL,
+    added_at TEXT NOT NULL,
+    PRIMARY KEY (case_id, username)
+);
 """
 
 # Columns added after the first release; applied to existing databases on open.
@@ -161,6 +357,23 @@ MIGRATIONS = [
     # Set when an examiner removes an item from the case; the row and the stored file are kept.
     ("evidence", "removed_json", "TEXT"),
     ("chains", "removed_json", "TEXT"),
+    # v0.4: case management
+    ("cases", "case_number", "TEXT NOT NULL DEFAULT ''"),
+    ("cases", "legal_authority", "TEXT NOT NULL DEFAULT ''"),
+    ("cases", "description", "TEXT NOT NULL DEFAULT ''"),
+    ("cases", "parent_id", "TEXT"),
+    ("cases", "status", "TEXT NOT NULL DEFAULT 'open'"),
+    ("cases", "legal_hold_json", "TEXT"),
+    ("cases", "retention_until", "TEXT"),
+    ("cases", "disposed_json", "TEXT"),
+    ("evidence", "sha512", "TEXT"),
+    ("evidence", "source_json", "TEXT"),
+    ("evidence", "phash", "TEXT"),
+    ("evidence", "camera_id", "TEXT"),
+    ("evidence", "integrity_json", "TEXT"),
+    ("chains", "parent_chain_id", "TEXT"),
+    ("users", "failed_logins", "INTEGER NOT NULL DEFAULT 0"),
+    ("users", "locked_until", "TEXT"),
 ]
 
 

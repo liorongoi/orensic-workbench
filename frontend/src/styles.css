@@ -414,3 +414,23 @@ kbd { font-family: var(--mono); font-size: 11px; color: var(--muted); border: 1p
 .kv { width: 100%; border-collapse: collapse; }
 .kv th, .kv td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .kv th { color: var(--muted); font-weight: 500; white-space: nowrap; width: 1%; padding-right: 16px; }
+
+/* Tools (algorithm) panel on the left, evidence on the right: the default layout. */
+.workspace.tools-left { grid-template-columns: var(--right-w) minmax(0, 1fr) var(--left-w); }
+.workspace.tools-left > * { grid-row: 1; }
+.workspace.tools-left > .right, .workspace.tools-left > .right-rail { grid-column: 1; }
+.workspace.tools-left > .center { grid-column: 2; }
+.workspace.tools-left > .left, .workspace.tools-left > .left-rail { grid-column: 3; }
+.workspace.tools-left > .right { border-left: none; border-right: 1px solid var(--line); }
+.workspace.tools-left > .left { border-right: none; border-left: 1px solid var(--line); }
+.workspace.tools-left > .right-rail { border-left: none; border-right: 1px solid var(--line); }
+.workspace.tools-left > .left-rail { border-right: none; border-left: 1px solid var(--line); }
+.workspace.tools-left .split-left { left: auto; right: calc(var(--left-w) - 4px); }
+.workspace.tools-left .split-right { right: auto; left: calc(var(--right-w) - 4px); }
+.workspace.tools-left.no-left { grid-template-columns: var(--right-w) minmax(0, 1fr) 22px; }
+.workspace.tools-left.no-right { grid-template-columns: 22px minmax(0, 1fr) var(--left-w); }
+.workspace.tools-left.no-left.no-right { grid-template-columns: 22px minmax(0, 1fr) 22px; }
+@media (max-width: 1100px) {
+  .workspace.tools-left { grid-template-columns: min(var(--right-w), 320px) minmax(0, 1fr) min(var(--left-w), 220px); }
+}
+.tabs .tab-swap { flex: none; color: var(--muted); }
