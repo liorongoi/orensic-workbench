@@ -53,6 +53,9 @@ class Workbench:
         self.redaction = Redaction(self)
         self.sync = MultiCamera(self)
         self.intel = Intelligence(self)
+        from .batch import Batch
+
+        self.batch = Batch(self)
 
     # Environment ----------------------------------------------------------
 

@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from . import APP_NAME, __version__, formats, media
 from . import measure as measure_mod
+from . import security
 from .accounts import Accounts, actor_for
 from .agents import WORKFLOWS, plan_enhancement
 from .audit import Actor
@@ -31,13 +32,36 @@ from .workbench import NotFound, Workbench
 _user: contextvars.ContextVar[dict | None] = contextvars.ContextVar("user", default=None)
 
 
+_PUBLIC = {"/api/health", "/api/auth/status", "/api/auth/login", "/api/auth/setup"}
+
+
 async def _authenticate(request: Request) -> None:
-    """Lucida has no sign-in: every request acts as the built-in local examiner.
+    """By default Lucida has no sign-in: every request acts as the built-in local examiner.
+
+    With FORENSIC_AUTH=accounts (a shared lab server) every API request needs a session, and
+    the user's role and case membership decide what it may do (see security.py).
 
     Runs on the event loop, so the user it sets is visible to the endpoint (FastAPI copies the
     context into the worker thread that runs a plain `def` endpoint).
     """
-    _user.set(accounts().local_user() if request.url.path.startswith("/api/") else None)
+    path = request.url.path
+    if not path.startswith("/api/"):
+        _user.set(None)
+        return
+    if not security.enabled():
+        _user.set(accounts().local_user())
+        return
+    if path in _PUBLIC:
+        _user.set(None)
+        return
+    sec = security.Security(wb().db, wb().audit)
+    auth = request.headers.get("authorization", "")
+    token = request.cookies.get("lucida_session") or (auth[7:] if auth.lower().startswith("bearer ") else None)
+    u = sec.user_for_token(token)
+    if not u:
+        raise HTTPException(401, "sign in first")
+    sec.authorize(u, request.method, path, dict(request.path_params))
+    _user.set(u)
 
 
 @asynccontextmanager
@@ -95,7 +119,12 @@ def jobs() -> JobQueue:
 
 
 def user() -> dict:
-    return _user.get() or accounts().local_user()
+    u = _user.get()
+    if u:
+        return u
+    if security.enabled():
+        raise HTTPException(401, "sign in first")
+    return accounts().local_user()
 
 
 def actor(_legacy_name: str | None = None) -> Actor:
@@ -306,7 +335,12 @@ def cancel_job(job_id: str):
 
 @app.get("/api/cases")
 def list_cases():
-    return wb().list_cases()
+    cases = wb().list_cases()
+    if security.enabled():
+        vis = security.Security(wb().db).visible_cases(user())
+        if vis is not None:
+            cases = [c for c in cases if c["id"] in vis]
+    return cases
 
 
 @app.post("/api/cases")
@@ -615,6 +649,29 @@ def _fast_png(img) -> bytes:
     u8 = cv2.cvtColor(media.to_uint8(img), cv2.COLOR_RGB2BGR)
     ok, buf = cv2.imencode(".png", u8, [cv2.IMWRITE_PNG_COMPRESSION, 1])
     return buf.tobytes()
+
+
+# Platform services (case management, video, sync, detection, redaction, batch, sign-in) -------
+
+from .api_platform import router as _platform  # noqa: E402
+
+app.include_router(_platform)
+
+
+class _VersionedPaths:
+    """/api/v1/... is the same API as /api/... (a stable, versioned prefix for scripts)."""
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket") and scope.get("path", "").startswith("/api/v1/"):
+            scope = dict(scope, path="/api/" + scope["path"][len("/api/v1/"):])
+            scope["raw_path"] = scope["path"].encode()
+        await self.inner(scope, receive, send)
+
+
+app.add_middleware(_VersionedPaths)
 
 
 # Front end (built with `npm run build` in ../frontend) --------------------------------------

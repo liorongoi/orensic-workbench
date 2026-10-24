@@ -28,6 +28,7 @@ tools = ["onnx>=1.15"]
 desktop = ["pywebview>=5.3"]
 
 [project.scripts]
+lucida = "forensic.cli:main"
 forensic-mcp = "forensic.mcp_server:main"
 lucida-desktop = "forensic.desktop:main"
 
