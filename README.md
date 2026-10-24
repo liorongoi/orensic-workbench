@@ -121,6 +121,17 @@ parameters and measurements against known ground truth.
 
 How each of these works and why: sections 22 to 27 of [docs/algorithms.md](docs/algorithms.md).
 
+**Still-image traffic detection** ([docs/traffic.md](docs/traffic.md))
+
+| Area | Where | How |
+|---|---|---|
+| Image record | `forensic/traffic/__init__.py` | Every still image gets a row: name, capture time in UTC (EXIF or file name, or entered) and local time = UTC + the camera's offset in hours, lighting, number of vehicles, review status (not run / detected / edited / approved). |
+| Day and night detection | `forensic/traffic/scene.py`, `detectors.py`, `ensemble.py` | Lighting and haze/snow indicators by fixed rules; an ensemble of YOLOX with tiling for distant vehicles, headlight and tail-light pairs at night, and change against the camera's learned background, fused by a weighted noisy-OR. Polygon scan areas and masks per camera or per image. |
+| Background lights | `forensic/traffic/background.py` | Per camera and lighting: the empty scene (per-pixel median) and the lights that are lit in most images (street lamps, signs, windows), so they are not counted as vehicles; a deleted lamp false alarm is learned at once. |
+| Review and corrections | Traffic page (`frontend/src/components/TrafficPage.tsx`) | Move, resize, re-class, mark false alarms, add missed vehicles, approve. Every correction is kept with its image crop. |
+| Training from corrections | `forensic/traffic/learn.py` | Automatic after N corrections or on request: a re-scorer and threshold fitted to the examiner's reviewed images, adopted only if cross-validated F1 does not drop. Notifies when it starts and finishes; re-runs only images never edited or approved. |
+| Output | `forensic/traffic/report.py`, `charts.py` | Excel (images, detections, corrections, training, method), CSV, JSON, YOLO training set, HTML/PDF report, charts asked for in words ("detections by hour and lighting as stacked"). |
+
 ## Rules the code enforces
 
 - By default there is no sign-in: every request acts as one built-in local examiner, and actions are audited under that examiner's name (click it at the top right to change it); a name sent by the browser is ignored. A shared server turns on sign-in (`FORENSIC_AUTH=accounts`), and then every action is audited under the signed-in person.
@@ -192,6 +203,8 @@ backend/
     videoops.py     clips, frame export, scene changes, compare, concatenate
     sync.py         multi-camera synchronisation and timelines
     intel/          object detection, tracking and licence-plate recognition
+    traffic/        still-image vehicle detection, review, training, Excel and report
+    api_traffic.py  HTTP API for traffic detection
     redaction.py    redaction, verification and annotated exhibits
     batch.py        batch conversion of recorder exports
     cli.py          the `lucida` command line (batch, verify, backup, restore)

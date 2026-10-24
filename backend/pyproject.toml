@@ -19,6 +19,8 @@ dependencies = [
     "onnxruntime-directml>=1.20; sys_platform == 'win32'",
     "c2pa-python>=0.38",
     "cryptography>=42",
+    # Excel export of traffic detections
+    "openpyxl>=3.1",
 ]
 
 [project.optional-dependencies]

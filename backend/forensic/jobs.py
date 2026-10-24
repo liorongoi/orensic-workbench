@@ -88,6 +88,11 @@ def _case_needs_gpu(wb, p) -> bool:
         get_analysis(a["name"]).ai for a in wb.list_analysis_results(cid))
 
 
+def _traffic_camera(wb, p):
+    c = wb.traffic.config(p["camera_id"])
+    return c["case_id"], c["camera_id"], c["label"]
+
+
 def _triage(wb, p, a):
     from .agents import triage_case
 
@@ -130,6 +135,21 @@ KINDS: dict[str, Kind] = {
         "Detect and track", _evidence,
         lambda wb, p, a: wb.intel.run(p["evidence_id"], a, **{k: v for k, v in p.items() if k != "evidence_id"}),
         lambda wb, p: True),
+    "traffic.detect": Kind(
+        "Traffic detection", _evidence,
+        lambda wb, p, a: wb.traffic.detect(p["evidence_id"], a, force=bool(p.get("force")), reason=p.get("reason", "")),
+        lambda wb, p: True),
+    "traffic.detect_batch": Kind(
+        "Traffic detection (batch)", _case,
+        lambda wb, p, a: wb.traffic.detect_many(p["case_id"], a, evidence_ids=p.get("evidence_ids"), camera_id=p.get("camera_id"),
+                                                only=p.get("only", "pending"), notify=True),
+        lambda wb, p: True),
+    "traffic.background": Kind(
+        "Learn background", _traffic_camera,
+        lambda wb, p, a: wb.traffic.learn_background(p["camera_id"], a, p.get("lighting"))),
+    "traffic.train": Kind(
+        "Train traffic detector", _traffic_camera,
+        lambda wb, p, a: wb.traffic.train(p["camera_id"], a, rerun=p.get("rerun", True)), lambda wb, p: True),
     "redaction.render": Kind(
         "Render redaction", lambda wb, p: _doc(wb, p),
         lambda wb, p, a: wb.redaction.render(p["doc_id"], a, p.get("codec", "h264")), lambda wb, p: True),

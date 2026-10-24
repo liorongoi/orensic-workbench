@@ -8,6 +8,7 @@ import ampedComparison from "../../../docs/amped-comparison.md?raw";
 import deployment from "../../../docs/deployment.md?raw";
 import aiModels from "../../../docs/ai-models.md?raw";
 import validation from "../../../docs/validation/README.md?raw";
+import trafficDoc from "../../../docs/traffic.md?raw";
 import overview from "../../../README.md?raw";
 import { HELP_DOCS, type HelpDocId, readHelpHash } from "../help";
 
@@ -18,6 +19,7 @@ const TEXT: Record<HelpDocId, string> = {
   deployment,
   "ai-models": aiModels,
   validation,
+  traffic: trafficDoc,
   overview,
 };
 

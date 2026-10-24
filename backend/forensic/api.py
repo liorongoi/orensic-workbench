@@ -666,6 +666,10 @@ from .api_platform import router as _platform  # noqa: E402
 
 app.include_router(_platform)
 
+from .api_traffic import router as _traffic  # noqa: E402
+
+app.include_router(_traffic)
+
 
 class _VersionedPaths:
     """/api/v1/... is the same API as /api/... (a stable, versioned prefix for scripts)."""

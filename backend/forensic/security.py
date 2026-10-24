@@ -32,7 +32,7 @@ LOCK_MINUTES = 15
 MAX_SESSION_HOURS = 12
 MIN_PASSWORD = 12
 # Write actions a reviewer may take (path suffixes).
-REVIEW_ACTIONS = ("/review", "/accept", "/notes", "/bookmarks", "/verify")
+REVIEW_ACTIONS = ("/review", "/accept", "/notes", "/bookmarks", "/verify", "/approve")
 
 
 def enabled() -> bool:
@@ -241,7 +241,9 @@ class Security:
                    "doc_id": "SELECT case_id FROM annotations WHERE id = ?",
                    "bookmark_id": "SELECT case_id FROM bookmarks WHERE id = ?",
                    "export_id": "SELECT case_id FROM exports WHERE id = ?",
-                   "camera_id": "SELECT case_id FROM cameras WHERE id = ?"}
+                   "camera_id": "SELECT case_id FROM cameras WHERE id = ?",
+                   "traffic_run_id": "SELECT case_id FROM traffic_runs WHERE id = ?",
+                   "detection_id": "SELECT case_id FROM traffic_detections WHERE id = ?"}
         for k, q in lookups.items():
             if params.get(k):
                 r = self.db.one(q, (params[k],))

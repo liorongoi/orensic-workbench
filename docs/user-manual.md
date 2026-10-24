@@ -872,6 +872,10 @@ metre). If the distances differ a lot, prefer an event or the brightness method.
 
 ## 14. Detection, plates and redaction
 
+> To count and review vehicles in still images from traffic cameras (day and night, with masks,
+> background lights, corrections and training), use the **Traffic** page instead: see
+> [Traffic detection](traffic.md).
+
 Open the **Detect & redact** tab. Everything here runs on this computer; nothing is sent out.
 The line at the top shows the hardware profile, which decides the detector size and how many
 frames are examined (see 16.3).

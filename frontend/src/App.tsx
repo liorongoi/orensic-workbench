@@ -5,6 +5,7 @@ import { JobQueue } from "./components/JobQueue";
 import { ExaminerMenu } from "./components/ExaminerMenu";
 import { MenuBar } from "./components/MenuBar";
 import { Workspace } from "./components/Workspace";
+import { TrafficPage } from "./components/TrafficPage";
 import { AccountMenu, SignIn } from "./components/SignIn";
 import type { AnalysisSchema, FilterSchema, User } from "./types";
 import logo from "./assets/lucida.svg";
@@ -18,6 +19,11 @@ function readHash() {
 }
 
 /** `#/case/<id>?ev=<evidence>&layout=viewer`: a second window showing only the viewer. */
+/** `#/case/<id>/traffic`: the still-image traffic detection page for the case. */
+function readTraffic() {
+  return /^#\/case\/[\w-]+\/traffic/.test(location.hash);
+}
+
 function readHashOptions() {
   const q = new URLSearchParams(location.hash.split("?")[1] ?? "");
   return { evidence: q.get("ev"), viewerOnly: q.get("layout") === "viewer" };
@@ -27,6 +33,7 @@ export default function App() {
   const [me, setMe] = useState<User | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [caseId, setCaseId] = useState<string | null>(readHash());
+  const [trafficView, setTrafficView] = useState(readTraffic());
   const [filters, setFilters] = useState<FilterSchema[]>([]);
   const [analyses, setAnalyses] = useState<AnalysisSchema[]>([]);
   const [caseName, setCaseName] = useState("");
@@ -60,6 +67,7 @@ export default function App() {
     window.addEventListener("lucida-signed-out", signedOut);
     const onHash = () => {
       setCaseId(readHash());
+      setTrafficView(readTraffic());
       setHelp(readHelpHash() !== null);
     };
     window.addEventListener("hashchange", onHash);
@@ -112,7 +120,13 @@ export default function App() {
           <span className="wordmark">Lucida</span>
         </a>
         <MenuBar caseId={caseId} signedIn />
-        {caseId && <span className="crumb">/ {caseName}</span>}
+        {caseId && <span className="crumb">/ {caseName}{trafficView ? " / Traffic" : ""}</span>}
+        {caseId && (
+          <a className="button" href={trafficView ? `#/case/${caseId}` : `#/case/${caseId}/traffic`}
+            title={trafficView ? "Back to the forensic workspace" : "Vehicle detection and review on still images"}>
+            {trafficView ? "Workspace" : "Traffic"}
+          </a>
+        )}
         <span className="spacer" />
         <JobQueue me={me} />
         {authState?.mode === "accounts" ? (
@@ -121,7 +135,9 @@ export default function App() {
           <ExaminerMenu me={me} onRenamed={named} />
         )}
       </header>
-      {caseId ? (
+      {caseId && trafficView ? (
+        <TrafficPage key={caseId} caseId={caseId} />
+      ) : caseId ? (
         <Workspace key={caseId} caseId={caseId} filters={filters} analyses={analyses} {...readHashOptions()} />
       ) : (
         <CaseList onOpen={(id) => (location.hash = `#/case/${id}`)} />
