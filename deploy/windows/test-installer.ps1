@@ -156,6 +156,11 @@ try {
     $wv = Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" -ErrorAction SilentlyContinue
     Write-Host "WebView2 runtime: $(if ($wv) { $wv.pv } else { 'per-user or missing' })"
 
+    Step "Installed files unchanged after Lucida has run"
+    # Starting Lucida must not rewrite any installed file (for example a compiled .pyc).
+    & $py -B -X utf8 $launcher verify
+    if ($LASTEXITCODE -ne 0) { throw "running Lucida changed installed files" }
+
     Step "Installing again over the running Lucida"
     # Setup has to close the running server itself and replace the runtime, compiled caches included.
     $p = Start-Process -Wait -PassThru -FilePath (Resolve-Path $Installer) -ArgumentList @(
