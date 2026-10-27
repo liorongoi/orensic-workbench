@@ -188,7 +188,9 @@ mv "$payload" "$pkg/$name/payload"
 install -m 0755 "$here/install.sh" "$pkg/$name/install.sh"
 install -m 0755 "$here/check-server.sh" "$pkg/$name/check-server.sh"
 cp "$here/INSTALL.txt" "$pkg/$name/INSTALL.txt"
-[ -f "$repo/docs/linux-server-install.pdf" ] && cp "$repo/docs/linux-server-install.pdf" "$pkg/$name/"
+for g in linux-server-install.pdf linux-server-quick-install.pdf; do
+  [ -f "$repo/docs/$g" ] && cp "$repo/docs/$g" "$pkg/$name/"
+done
 (cd "$pkg/$name" && sha256sum install.sh check-server.sh payload/SHA256SUMS > PACKAGE.SHA256SUMS)
 tarball="$out/$name.tar.gz"
 tar -C "$pkg" -cf - "$name" | gzip -6 > "$tarball"

@@ -1,7 +1,9 @@
 Lucida for Linux servers (x86_64, NVIDIA GPU)
 =============================================
 
-The full step-by-step guide is linux-server-install.pdf in this folder.
+Guides in this folder: linux-server-quick-install.pdf (short: a server whose
+operating system is already installed) and linux-server-install.pdf (every step
+in detail, operations and troubleshooting).
 
 This package is fully offline. It contains everything Lucida needs and makes no
 internet connection, during installation or afterwards:
