@@ -151,6 +151,8 @@ def _options(gpu: bool):
     opts.log_severity_level = 3
     if gpu:
         opts.enable_mem_pattern = False  # required by DirectML
+        # CUDA: pick kernels that give the same bits on every run and after every restart.
+        opts.use_deterministic_compute = True
     return opts
 
 
@@ -172,7 +174,11 @@ def provider_options(provider: str) -> dict:
             return {"device_id": dev}
         return {"performance_preference": "high_performance", "device_filter": "gpu"}
     if provider == "CUDAExecutionProvider":
-        return {"device_id": dev if dev.isdigit() else "0"}
+        # The default cuDNN algorithm rather than a timed search: a search can choose a different
+        # kernel after a restart, and so a different last bit. TF32 is off, so convolutions keep
+        # full 32-bit precision on Ampere and Ada cards (the L40S, the A4000).
+        return {"device_id": dev if dev.isdigit() else "0", "cudnn_conv_algo_search": "DEFAULT",
+                "use_tf32": "0"}
     return {}
 
 

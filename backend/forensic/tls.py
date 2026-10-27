@@ -37,7 +37,50 @@ def machine_names() -> tuple[list[str], list[str]]:
             addrs.add(info[4][0].split("%")[0])
     except OSError:
         pass
+    # On Linux the host name usually resolves only to 127.0.1.1 (Debian and Ubuntu put that in
+    # /etc/hosts), so the addresses examiners actually type come from the network interfaces.
+    addrs.update(interface_addresses())
     return sorted(names), sorted(addrs)
+
+
+def interface_addresses() -> set[str]:
+    """IPv4 and global IPv6 addresses of this computer's network interfaces (Linux only).
+
+    Read from the kernel, with no network traffic. Loopback and link-local addresses are left
+    out: browsers on other computers cannot use them.
+    """
+    found: set[str] = set()
+    if not hasattr(socket, "if_nameindex"):
+        return found
+    try:
+        import fcntl
+        import struct
+    except ImportError:  # Windows
+        return found
+    try:
+        interfaces = [name for _, name in socket.if_nameindex()]
+    except OSError:
+        return found
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        for name in interfaces:
+            try:
+                # SIOCGIFADDR: the interface's IPv4 address.
+                raw = fcntl.ioctl(s.fileno(), 0x8915, struct.pack("256s", name.encode()[:15]))
+                found.add(socket.inet_ntoa(raw[20:24]))
+            except OSError:
+                continue
+    try:
+        for line in Path("/proc/net/if_inet6").read_text().splitlines():
+            h = line.split()[0]
+            found.add(str(ipaddress.ip_address(int(h, 16))))
+    except (OSError, ValueError, IndexError):
+        pass
+    keep = set()
+    for a in found:
+        ip = ipaddress.ip_address(a)
+        if not (ip.is_loopback or ip.is_link_local or ip.is_unspecified):
+            keep.add(a)
+    return keep
 
 
 def _write_key(path: Path, key) -> None:

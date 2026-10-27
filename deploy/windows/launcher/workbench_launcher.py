@@ -1,6 +1,7 @@
-"""Windows launcher for an installed Lucida.
+"""Launcher for an installed Lucida (the Windows installer and the Linux server package).
 
-Runs with the Python bundled in the installation (<app>\\python\\python.exe):
+Runs with the Python bundled in the installation (<app>\\python\\python.exe on Windows,
+<app>/python/bin/python3 on Linux, started by <app>/bin/lucida):
 
     workbench_launcher.py desktop              start Lucida in its own window (pythonw.exe, no console)
     workbench_launcher.py run [--no-browser]   start Lucida with a console and open it in the browser
@@ -8,8 +9,9 @@ Runs with the Python bundled in the installation (<app>\\python\\python.exe):
     workbench_launcher.py verify [--report F]  check the installed files against the installer's SHA256SUMS
     workbench_launcher.py cli ARGS...          the `lucida` command line (lucida.cmd in the install folder)
 
-Settings come from <app>\\workbench.ini (written by the installer); environment
-variables of the same name (FORENSIC_DATA_DIR, ...) override it. Nothing here
+Settings come from <app>\\workbench.ini (written by the installer), or the file named by
+LUCIDA_CONFIG (/etc/lucida/workbench.ini on Linux); environment variables of the same name
+(FORENSIC_DATA_DIR, ...) override it. Nothing here
 makes a network connection other than to Lucida on this machine.
 """
 
@@ -19,8 +21,10 @@ import argparse
 import configparser
 import datetime as dt
 import hashlib
+import ipaddress
 import json
 import os
+import platform
 import socket
 import ssl
 import sys
@@ -31,7 +35,8 @@ import webbrowser
 from pathlib import Path
 
 APP = Path(__file__).resolve().parents[1]
-CONFIG = APP / "workbench.ini"
+CONFIG = Path(os.environ.get("LUCIDA_CONFIG") or APP / "workbench.ini")
+EXE = ".exe" if sys.platform == "win32" else ""
 
 
 def configure() -> dict:
@@ -39,14 +44,17 @@ def configure() -> dict:
     ini = configparser.ConfigParser()
     ini.read(CONFIG, encoding="utf-8")
     cfg = ini["workbench"] if ini.has_section("workbench") else {}
-    default_data = Path(os.environ.get("LOCALAPPDATA", APP)) / "ForensicWorkbench" / "data"
+    if sys.platform == "win32":
+        default_data = Path(os.environ.get("LOCALAPPDATA", APP)) / "ForensicWorkbench" / "data"
+    else:
+        default_data = Path.home() / ".local" / "share" / "lucida"
     data = Path(os.environ.get("FORENSIC_DATA_DIR") or cfg.get("data_dir") or default_data)
     env = {
         "FORENSIC_DATA_DIR": str(data),
         "FORENSIC_IMPORT_DIR": os.environ.get("FORENSIC_IMPORT_DIR") or cfg.get("import_dir") or str(data / "import"),
         "FORENSIC_FRONTEND_DIST": str(APP / "frontend" / "dist"),
-        "FORENSIC_FFMPEG": str(APP / "ffmpeg" / "ffmpeg.exe"),
-        "FORENSIC_FFPROBE": str(APP / "ffmpeg" / "ffprobe.exe"),
+        "FORENSIC_FFMPEG": str(APP / "ffmpeg" / f"ffmpeg{EXE}"),
+        "FORENSIC_FFPROBE": str(APP / "ffmpeg" / f"ffprobe{EXE}"),
     }
     if cfg.get("c2pa_trust_anchors"):
         env["FORENSIC_C2PA_TRUST_ANCHORS"] = cfg["c2pa_trust_anchors"]
@@ -84,6 +92,15 @@ def configure() -> dict:
         from forensic.tls import ensure_certificate, fingerprint, machine_names
 
         names, addrs = machine_names()
+        # Names and addresses from allowed_hosts (a DNS alias, a NAT address) go in the certificate
+        # too, so the browser accepts it under those names as well.
+        for h in extra:
+            try:
+                ipaddress.ip_address(h)
+                addrs.append(h)
+            except ValueError:
+                names.append(h.lower())
+        names, addrs = sorted(set(names)), sorted(set(addrs))
         extra += [n for n in names + addrs if n not in ("localhost", "127.0.0.1")]
         if cfg.get("tls_cert") and cfg.get("tls_key"):
             tls = {"cert": Path(cfg["tls_cert"]), "key": Path(cfg["tls_key"]), "authority": None,
@@ -143,6 +160,9 @@ def run(open_browser: bool) -> int:
     if tls:
         lan = next((n for n in tls["names"] if n != "localhost" and "." in n), None) or socket.gethostname().lower()
         print(f"  Lab network: https://{lan}:{net['port']}")
+        for addr in tls.get("addresses") or []:
+            if "." in addr and not addr.startswith("127."):
+                print(f"               https://{addr}:{net['port']}")
         if tls["authority"]:
             print(f"  Certificate: install {tls['authority']} on each examiner PC once")
             print(f"               (Trusted Root Certification Authorities); SHA-256 {tls['authority_sha256']}")
@@ -311,7 +331,7 @@ def selftest(pause: bool) -> int:
         try:
             print(f"Lucida acceptance self-test, {dt.datetime.now().isoformat(timespec='seconds')}")
             print(f"Installation: {APP}")
-            print(f"Computer:     {os.environ.get('COMPUTERNAME', '?')}  Python {sys.version.split()[0]}\n")
+            print(f"Computer:     {os.environ.get('COMPUTERNAME') or platform.node() or '?'}  Python {sys.version.split()[0]}\n")
             ok, detail = verify_installation()
             print(f"{'PASS' if ok else 'FAIL'}  installed files: {detail}")
             from forensic import selftest as st

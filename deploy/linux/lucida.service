@@ -1,0 +1,38 @@
+# Installed by Lucida's install.sh as /etc/systemd/system/lucida.service.
+# @DATA_DIR@ and @IMPORT_DIR@ are filled in by the installer.
+[Unit]
+Description=Lucida forensic workbench (web app)
+Documentation=file:///opt/lucida/docs/deployment.md
+After=network-online.target nvidia-persistenced.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lucida
+Group=lucida
+Environment=LUCIDA_CONFIG=/etc/lucida/workbench.ini
+# Create /dev/nvidia-uvm and /dev/nvidia0 if no root process has done so yet since boot
+# (CUDA needs them; the service itself may not load kernel modules). Skipped without the driver.
+ExecStartPre=-+/usr/bin/nvidia-modprobe -u -c=0
+ExecStart=@APP_DIR@/bin/lucida server
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=60
+LimitNOFILE=65536
+UMask=0027
+# Lets the service use port 443 if you choose it; it gets no other privilege.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@DATA_DIR@ @IMPORT_DIR@
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -38,7 +38,9 @@ to port 8000).
 How to use it: [docs/user-manual.md](docs/user-manual.md). How every algorithm works and why it
 was chosen: [docs/algorithms.md](docs/algorithms.md).
 
-Windows (offline installer), Docker and air-gapped installation: see
+Windows (offline installer), Linux server (offline package for Ubuntu and Red Hat with an NVIDIA GPU,
+step-by-step guide in [docs/linux-server-install.pdf](docs/linux-server-install.pdf)), Docker and
+air-gapped installation: see
 [docs/deployment.md](docs/deployment.md). After any
 installation, `python -m forensic.selftest` checks the tools, models and a full case end to end.
 
