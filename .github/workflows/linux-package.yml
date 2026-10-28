@@ -1,0 +1,103 @@
+name: Linux server package
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    # Built on the oldest supported Ubuntu, so the package runs on 22.04 and everything newer.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space (the CUDA and cuDNN libraries are large)
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Build the offline package
+        run: deploy/linux/build-package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lucida-Linux-Server
+          path: |
+            dist/*-linux-x86_64.tar.gz
+            dist/*-linux-x86_64.tar.gz.sha256
+          compression-level: 0
+          if-no-files-found: error
+
+  # Each install is tested on a fresh runner that never saw the build.
+  test:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { sparse-checkout: deploy/linux }
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
+      - uses: actions/download-artifact@v4
+        with: { name: Lucida-Linux-Server, path: dist }
+      - name: Install as a service, open over HTTPS and in Chrome, self-test offline, upgrade, uninstall
+        run: sudo deploy/linux/test-package.sh dist/*-linux-x86_64.tar.gz
+
+  # The same package on Red Hat Enterprise Linux 9: Red Hat's own UBI image with systemd running inside.
+  test-rhel:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [registry.access.redhat.com/ubi9/ubi-init]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { sparse-checkout: deploy/linux }
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
+      - uses: actions/download-artifact@v4
+        with: { name: Lucida-Linux-Server, path: dist }
+      - name: Start ${{ matrix.image }} with systemd
+        run: |
+          docker run -d --name rhel --hostname lucida-rhel --privileged --cgroupns=host \
+            -v /sys/fs/cgroup:/sys/fs/cgroup:rw -v "$PWD:/src:ro" ${{ matrix.image }}
+          for i in $(seq 1 60); do
+            state="$(docker exec rhel systemctl is-system-running 2>/dev/null || true)"
+            case "$state" in running|degraded) break ;; esac
+            sleep 1
+          done
+          echo "systemd: $state"
+          docker exec rhel cat /etc/os-release
+          docker exec rhel dnf -y -q install tar gzip procps-ng iproute hostname findutils which
+      - name: Install as a service, open over HTTPS, self-test, upgrade, uninstall
+        run: docker exec -e TEST_NO_IPDENY=1 rhel bash /src/deploy/linux/test-package.sh /src/dist/$(cd dist && ls *-linux-x86_64.tar.gz)
+      - name: Service log
+        if: failure()
+        run: docker exec rhel journalctl -u lucida -n 200 --no-pager || true
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, test-rhel]
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: Lucida-Linux-Server, path: dist }
+      - name: Attach the package to the release
+        env: { GH_TOKEN: "${{ github.token }}", TAG: "${{ github.ref_name }}" }
+        run: |
+          cd dist
+          f="$(ls *-linux-x86_64.tar.gz)"
+          # A release file may be at most 2 GiB; a larger package goes up in parts that
+          # `cat Lucida-*.tar.gz.part* > Lucida-....tar.gz` joins again (the .sha256 is of the whole file).
+          if [ "$(stat -c %s "$f")" -gt 2000000000 ]; then
+            split -b 1900M -d "$f" "$f.part" && rm "$f"
+          fi
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$TAG" -R "$GITHUB_REPOSITORY" --title "Lucida $TAG" --notes "Offline installers."
+          gh release upload "$TAG" * -R "$GITHUB_REPOSITORY" --clobber

@@ -1,0 +1,42 @@
+Lucida for Linux servers (x86_64, NVIDIA GPU)
+=============================================
+
+Guides in this folder: linux-server-quick-install.pdf (short: a server whose
+operating system is already installed) and linux-server-install.pdf (every step
+in detail, operations and troubleshooting).
+
+This package is fully offline. It contains everything Lucida needs and makes no
+internet connection, during installation or afterwards:
+
+  - a private Python 3.12 and every Python library Lucida uses
+  - ONNX Runtime for CUDA 12 with the NVIDIA CUDA 12 and cuDNN 9 libraries,
+    so the server needs only the NVIDIA driver (R525 or newer; 550+ recommended),
+    no CUDA toolkit
+  - static FFmpeg and FFprobe
+  - the bundled AI models, each pinned by SHA-256 and re-checked before use
+  - the Lucida web interface, which examiners open in Chrome on their own PCs
+
+In short:
+
+  1. ./check-server.sh                 check the driver, GPU, memory, disk and port
+  2. sudo ./install.sh                 install, start the "lucida" service, run the self-test
+  3. copy /var/lib/lucida/tls/workbench-ca.crt (a copy is put in your home folder as
+     lucida-ca.crt) to each examiner PC and install it as a trusted root authority
+  4. open https://<server address>:8443 in Chrome; the first visitor creates the
+     administrator account
+
+Useful commands afterwards:
+
+  systemctl status lucida              is it running
+  journalctl -u lucida -f              its log
+  sudo systemctl restart lucida        after changing /etc/lucida/workbench.ini
+  lucida selftest                      acceptance self-test (log in /var/lib/lucida/logs)
+  lucida gpu                           where the models run (GPU or CPU)
+  lucida ca                            the certificate authority and its fingerprint
+  lucida backup --output FILE          backup of all case data
+  sudo /opt/lucida/uninstall.sh        remove (keeps case data unless --purge)
+
+Third-party software included: Python (PSF licence), FFmpeg (GPL; see
+/opt/lucida/ffmpeg), the NVIDIA CUDA and cuDNN runtime libraries (NVIDIA
+licence, inside python/lib/python3.12/site-packages/nvidia), and the Python
+libraries listed in /opt/lucida/licences/python-packages.txt.

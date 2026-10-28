@@ -1,0 +1,90 @@
+#!/bin/sh
+# Lucida on a Linux server.
+#
+#   lucida server         run the web app in the foreground (what the lucida service runs)
+#   lucida selftest       check the installed files, then the acceptance self-test
+#   lucida gpu            show the graphics card, the driver and where each model runs
+#   lucida verify-install check the installed files against SHA256SUMS only
+#   lucida check          check the server (driver, GPU, memory, port) without changing anything
+#   lucida ca             where the HTTPS authority certificate is, and its SHA-256 fingerprint
+#   lucida version
+#   lucida <anything else>  the Lucida command line (batch, verify, backup, restore, profile, ...)
+#
+# Commands run as the "lucida" service account, so files in the case data stay owned by it:
+# root switches to it with runuser, other users through sudo. Settings come from
+# /etc/lucida/workbench.ini.
+set -e
+self="$(readlink -f "$0")"
+APP="$(cd "$(dirname "$self")/.." && pwd)"
+
+if [ -z "${LUCIDA_AS_ME:-}" ] && [ "$(id -un)" != lucida ] && id lucida >/dev/null 2>&1; then
+  case "${1:-}" in
+    check|version|help|-h|--help|"") ;;
+    *)
+      if [ "$(id -u)" = 0 ]; then exec runuser -u lucida -- "$self" "$@"; fi
+      exec sudo -u lucida -- "$self" "$@" ;;
+  esac
+fi
+
+if [ -z "${LUCIDA_CONFIG:-}" ]; then
+  if [ -f /etc/lucida/workbench.ini ]; then LUCIDA_CONFIG=/etc/lucida/workbench.ini; else LUCIDA_CONFIG="$APP/workbench.ini"; fi
+fi
+export LUCIDA_CONFIG
+# The CUDA and cuDNN libraries ship inside the private Python (the NVIDIA pip packages); the
+# dynamic loader reads this list when the process starts, so it is set here, before Python runs.
+site="$(echo "$APP"/python/lib/python3.*/site-packages)"
+libs=""
+for d in "$site"/nvidia/*/lib; do [ -d "$d" ] && libs="$libs${libs:+:}$d"; done
+export LD_LIBRARY_PATH="$libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export PATH="$APP/ffmpeg:$PATH"
+export PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONNOUSERSITE=1
+PY="$APP/python/bin/python3"
+L="$APP/launcher/workbench_launcher.py"
+
+cmd="${1:-help}"
+[ $# -gt 0 ] && shift
+case "$cmd" in
+  server)   exec "$PY" -X utf8 "$L" run --no-browser "$@" ;;
+  selftest) exec "$PY" -X utf8 "$L" selftest "$@" ;;
+  verify-install) exec "$PY" -X utf8 "$L" verify "$@" ;;
+  check)    exec "$APP/bin/check-server.sh" "$@" ;;
+  version)  head -1 "$APP/BUILDINFO.txt"; sed -n '2,$p' "$APP/BUILDINFO.txt" ;;
+  gpu)
+    exec "$PY" -X utf8 - "$L" <<'PY'
+import runpy, sys
+launcher = runpy.run_path(sys.argv[1])
+launcher["configure"]()
+import onnxruntime as ort
+from forensic import compute, models
+g = compute.gpu_info()
+print(f"Graphics card:   {g['name'] or 'none found'}" + (f", {g['memory_mb'] // 1024} GB" if g["memory_mb"] else ""))
+print(f"ONNX Runtime:    {ort.__version__}, providers {', '.join(ort.get_available_providers())}")
+print(f"AI device rule:  {compute.ai_device()} ({models.device_label()})")
+print("Models (loaded, checked and run twice; the GPU is used only when both runs match):")
+devices = models.warm()
+for mid, dev in devices.items():
+    print(f"  {mid:32s} {dev}")
+on_gpu = any(d.startswith("gpu") for d in devices.values())
+print("RESULT: models run on the GPU" if on_gpu else "RESULT: models run on the CPU (see the troubleshooting section of the guide)")
+sys.exit(0 if on_gpu else 1)
+PY
+    ;;
+  ca)
+    exec "$PY" -X utf8 - "$L" <<'PY'
+import os, runpy, sys
+from pathlib import Path
+launcher = runpy.run_path(sys.argv[1])
+net = launcher["configure"]()
+tls = net["tls"]
+if not tls:
+    sys.exit("Lucida is set to this computer only (network = local), so it has no HTTPS certificate.")
+from forensic.tls import fingerprint
+ca = tls["authority"] or tls["cert"]
+print(f"Authority certificate: {ca}")
+print(f"SHA-256 fingerprint:   {fingerprint(Path(ca))}")
+print("Names in the server certificate: " + ", ".join(tls["names"] + tls.get("addresses", [])))
+PY
+    ;;
+  help|-h|--help) sed -n '2,18p' "$self" | sed 's/^# \{0,1\}//' ;;
+  *) exec "$PY" -X utf8 "$L" cli "$cmd" "$@" ;;
+esac
