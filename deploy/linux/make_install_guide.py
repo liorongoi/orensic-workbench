@@ -191,7 +191,7 @@ def cover():
           "the NVIDIA driver, getting and checking the package, installing the service, trusting its "
           "certificate, the first sign-in, the self-test, everyday operation and troubleshooting."),
         Spacer(1, 4 * mm),
-        *table([["Server", "x86_64, 64 GB RAM, NVIDIA L40S (48 GB), with Ubuntu Server 22.04 / 24.04 LTS or Red Hat Enterprise Linux 8 / 9 (Rocky Linux and AlmaLinux work the same way as Red Hat)"],
+        *table([["Server", "x86_64, 64 GB RAM, NVIDIA L40S (48 GB), with Ubuntu Server 22.04 / 24.04 LTS or Red Hat Enterprise Linux 9 (Rocky Linux and AlmaLinux 9 work the same way as Red Hat)"],
                 ["One package", "The same package installs on both families: it carries its own Python, CUDA libraries and FFmpeg. Only the NVIDIA driver installation differs, and this guide gives both"],
                 ["Examiner PCs", "Google Chrome (or Edge) on Windows, macOS or Linux, on the same network"],
                 ["Time needed", "About 30 minutes, plus a reboot if the NVIDIA driver is not installed yet"],
@@ -272,8 +272,9 @@ def content():
     s += [code("cat /etc/os-release")]
     s += table([["If you see", "The server runs", "Follow the boxes marked"],
                 ["NAME=\"Ubuntu\", VERSION_ID=\"22.04\" or \"24.04\"", "Ubuntu Server LTS", "<b>Ubuntu</b>"],
-                ["NAME=\"Red Hat Enterprise Linux\", VERSION_ID=\"9.x\" or \"8.x\"", "Red Hat Enterprise Linux 9 or 8", "<b>Red Hat</b>"],
-                ["NAME=\"Rocky Linux\" or \"AlmaLinux\", VERSION_ID 9.x or 8.x", "A Red Hat rebuild", "<b>Red Hat</b> (differences noted)"]],
+                ["NAME=\"Red Hat Enterprise Linux\", VERSION_ID=\"9.x\"", "Red Hat Enterprise Linux 9", "<b>Red Hat</b>"],
+                ["NAME=\"Rocky Linux\" or \"AlmaLinux\", VERSION_ID 9.x", "A Red Hat 9 rebuild", "<b>Red Hat</b> (differences noted)"],
+                ["VERSION_ID=\"8.x\" (Red Hat, Rocky or Alma 8)", "Too old for this package", "Upgrade to 9 first (Red Hat's <i>leapp</i> tool), or reinstall with 9"]],
                [72 * mm, 50 * mm, 50 * mm])
     s += [P("Write down the family and the major version (for example <i>Red Hat 9</i>); step 2 depends on it. "
             "Everything from step 3 on is the same on both, except where a box says otherwise.")]
@@ -332,11 +333,10 @@ sudo reboot""", "Ubuntu")]
     s += [sub("2.2 Red Hat: install the driver from NVIDIA's repository")]
     s += [P("Red Hat does not ship the NVIDIA driver; NVIDIA publishes it as a dnf repository. The driver is "
             "compiled for your kernel by DKMS, which comes from EPEL. For the L40S, NVIDIA recommends its "
-            "<i>open</i> kernel modules. The commands are for version 9; <b>on version 8 replace every 9 with 8</b>.")]
+            "<i>open</i> kernel modules. The commands are for version 9.")]
     s += [code("""# 1. the CodeReady Builder repository (needed by EPEL)
 sudo subscription-manager repos --enable codeready-builder-for-rhel-9-x86_64-rpms
 #    Rocky / Alma 9 instead:  sudo dnf config-manager --set-enabled crb
-#    Rocky / Alma 8 instead:  sudo dnf config-manager --set-enabled powertools
 # 2. EPEL, for DKMS
 sudo dnf install -y \\
   https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
@@ -348,8 +348,7 @@ sudo dnf config-manager --add-repo \\
 sudo dnf clean expire-cache
 # 5. the driver (open kernel modules)
 sudo dnf install -y nvidia-open                            # version 9
-#   version 8 instead:  sudo dnf module install -y nvidia-driver:open-dkms
-sudo reboot""", "Red Hat 9 (and Rocky / Alma 9); for 8, replace 9 with 8")]
+sudo reboot""", "Red Hat 9 (and Rocky / Alma 9)")]
     s += [P("If step 3 says no package matches <font face='Courier'>kernel-devel-...</font>, the running kernel is "
             "older than the newest available: run <font face='Courier'>sudo dnf -y upgrade</font>, reboot, and repeat "
             "from step 3. NVIDIA's proprietary modules (<font face='Courier'>sudo dnf install -y cuda-drivers</font>) "

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install or upgrade Lucida on a Linux server (x86_64; Ubuntu 22.04 / 24.04 LTS, Red Hat
-# Enterprise Linux 8 / 9 and its rebuilds, and other systemd distributions). Run from the unpacked package, as root:
+# Enterprise Linux 9 and its rebuilds, and other systemd distributions). Run from the unpacked package, as root:
 #
 #   sudo ./install.sh                      install with the defaults below and start the service
 #   sudo ./install.sh --port 443           a different port

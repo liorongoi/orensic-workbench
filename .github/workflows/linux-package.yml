@@ -47,14 +47,13 @@ jobs:
       - name: Install as a service, open over HTTPS and in Chrome, self-test offline, upgrade, uninstall
         run: sudo deploy/linux/test-package.sh dist/*-linux-x86_64.tar.gz
 
-  # The same package on Red Hat Enterprise Linux 8 and 9: Red Hat's own UBI images with systemd
-  # running inside, so the service, firewall-free networking and SELinux-free paths are exercised.
+  # The same package on Red Hat Enterprise Linux 9: Red Hat's own UBI image with systemd running inside.
   test-rhel:
     needs: build
     strategy:
       fail-fast: false
       matrix:
-        image: [registry.access.redhat.com/ubi9/ubi-init, registry.access.redhat.com/ubi8/ubi-init]
+        image: [registry.access.redhat.com/ubi9/ubi-init]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

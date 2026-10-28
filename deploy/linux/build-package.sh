@@ -70,11 +70,37 @@ pipi() { "$py" -m pip install --no-cache-dir --disable-pip-version-check --no-wa
 pipi --upgrade pip
 wheels="$work/wheels" && rm -rf "$wheels"
 "$py" -m pip wheel -q --no-deps --wheel-dir "$wheels" "$repo/backend"
-pipi "$wheels"/lucida_forensic-*.whl
+site="$("$py" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+# The oldest C library the package supports is glibc 2.34 (Red Hat 9; Ubuntu 22.04 has 2.35). pip on
+# the build machine would otherwise pick wheels for its own glibc, so only wheels for manylinux_2_34
+# and older
+# are accepted, installed with --target.
 # The backend asks for the CPU build of ONNX Runtime on Linux; the GPU build provides the same
-# module, so the CPU one is removed first and the two never overwrite each other's files.
-"$py" -m pip uninstall -y -q onnxruntime
-pipi "onnxruntime-gpu[cuda,cudnn]==$ORT_GPU_VERSION"
+# module, so the backend goes in without dependencies and its dependency list is installed with
+# onnxruntime-gpu in place of onnxruntime.
+"$tools/bin/pip" install -q --disable-pip-version-check packaging
+mapfile -t deps < <("$tools/bin/python" -I - "$repo/backend/pyproject.toml" <<'PY'
+import sys, tomllib
+from packaging.requirements import Requirement
+env = {"sys_platform": "linux", "platform_system": "Linux", "python_version": "3.12", "implementation_name": "cpython",
+       "platform_machine": "x86_64", "os_name": "posix", "extra": ""}
+for spec in tomllib.load(open(sys.argv[1], "rb"))["project"]["dependencies"]:
+    r = Requirement(spec)
+    if r.marker and not r.marker.evaluate(env):
+        continue
+    if r.name.lower() == "onnxruntime":
+        continue
+    r.marker = None
+    print(str(r))
+PY
+)
+printf '  %s\n' "${deps[@]}"
+platforms=()
+for m in $(seq 34 -1 5); do platforms+=(--platform "manylinux_2_${m}_x86_64"); done
+platforms+=(--platform manylinux2014_x86_64 --platform manylinux2010_x86_64 --platform manylinux1_x86_64 --platform linux_x86_64)
+pipi --target "$site" --upgrade "${platforms[@]}" --implementation cp --python-version 3.12 --abi cp312 \
+  "${deps[@]}" "onnxruntime-gpu[cuda,cudnn]==$ORT_GPU_VERSION"
+pipi --target "$site" --upgrade --no-deps "$wheels"/lucida_forensic-*.whl
 "$py" -c "import onnxruntime as o; p = o.get_available_providers(); print(o.__version__, p); assert 'CUDAExecutionProvider' in p"
 
 step "FFmpeg (static build)"
@@ -111,6 +137,31 @@ else
 fi
 ff_version="$("$payload/ffmpeg/ffmpeg" -hide_banner -version | head -1)"
 echo "  $ff_version"
+
+step "No library needs a C library newer than glibc 2.34 (Red Hat 9)"
+"$tools/bin/python" -I - "$payload" "${FFMPEG_DIR:+ffmpeg}" <<'PY'
+import pathlib, re, subprocess, sys
+root = pathlib.Path(sys.argv[1])
+skip = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else None  # a local FFmpeg copy (test builds only)
+limit = (2, 34)
+bad = []
+for f in root.rglob("*"):
+    if not f.is_file() or f.is_symlink() or not (f.suffix == ".so" or ".so." in f.name or f.parent.name in ("bin", "ffmpeg")):
+        continue
+    if skip and f.relative_to(root).parts[0] == skip:
+        continue
+    with open(f, "rb") as fh:
+        if fh.read(4) != b"\x7fELF":
+            continue
+    out = subprocess.run(["objdump", "-T", str(f)], capture_output=True, text=True).stdout
+    need = max((tuple(map(int, v.split("."))) for v in re.findall(r"GLIBC_([0-9]+\.[0-9]+(?:\.[0-9]+)?)", out)), default=(0,))
+    if need[:2] > limit:
+        bad.append(f"{f.relative_to(root)} needs glibc {'.'.join(map(str, need))}")
+print(f"  checked the ELF files; {len(bad)} need more than glibc 2.34")
+for b in bad[:30]:
+    print("  " + b)
+sys.exit(1 if bad else 0)
+PY
 
 step "User interface"
 (cd "$repo/frontend" && npm ci --no-audit --no-fund && npm run build)

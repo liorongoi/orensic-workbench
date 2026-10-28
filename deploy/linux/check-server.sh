@@ -27,14 +27,15 @@ if [ -r /etc/os-release ]; then
   . /etc/os-release
   case "${ID:-}:${VERSION_ID:-}" in
     ubuntu:22.04|ubuntu:24.04|ubuntu:26.04) ok "operating system: $PRETTY_NAME (Ubuntu family)" ;;
-    rhel:8*|rhel:9*|rhel:10*|rocky:8*|rocky:9*|rocky:10*|almalinux:8*|almalinux:9*|almalinux:10*|ol:8*|ol:9*|centos:9|centos:10)
+    rhel:9*|rhel:10*|rocky:9*|rocky:10*|almalinux:9*|almalinux:10*|ol:9*|ol:10*|centos:9|centos:10)
       ok "operating system: $PRETTY_NAME (Red Hat family)" ;;
-    *) warn "operating system: ${PRETTY_NAME:-unknown} (tested on Ubuntu 22.04/24.04 and Red Hat Enterprise Linux 8/9; other systemd distributions usually work)" ;;
+    *) warn "operating system: ${PRETTY_NAME:-unknown} (tested on Ubuntu 22.04/24.04 and Red Hat Enterprise Linux 9; other systemd distributions usually work)" ;;
   esac
 fi
 [ "$(uname -m)" = x86_64 ] && ok "processor architecture: x86_64" || fail "processor architecture: $(uname -m) (this package is for x86_64)"
 glibc="$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')"
-if [ -n "$glibc" ] && ver_ge "$glibc" 2.28; then ok "C library: glibc $glibc"; else fail "C library: glibc ${glibc:-unknown} (2.28 or newer is needed)"; fi
+if [ -n "$glibc" ] && ver_ge "$glibc" 2.34; then ok "C library: glibc $glibc"
+else fail "C library: glibc ${glibc:-unknown}; 2.34 or newer is needed (Ubuntu 22.04 or newer, Red Hat 9 or newer; Red Hat 8 is too old)"; fi
 command -v systemctl >/dev/null && [ -d /run/systemd/system ] && ok "systemd is running" || fail "systemd is not running (the lucida service needs it)"
 
 # Memory, processor, disk

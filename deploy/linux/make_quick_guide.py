@@ -1,5 +1,5 @@
 """Write docs/linux-server-quick-install.pdf: the short installation guide for a server whose
-operating system is already installed (Ubuntu 22.04 / 24.04 or Red Hat 8 / 9).
+operating system is already installed (Ubuntu 22.04 / 24.04 or Red Hat 9).
 
     python deploy/linux/make_quick_guide.py [--out docs/linux-server-quick-install.pdf]
 
@@ -55,7 +55,7 @@ def story():
         Spacer(1, 3 * mm),
     ]
     s += table([["This guide assumes", ""],
-                ["Operating system", "Ubuntu 22.04 / 24.04 LTS, or Red Hat Enterprise Linux 8 / 9 (also Rocky, Alma), "
+                ["Operating system", "Ubuntu 22.04 / 24.04 LTS, or Red Hat Enterprise Linux 9 (also Rocky, Alma 9), "
                  "installed, on the network, with a fixed IP address"],
                 ["Hardware", "x86_64, 64 GB RAM, NVIDIA L40S"],
                 ["Your account", "A user that can use sudo, logged in at the console or with SSH"],
@@ -70,8 +70,9 @@ def story():
     # 1 ---------------------------------------------------------------------------------------
     s += step(1, "Confirm the operating system")
     s += [code("grep -E '^(NAME|VERSION_ID)=' /etc/os-release\nuname -m\nhostname -I")]
-    s += [box("<i>Ubuntu</i> 22.04 / 24.04, or <i>Red Hat Enterprise Linux</i> (or Rocky / AlmaLinux) 8.x / 9.x; "
-              "<font face='Courier'>x86_64</font>; and the server's IP address. Write the address down: examiners "
+    s += [box("<i>Ubuntu</i> 22.04 / 24.04, or <i>Red Hat Enterprise Linux</i> (or Rocky / AlmaLinux) 9.x; "
+              "<font face='Courier'>x86_64</font>; and the server's IP address. (Version 8 of Red Hat, Rocky or Alma is too old "
+              "for this package: upgrade the server to 9 first.) Write the address down: examiners "
               "will type it in Chrome.", "check")]
 
     # 2 ---------------------------------------------------------------------------------------
@@ -86,8 +87,7 @@ sudo apt install -y ubuntu-drivers-common pciutils
 sudo ubuntu-drivers list --gpgpu          # pick the highest ...-server branch it lists
 sudo apt install -y nvidia-driver-570-server nvidia-utils-570-server
 sudo reboot""", "Ubuntu")]
-    s += [code("""# for version 8, replace every 9 with 8
-# (Rocky / Alma 9: sudo dnf config-manager --set-enabled crb instead of the next line)
+    s += [code("""# (Rocky / Alma 9: sudo dnf config-manager --set-enabled crb instead of the next line)
 sudo subscription-manager repos --enable codeready-builder-for-rhel-9-x86_64-rpms
 sudo dnf install -y \\
   https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
@@ -95,7 +95,6 @@ sudo dnf install -y kernel-devel-$(uname -r) kernel-headers-$(uname -r) pciutils
 sudo dnf config-manager --add-repo \\
   https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo
 sudo dnf install -y nvidia-open
-#   version 8 instead:  sudo dnf module install -y nvidia-driver:open-dkms
 sudo reboot""", "Red Hat")]
     s += [box("If Secure Boot is on (<font face='Courier'>mokutil --sb-state</font>), a blue <i>MOK management</i> "
               "screen appears on the console at the reboot: <b>Enroll MOK</b> &gt; <b>Continue</b> &gt; <b>Yes</b> &gt; "
