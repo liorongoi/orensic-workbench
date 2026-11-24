@@ -177,19 +177,38 @@ def channel_gains(img, p):
 
 @register(
     "color.grayscale",
-    name="Greyscale / channel",
-    version="1.0.0",
+    name="Greyscale / colour channel",
+    version="1.1.0",
     category="Colour",
-    description="Converts to Rec. 601 luma, or isolates one colour channel, shown as greyscale.",
+    description="With 'Luminance' selected, converts the picture to Rec. 601 luma (greyscale). With a colour "
+    "selected (red, green or blue) the picture keeps its colours and the action decides what happens to that "
+    "colour: 'keep only this colour' removes the other two channels, 'remove this colour' takes this channel out "
+    "and leaves the others, and 'show this channel as grey' displays the channel on its own as a greyscale picture. "
+    "Every action is an exact per-pixel copy or zeroing of channel values; nothing is interpolated.",
     reference="ITU-R Recommendation BT.601-7, 2011.",
-    params=[Param("source", "choice", "luma", "Source", choices=("luma", "red", "green", "blue"))],
+    params=[
+        Param("source", "choice", "luma", "Source", choices=("luma", "red", "green", "blue"),
+              help="Luma gives a greyscale picture; a colour keeps the picture in colour and applies the action below"),
+        Param("action", "choice", "keep_only_this_colour", "Action on the colour",
+              choices=("keep_only_this_colour", "remove_this_colour", "show_this_channel_as_grey"),
+              help="Keep only the selected colour (remove the others), remove the selected colour, or show its channel "
+              "as greyscale. Not used with luma."),
+    ],
+    # 1.0.0 always showed the selected channel as grey.
+    upgrades={"1.0.0": lambda p: {**p, "action": "show_this_channel_as_grey"}},
 )
 def grayscale(img, p):
     if p["source"] == "luma":
-        g = luminance(img)
+        return np.repeat(luminance(img)[..., None], 3, axis=2).astype(np.float32)
+    c = {"red": 0, "green": 1, "blue": 2}[p["source"]]
+    if p["action"] == "show_this_channel_as_grey":
+        return np.repeat(img[..., c : c + 1], 3, axis=2).astype(np.float32)
+    out = np.array(img, dtype=np.float32, copy=True)
+    if p["action"] == "keep_only_this_colour":
+        out[..., [i for i in range(3) if i != c]] = 0.0
     else:
-        g = img[..., {"red": 0, "green": 1, "blue": 2}[p["source"]]]
-    return np.repeat(g[..., None], 3, axis=2).astype(np.float32)
+        out[..., c] = 0.0
+    return out
 
 
 @register(

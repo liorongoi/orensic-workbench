@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fetchPreview, urls } from "../api";
-import { cropBoxOnSource, cropPosition, framingGraph, isBoxParam } from "../crop";
+import { cropBoxOnSource, cropPosition, framingGraph, isBoxParam, pickCount } from "../crop";
 import { bridge, keyOf, onCommand, openWindow, type Command, type OfferedFile } from "../desktop";
 import type {
   AnalysisRun,
@@ -764,7 +764,8 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
       return;
     }
     setView({ kind: "chain" });
-    setPicking({ nodeId, param: p.name, count: p.count ?? (p.name === "roi" ? 2 : undefined) });
+    const target = draft?.nodes.find((n) => n.id === nodeId);
+    setPicking({ nodeId, param: p.name, count: pickCount(target?.filter, p, target?.params) });
     setCrop(null);
     setFullImage(false);
     if (!draft) return;
@@ -902,6 +903,12 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
     if (mpoints.plan_roi?.length) overlays.push({ points: mpoints.plan_roi, color: "#3fe08a", mode: "rect", label: "planner region" });
   } else if (tab === "enhance" && mpoints.plan_roi?.length) {
     overlays.push({ points: mpoints.plan_roi, color: "#3fe08a", mode: "rect", label: "planner region" });
+  }
+  // Lines being measured are drawn as separate segments (each pair of clicks), not as one path.
+  const pickingLines = !!picking && picking.param === "lines";
+  if (pickingLines && pickPoints?.length) {
+    overlays.push({ points: pickPoints, color: "#ffcf3f", mode: "segments" });
+    overlays.push({ points: pickPoints, color: "#ffcf3f", mode: "points" });
   }
   const extHint = extPick
     ? `Click on the image: ${extPick.field.replace(/_/g, " ")} (${mpoints[extPick.field]?.length ?? 0}/${extPick.count}). Esc to stop.`
@@ -1143,7 +1150,7 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
           busyLabel={view.kind === "chain" && tab === "enhance" && selName ? `Applying ${selName}` : undefined}
           error={codecOn ? codecInfo.error : view.kind === "chain" ? preview.error : null}
           describe={codecOn ? (x, y) => describeBlock(codecInfo.info, x, y) : undefined}
-          points={picking && !pickingBox ? pickPoints : undefined}
+          points={picking && !pickingBox && !pickingLines ? pickPoints : undefined}
           pointsClosed={picking?.param === "points"}
           pickHint={
             picking
@@ -1289,7 +1296,8 @@ export function Workspace({ caseId, filters, analyses, evidence: initialEvidence
                     setCrop(null);
                     setExtPick(null);
                     setView({ kind: "chain" });
-                    setPicking({ nodeId, param: p.name, count: p.count ?? (p.name === "roi" ? 2 : undefined) });
+                    const target = draft?.nodes.find((n) => n.id === nodeId);
+                    setPicking({ nodeId, param: p.name, count: pickCount(target?.filter, p, target?.params) });
                   }}
                   drawingCrop={!!crop?.nodeId && crop.nodeId === selected}
                   onSave={save}

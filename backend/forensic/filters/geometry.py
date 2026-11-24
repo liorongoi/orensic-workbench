@@ -127,22 +127,32 @@ def aspect_ratio(img, p):
     return np.clip(cv2.resize(img, (nw, h), interpolation=INTERP[p["interpolation"]]), 0, 1)
 
 
+MAX_UNCROPPED = 3  # the uncropped canvas is at most this many times the input on each side...
+MAX_UNCROPPED_PX = 6000  # ...and at most this many pixels, unless the marked area itself is larger
+
+
 @register(
     "geometry.perspective",
     name="Perspective correction",
-    version="1.0.0",
+    version="2.0.0",
     category="Geometry",
-    description="Maps the quadrilateral marked by four points (top-left, top-right, bottom-right, "
-    "bottom-left) onto a rectangle of the given size, e.g. to view a licence plate or document "
-    "front-on. Uses a planar homography.",
+    description="Straightens the plane marked by four points (top-left, top-right, bottom-right, bottom-left) so "
+    "that it is seen front-on, e.g. a licence plate, document or wall. Uses a planar homography. By default the "
+    "whole picture is kept, warped with the plane, so nothing outside the marked area is lost; tick 'Crop to the "
+    "marked area' to keep only the straightened quadrilateral. Areas far from the plane can stretch strongly, so "
+    "the uncropped canvas is limited to three times the input size (and 6000 pixels) on each side, centred on the marked area.",
     reference=HARTLEY,
     params=[
         Param("points", "points", [[0, 0], [100, 0], [100, 50], [0, 50]], "Corners (pixels)", count=4,
               help="Click four corners on the image: top-left, top-right, bottom-right, bottom-left"),
-        Param("width", "int", 0, "Output width (0 = auto)", 0, 8192, 1),
-        Param("height", "int", 0, "Output height (0 = auto)", 0, 8192, 1),
+        Param("crop", "bool", False, "Crop to the marked area",
+              help="Off: keep the whole picture, straightened. On: keep only the marked quadrilateral."),
+        Param("width", "int", 0, "Marked area width (0 = auto)", 0, 8192, 1),
+        Param("height", "int", 0, "Marked area height (0 = auto)", 0, 8192, 1),
         Param("interpolation", "choice", "bicubic", "Interpolation", choices=INTERP_CHOICES),
     ],
+    # 1.0.0 always cropped to the marked area.
+    upgrades={"1.0.0": lambda p: {**p, "crop": True}},
 )
 def perspective(img, p):
     src = np.array(p["points"], dtype=np.float32)
@@ -152,7 +162,29 @@ def perspective(img, p):
         raise FilterError("the four points enclose too small an area")
     dst = np.array([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]], dtype=np.float32)
     m = cv2.getPerspectiveTransform(src, dst)
-    return np.clip(cv2.warpPerspective(img, m, (w, h), flags=INTERP[p["interpolation"]]), 0, 1)
+    if p["crop"]:
+        return np.clip(cv2.warpPerspective(img, m, (w, h), flags=INTERP[p["interpolation"]]), 0, 1)
+    ih, iw = img.shape[:2]
+    corners = np.array([[0, 0], [iw - 1, 0], [iw - 1, ih - 1], [0, ih - 1]], np.float64)
+    hom = np.c_[corners, np.ones(4)] @ m.T
+    if np.any(hom[:, 2] <= 1e-9):
+        # Part of the picture lies beyond the plane's horizon: it has no finite position, so keep the limit box.
+        x0, y0, x1, y1 = -np.inf, -np.inf, np.inf, np.inf
+    else:
+        xy = hom[:, :2] / hom[:, 2:]
+        x0, y0 = xy.min(axis=0)
+        x1, y1 = xy.max(axis=0)
+    # Limit the canvas around the marked area so a near-horizon plane cannot make it enormous.
+    lw = max(w, min(MAX_UNCROPPED * iw, MAX_UNCROPPED_PX))
+    lh = max(h, min(MAX_UNCROPPED * ih, MAX_UNCROPPED_PX))
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+    x0, x1 = max(x0, cx - lw / 2), min(x1, cx + lw / 2)
+    y0, y1 = max(y0, cy - lh / 2), min(y1, cy + lh / 2)
+    x0, y0 = int(np.floor(x0)), int(np.floor(y0))
+    ow, oh = int(np.ceil(x1)) - x0 + 1, int(np.ceil(y1)) - y0 + 1
+    shift = np.array([[1, 0, -x0], [0, 1, -y0], [0, 0, 1]], np.float64)
+    out = cv2.warpPerspective(img, shift @ m, (ow, oh), flags=INTERP[p["interpolation"]], borderMode=cv2.BORDER_CONSTANT)
+    return np.clip(out, 0, 1)
 
 
 @register(

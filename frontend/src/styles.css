@@ -471,3 +471,30 @@ kbd { font-family: var(--mono); font-size: 11px; color: var(--muted); border: 1p
 .account { position: relative; }
 .account-menu { position: absolute; right: 0; top: 100%; z-index: 50; display: flex; flex-direction: column; gap: 6px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; min-width: 140px; }
+
+/* Face-swap and face-edit checks: 0-1.0 score and TRUE / FALSE result */
+.face-view { margin: 6px 0; }
+.face-verdict { display: flex; align-items: baseline; gap: 10px; padding: 6px 10px; border: 1px solid var(--line); border-left-width: 4px; border-radius: 6px; margin-bottom: 8px; }
+.face-verdict b { font-size: 15px; }
+.face-verdict-label { color: var(--muted); flex: 1; }
+.face-verdict.low { border-left-color: var(--ok); }
+.face-verdict.mid { border-left-color: var(--warn); }
+.face-verdict.high { border-left-color: var(--bad); }
+.face-result.low { color: var(--ok); }
+.face-result.mid { color: var(--warn); }
+.face-result.high { color: var(--bad); }
+.score-scale { margin: 4px 4px 14px; }
+.score-track { position: relative; height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--ok) 0%, var(--warn) 50%, var(--bad) 100%); opacity: 0.85; margin-top: 18px; }
+.score-threshold { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--text); }
+.score-mark { position: absolute; top: -18px; transform: translateX(-50%); font-size: 10.5px; font-weight: 600; }
+.score-mark::after { content: ""; position: absolute; left: 50%; top: 14px; width: 2px; height: 12px; background: currentColor; }
+.score-ticks { position: relative; display: flex; justify-content: space-between; margin-top: 2px; }
+.score-ticks span[style] { position: absolute; transform: translateX(-50%); }
+.score-cell { display: flex; align-items: center; gap: 6px; }
+.score-bar { position: relative; display: inline-block; width: 60px; height: 8px; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
+.score-fill { position: absolute; left: 0; top: 0; bottom: 0; }
+.score-fill.low { background: var(--ok); }
+.score-fill.mid { background: var(--warn); }
+.score-fill.high { background: var(--bad); }
+.face-table { width: 100%; }
+.face-table th, .face-table td { text-align: left; vertical-align: top; }

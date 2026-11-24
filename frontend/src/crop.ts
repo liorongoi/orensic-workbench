@@ -64,3 +64,26 @@ export function cropBoxOnSource(filters: FilterSchema[], graph: Graph | null): n
     [p.x + p.width - 1, p.y + p.height - 1],
   ];
 }
+
+/** How many clicks a point parameter takes: the schema's count, or what the filter's other settings call for. */
+export function pickCount(filterId: string | undefined, p: { name: string; count?: number }, params: Record<string, unknown> = {}): number | undefined {
+  if (p.count) return p.count;
+  if (p.name === "roi") return 2;
+  if (filterId === "annotate.mark" && p.name === "position") return params.shape === "text" ? 1 : 2;
+  if (filterId === "annotate.measure" && p.name === "reference") return 2;
+  return undefined;
+}
+
+const ZOOM_ONLY = new Set(["zoom", "zoom_area", "zoom_position", "zoom_interpolation"]);
+
+/** Settings that only matter for some choices of another setting are hidden otherwise. `values` holds every
+ * parameter, defaults filled in. */
+export function paramShown(filterId: string | undefined, name: string, values: Record<string, unknown>): boolean {
+  if (filterId === "color.grayscale" && name === "action") return values.source !== "luma";
+  if (filterId === "annotate.mark") {
+    if (ZOOM_ONLY.has(name)) return values.shape === "zoom";
+    if (name === "filled") return values.shape === "rectangle" || values.shape === "circle";
+  }
+  if (filterId === "annotate.measure" && name === "unit") return Number(values.reference_length) > 0;
+  return true;
+}

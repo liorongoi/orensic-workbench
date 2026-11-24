@@ -685,7 +685,7 @@ viewer. Each result shows:
 | Camera-pipeline traces | Look for demosaicing traces (camera capture) and resampling (resized or rotated). | Traces present are consistent with a camera at this resolution. Their absence means little after JPEG or resizing. |
 | Generated-image detector (GAN and diffusion) | Screen an image for being made entirely by an AI generator (Stable Diffusion, FLUX, DALL-E, Midjourney, GANs). Bundled; runs on the GPU when available. | Score 0.5 or more: consistent with generated; 0.2 to 0.8 is uncertain. Screening, never proof. In testing on 20 generators it had never seen, it caught 84 % of generated images with 0.4 % false alarms, but only 35-65 % for Adobe Firefly, Midjourney 6.1 and Ideogram 2, and fewer after JPEG re-saving or down-scaling. Newer generators can be missed, and a generated object pasted into a real photo is usually not detected. |
 | Learned AI-image detector | Run a further detector your lab installed (for example one trained on newer generators). | Available only when installed. A score to weigh with the others, never proof. |
-| Face-swap and face-edit checks | Compare each face's noise and detail with its surroundings. | z of 4 or more: the face differs more than almost any other region does. Faces under 40 pixels between the eyes give weak results. Mark faces the detector misses. |
+| Face-swap and face-edit checks | Compare each face's noise and detail with its surroundings. | Each face gets a score from 0 to 1.0 and a result: TRUE (score 0.50 or more, face-swap or face-edit indicated) or FALSE. Under 0.20 consistent, 0.20-0.50 within the image's own variation, 0.50-0.80 a clear difference, over 0.80 a strong one. The score measures inconsistency, not the probability of manipulation. Faces under 40 pixels between the eyes give weak results. Mark faces the detector misses. |
 | Shadow consistency | Test whether one light casts every shadow. Open ⚙, **Pick on image**, then click a shadow point and the object point casting it, for each shadow (at least two). | Green region: where the light can be. **Inconsistent** names the smallest set of shadows that conflict (red in the map) and the tolerance the conflict holds to; report that tolerance. Use clear shadow-object pairs only. In testing there were no false alarms on consistent scenes, and a shadow from a light 20° off was caught in 84 % of cases (about half at 10°, rarely at 5°). **Consistent** does not show the image is authentic. |
 | Reflection consistency | Test reflections in one flat mirror, window or water: click an object point, then the same point in the reflection. | As for shadows; curved or rippled surfaces are not supported. |
 | Perspective consistency | Test whether lines parallel in the scene (building edges, kerbs, shelves) meet at one vanishing point: click two points along each line. | One direction per run. Lens distortion bends lines; correct it first. |
@@ -1200,14 +1200,14 @@ with the lab's validation records.
 | Exposure | Video range to full range | Stretches washed-out 16-235 "video range" footage to full black and white. |
 | Exposure | Low-light enhancement (illumination map) | Lifts dark areas much more than bright ones, keeping colour; for unevenly lit night scenes. |
 | Colour | Colour balance | Channel gains, or automatic grey world. |
-| Colour | Greyscale / channel | Luma, or one colour channel. |
+| Colour | Greyscale / colour channel | Luma (greyscale), or a colour: keep only that colour, remove it, or show its channel as grey. |
 | Colour | Invert | Negative. |
 | Geometry | Crop | Keeps a rectangle; exact copy. |
 | Geometry | Rotate | By any angle; 90° steps are exact. |
 | Geometry | Flip | Mirror horizontally or vertically. |
 | Geometry | Resize | Scale with a chosen interpolation. |
 | Geometry | Correct aspect ratio | Restore the display ratio of non-square-pixel footage. |
-| Geometry | Perspective correction | View a flat object front-on from four corners. |
+| Geometry | Perspective correction | View a flat object front-on from four corners; keeps the whole picture unless you tick "Crop to the marked area". |
 | Geometry | Lens distortion | Remove barrel or pincushion distortion. |
 | Geometry | Deinterlace | Separate the two fields of interlaced video. |
 | Denoise | Median filter | Removes speckle and impulse noise. |
@@ -1230,6 +1230,8 @@ with the lab's validation records.
 | AI-assisted | AI super resolution (single image) | Enlarges with a small neural network (FSRCNN/ESPCN); generative, illustrative only. |
 | AI-assisted | AI enhance and enlarge (Real-ESRGAN) | Cleans and enlarges 1-4x, much sharper on CCTV but invents more; generative, illustrative only. |
 | AI-assisted | Redact detected faces | Pixelates, blurs or blanks faces for disclosure. |
+| Annotate | Annotation | Arrow, line, rectangle, circle, text, or an enlarged copy (zoom) of an area; one step per mark. |
+| Annotate | Measurement | Lengths (pixels, or real units from a reference of known length) and angles, written on the picture; add it after the steps that change the picture. |
 
 ### Analyses
 

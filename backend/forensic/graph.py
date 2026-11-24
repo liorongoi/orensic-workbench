@@ -58,6 +58,11 @@ def normalise(graph: dict) -> dict:
             raise FilterError(f"duplicate node id {nid}")
         seen.add(nid)
         version = raw.get("version") or f.version
+        params = raw.get("params")
+        if version != f.version and version in f.upgrades:
+            # A chain saved with an earlier version: its parameters are mapped to the ones that give the same output.
+            params = f.upgrades[version](dict(params or {}))
+            version = f.version
         if version != f.version:
             raise FilterError(
                 f"{f.id} is pinned to version {version} but this build provides {f.version}; "
@@ -67,7 +72,7 @@ def normalise(graph: dict) -> dict:
             "id": nid,
             "filter": f.id,
             "version": version,
-            "params": f.validate(raw.get("params")),
+            "params": f.validate(params),
             "enabled": bool(raw.get("enabled", True)),
         }
         if raw.get("note"):

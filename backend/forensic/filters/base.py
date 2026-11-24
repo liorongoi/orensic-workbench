@@ -103,6 +103,9 @@ class Filter:
     ai: bool = False  # runs a learned model (printed as AI-assisted in the report)
     # For AI filters: the model ids a given parameter set runs (their weights hashes go in the report).
     models: Callable[[dict], list[str]] | None = None
+    # Earlier versions whose chains still reproduce on this build: old version -> function that turns the old
+    # parameters into this version's parameters giving the same output (e.g. a new option set to the old behaviour).
+    upgrades: dict[str, Callable[[dict], dict]] = field(default_factory=dict)
 
     def model_ids(self, params: dict) -> list[str]:
         return list(self.models(params)) if self.models else []
@@ -148,6 +151,7 @@ def register(
     generative: bool = False,
     ai: bool = False,
     models: Callable[[dict], list[str]] | None = None,
+    upgrades: dict[str, Callable[[dict], dict]] | None = None,
 ):
     def deco(fn):
         if id in REGISTRY:
@@ -166,6 +170,7 @@ def register(
             generative=generative,
             ai=ai,
             models=models,
+            upgrades=dict(upgrades or {}),
         )
         return fn
 
