@@ -50,8 +50,12 @@ SYMBOL = {
 CODE = {s: KIND_INDEX[k] for s, k in SYMBOL.items()}
 OTHER = KIND_INDEX["other"]
 CELL = re.compile(r"(\d+)([^\s\d])")
-PREFIX = re.compile(r"(\[[^\]]* @ 0x[0-9a-fA-F]+\]) ")
-GRID_TEXT = re.compile(r"(?:\s*\d+[^\s\d]{1,3}\s*)+")
+PREFIX = re.compile(r"(\[[^\[\]]*\]) ?")
+ROW_LABEL = re.compile(r"^\d+\s+(?=\d)")
+CELL_TEXT = re.compile(r"\d+[^\s\d]{1,3}")
+# What may remain of a grid row once its cells are taken out: spaces and the segmentation / interlace marks
+# that follow a blank one ("34< |" is "<", no segmentation, interlaced).
+GRID_REST = re.compile(r"[\s+\-|=]*")
 # Forward and backward motion-vector arrow colours.
 MV_FWD = (255, 236, 120)
 MV_BWD = (90, 230, 255)
@@ -83,7 +87,6 @@ def blocks(path: Path, settings: Settings, start: int, count: int, width: int, h
     n = -1
     cur: dict | None = None
     cells: list[tuple[str, str]] = []
-    decoder: str | None = None  # the "[h264 @ 0x...]" prefix of the decoder that prints the grid
 
     def close():
         # Other FFmpeg threads (filters, muxer) log at the same time and can break a row in two, so the cells of a
@@ -100,26 +103,27 @@ def blocks(path: Path, settings: Settings, start: int, count: int, width: int, h
     try:
         for raw in proc.stderr:
             line = raw.decode("latin-1")
-            m = re.search(r"(\[[^\]]* @ 0x[0-9a-fA-F]+\]) New frame, type: (\w)", line)
+            m = re.search(r"New frame, type: (\w)", line)
             if m:
                 close()
-                decoder = m.group(1)
                 n += 1
-                cur = {"type": m.group(2)} if n >= start else None
+                cur = {"type": m.group(1)} if n >= start else None
                 cells = []
                 continue
             if cur is None:
                 tail.append(line.strip())
                 continue
-            # Split the line at every log prefix; keep the decoder's text, and text before any prefix, which is
-            # the rest of a decoder row that another thread's message interrupted.
-            parts = PREFIX.split(line)
-            texts = [parts[0]] + [parts[i + 1] for i in range(1, len(parts) - 1, 2) if parts[i] == decoder]
-            for t in texts:
-                if t.strip() and GRID_TEXT.fullmatch(t.strip()):
-                    cells.extend(CELL.findall(t))
-                elif t.strip():
-                    tail.append(t.strip())
+            # Split the line at every "[...]" log prefix and keep the pieces that are nothing but grid cells: a
+            # decoder row (FFmpeg 8 logs a row in one message; FFmpeg 6 logs it cell by cell, so another thread's
+            # message can interrupt it). The prefix's wording differs between versions, so it is not relied on.
+            for t in PREFIX.split(line):
+                # FFmpeg 8 starts each row with its pixel row number ("112 30d  30>  ..."); FFmpeg 6 does not.
+                t = ROW_LABEL.sub("", t.strip())
+                found = CELL.findall(t)
+                if found and GRID_REST.fullmatch(CELL_TEXT.sub("", t)):
+                    cells.extend(found)
+                elif t and not PREFIX.fullmatch(t + " "):
+                    tail.append(t)
         close()
     finally:
         proc.stderr.close()

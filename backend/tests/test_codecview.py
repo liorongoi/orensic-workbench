@@ -141,3 +141,26 @@ def test_block_grid_survives_rows_broken_by_other_threads(tmp_path):
     assert out[0]["type"] == "P" and out[0]["qp"].shape == (3, 4)
     assert (out[0]["qp"] == 30).all()
     assert out[1]["qp"].shape == (1, 4)
+
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the stand-in FFmpeg is a shell script")
+def test_block_grid_reads_the_ffmpeg_8_layout(tmp_path):
+    """FFmpeg 8 prints a header of column positions and starts each row with its pixel row number."""
+    d = "[h264 @ 0x55aa]"
+    log = "\n".join([
+        f"{d} New frame, type: B",
+        f"{d}    0              64",
+        f"{d}   0 34X+=34d  34< |34d  ",
+        f"[out#0/null @ 0x77bb] sq: send 0 ts 0.08",
+        f"{d}  16  9i   9I   9i   9I  ",
+        f"{d}  32 30d  30d  30d  30d  ",
+    ]) + "\n"
+    (tmp_path / "log.txt").write_text(log)
+    fake = tmp_path / "ffmpeg"
+    fake.write_text(f"#!/bin/sh\ncat '{tmp_path / 'log.txt'}' >&2\n")
+    fake.chmod(0o755)
+    settings = load_settings(tmp_path / "data")
+    object.__setattr__(settings, "ffmpeg", str(fake))
+    out = codecview.blocks(tmp_path / "x.mp4", settings, 0, 1, 64, 48)
+    assert out[0]["qp"].tolist() == [[34, 34, 34, 34], [9, 9, 9, 9], [30, 30, 30, 30]]
