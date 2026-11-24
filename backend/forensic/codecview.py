@@ -50,6 +50,12 @@ SYMBOL = {
 CODE = {s: KIND_INDEX[k] for s, k in SYMBOL.items()}
 OTHER = KIND_INDEX["other"]
 CELL = re.compile(r"(\d+)([^\s\d])")
+PREFIX = re.compile(r"(\[[^\[\]]*\]) ?")
+ROW_LABEL = re.compile(r"^\d+\s+(?=\d)")
+CELL_TEXT = re.compile(r"\d+[^\s\d]{1,3}")
+# What may remain of a grid row once its cells are taken out: spaces and the segmentation / interlace marks
+# that follow a blank one ("34< |" is "<", no segmentation, interlaced).
+GRID_REST = re.compile(r"[\s+\-|=]*")
 # Forward and backward motion-vector arrow colours.
 MV_FWD = (255, 236, 120)
 MV_BWD = (90, 230, 255)
@@ -71,19 +77,29 @@ def blocks(path: Path, settings: Settings, start: int, count: int, width: int, h
     (uint8 grid). The decoder prints every frame from the first, so earlier frames are only counted.
     """
     mbw = (width + MB - 1) // MB
+    # -debug turns the log up to debug level. "repeat" keeps identical rows that would otherwise be folded into
+    # "Last message repeated n times".
     cmd = [
-        settings.ffmpeg, "-nostdin", "-hide_banner", "-nostats", "-threads", "1", "-debug", "mb_type+qp",
-        "-i", str(path), "-map", "0:v:0", "-frames:v", str(start + count), "-f", "null", "-",
+        settings.ffmpeg, "-nostdin", "-hide_banner", "-nostats", "-loglevel", "repeat+debug", "-threads", "1",
+        "-debug", "mb_type+qp", "-i", str(path), "-map", "0:v:0", "-frames:v", str(start + count + 1), "-f", "null", "-",
     ]
+    # FFmpeg 8 decodes in its own thread and can stop while that thread is still printing the last frame's grid,
+    # so one frame more than needed is decoded and only frames before it are kept. At the end of the file the
+    # decoder is flushed and finishes printing.
+    last = start + count - 1
     out: dict[int, dict] = {}
     n = -1
     cur: dict | None = None
-    rows: list[tuple[list[int], list[int]]] = []
+    cells: list[tuple[str, str]] = []
 
     def close():
-        if cur is not None and rows:
-            cur["kinds"] = np.array([r[0] for r in rows], np.uint8)
-            cur["qp"] = np.array([r[1] for r in rows], np.uint8)
+        # Other FFmpeg threads (filters, muxer) log at the same time and can break a row in two, so the cells of a
+        # frame are gathered across lines and cut into rows of exactly one cell per macroblock column.
+        full = len(cells) // mbw * mbw
+        if cur is not None and full and n <= last:
+            rows = [cells[i : i + mbw] for i in range(0, full, mbw)]
+            cur["kinds"] = np.array([[CODE.get(t, OTHER) for _, t in r] for r in rows], np.uint8)
+            cur["qp"] = np.array([[min(255, int(q)) for q, _ in r] for r in rows], np.uint8)
             out[n] = cur
 
     tail: deque[str] = deque(maxlen=8)
@@ -96,16 +112,22 @@ def blocks(path: Path, settings: Settings, start: int, count: int, width: int, h
                 close()
                 n += 1
                 cur = {"type": m.group(1)} if n >= start else None
-                rows = []
+                cells = []
                 continue
-            if cur is None or not line.startswith("[") or "] " not in line:
+            if cur is None:
                 tail.append(line.strip())
                 continue
-            cells = CELL.findall(line.split("] ", 1)[1])
-            # A row has exactly one cell per macroblock column; anything else is other log output.
-            if len(cells) != mbw:
-                continue
-            rows.append(([CODE.get(t, OTHER) for _, t in cells], [min(255, int(q)) for q, _ in cells]))
+            # Split the line at every "[...]" log prefix and keep the pieces that are nothing but grid cells: a
+            # decoder row (FFmpeg 8 logs a row in one message; FFmpeg 6 logs it cell by cell, so another thread's
+            # message can interrupt it). The prefix's wording differs between versions, so it is not relied on.
+            for t in PREFIX.split(line):
+                # FFmpeg 8 starts each row with its pixel row number ("112 30d  30>  ..."); FFmpeg 6 does not.
+                t = ROW_LABEL.sub("", t.strip())
+                found = CELL.findall(t)
+                if found and GRID_REST.fullmatch(CELL_TEXT.sub("", t)):
+                    cells.extend(found)
+                elif t and not PREFIX.fullmatch(t + " "):
+                    tail.append(t)
         close()
     finally:
         proc.stderr.close()

@@ -2,7 +2,7 @@
 .SYNOPSIS
   Click through the Lucida setup wizard and uninstaller and save a screenshot of every page.
 
-      deploy\windows\capture-wizard.ps1 -Installer dist\Lucida-0.3.0-Setup.exe -OutDir wizard-screenshots
+      deploy\windows\capture-wizard.ps1 -Installer dist\Lucida-0.4.0-Setup.exe -OutDir wizard-screenshots
 
   Drives the real wizard with plain window messages: finds each button by its caption and posts
   the click to its parent (WM_COMMAND / BN_CLICKED). That needs no keyboard focus and never waits
