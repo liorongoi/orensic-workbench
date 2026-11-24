@@ -81,8 +81,12 @@ def blocks(path: Path, settings: Settings, start: int, count: int, width: int, h
     # "Last message repeated n times".
     cmd = [
         settings.ffmpeg, "-nostdin", "-hide_banner", "-nostats", "-loglevel", "repeat+debug", "-threads", "1",
-        "-debug", "mb_type+qp", "-i", str(path), "-map", "0:v:0", "-frames:v", str(start + count), "-f", "null", "-",
+        "-debug", "mb_type+qp", "-i", str(path), "-map", "0:v:0", "-frames:v", str(start + count + 1), "-f", "null", "-",
     ]
+    # FFmpeg 8 decodes in its own thread and can stop while that thread is still printing the last frame's grid,
+    # so one frame more than needed is decoded and only frames before it are kept. At the end of the file the
+    # decoder is flushed and finishes printing.
+    last = start + count - 1
     out: dict[int, dict] = {}
     n = -1
     cur: dict | None = None
@@ -92,7 +96,7 @@ def blocks(path: Path, settings: Settings, start: int, count: int, width: int, h
         # Other FFmpeg threads (filters, muxer) log at the same time and can break a row in two, so the cells of a
         # frame are gathered across lines and cut into rows of exactly one cell per macroblock column.
         full = len(cells) // mbw * mbw
-        if cur is not None and full:
+        if cur is not None and full and n <= last:
             rows = [cells[i : i + mbw] for i in range(0, full, mbw)]
             cur["kinds"] = np.array([[CODE.get(t, OTHER) for _, t in r] for r in rows], np.uint8)
             cur["qp"] = np.array([[min(255, int(q)) for q, _ in r] for r in rows], np.uint8)
