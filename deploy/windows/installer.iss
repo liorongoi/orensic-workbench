@@ -1,6 +1,6 @@
 ; Inno Setup script for the Lucida Windows installer.
 ; Built by deploy/windows/build-installer.ps1, which assembles the payload folder and runs:
-;   ISCC.exe /DAppVersion=0.3.0 /DPayloadDir=<payload> /DOutputDir=<dist> installer.iss
+;   ISCC.exe /DAppVersion=0.4.0 /DPayloadDir=<payload> /DOutputDir=<dist> installer.iss
 ; The installer is fully offline: the payload carries Python, every dependency, FFmpeg,
 ; the AI models and the built UI. It never downloads anything.
 

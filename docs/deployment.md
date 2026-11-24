@@ -22,7 +22,7 @@ users" in the first dialog to install under Program Files for everyone on the ma
 Get the installer from the **Windows installer** workflow in GitHub Actions (artifact
 `Lucida-Windows-Setup`, with its `.sha256`), or from a release when a `v*` tag is
 pushed. Carry the `.exe` to the offline machine, check its SHA-256 if your lab requires it
-(`certutil -hashfile Lucida-0.3.0-Setup.exe SHA256`), and run it. The wizard opens with a
+(`certutil -hashfile Lucida-0.4.0-Setup.exe SHA256`), and run it. The wizard opens with a
 welcome page, the licence agreement and a list of what is included, then a **system check**.
 It reads the installed memory, the graphics card and the NVIDIA driver version. Lucida is sized for
 an NVIDIA RTX A4000 (16 GB) with 48 to 128 GB of RAM. The page warns, without stopping the install,
@@ -79,7 +79,7 @@ adapter number, if the NVIDIA card is not picked on its own). Running a newer in
 these settings and the case data. Silent installation for managed rollouts:
 
 ```
-Lucida-0.3.0-Setup.exe /VERYSILENT /ALLUSERS /DIR="C:\Program Files\Lucida" /DATADIR="D:\Cases" /PORT=8000
+Lucida-0.4.0-Setup.exe /VERYSILENT /ALLUSERS /DIR="C:\Program Files\Lucida" /DATADIR="D:\Cases" /PORT=8000
 ```
 
 Add `/TASKS="startmenu,desktopicon"` to choose shortcuts (and `labnetwork` for the lab-network
@@ -235,7 +235,7 @@ processor, memory and graphics card.
 ## Container
 
 ```bash
-docker build -t lucida:0.3.0 .
+docker build -t lucida:0.4.0 .
 docker compose up            # http://127.0.0.1:8000
 docker compose --profile agents up   # also the authenticate MCP server on the internal network
 ```
@@ -247,7 +247,7 @@ creates a missing bind-mounted folder owned by root), then runs Lucida as that u
 Without Compose:
 
 ```bash
-docker run -p 127.0.0.1:8000:8000 -v "$PWD/data:/data" lucida:0.3.0
+docker run -p 127.0.0.1:8000:8000 -v "$PWD/data:/data" lucida:0.4.0
 ```
 
 Lucida joins a plain network so its port can reach your browser (Docker does not

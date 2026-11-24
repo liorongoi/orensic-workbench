@@ -2,7 +2,7 @@
 .SYNOPSIS
   Install the built installer silently on a clean Windows machine and check it works offline.
 
-      deploy\windows\test-installer.ps1 -Installer dist\Lucida-0.3.0-Setup.exe [-AllUsers] [-LabNetwork]
+      deploy\windows\test-installer.ps1 -Installer dist\Lucida-0.4.0-Setup.exe [-AllUsers] [-LabNetwork]
 
   Installs, blocks the installed Python from the network with a firewall rule (needs an
   administrator shell), runs the acceptance self-test with nothing but Windows itself on PATH,
