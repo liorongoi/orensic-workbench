@@ -50,6 +50,8 @@ SYMBOL = {
 CODE = {s: KIND_INDEX[k] for s, k in SYMBOL.items()}
 OTHER = KIND_INDEX["other"]
 CELL = re.compile(r"(\d+)([^\s\d])")
+PREFIX = re.compile(r"(\[[^\]]* @ 0x[0-9a-fA-F]+\]) ")
+GRID_TEXT = re.compile(r"(?:\s*\d+[^\s\d]{1,3}\s*)+")
 # Forward and backward motion-vector arrow colours.
 MV_FWD = (255, 236, 120)
 MV_BWD = (90, 230, 255)
@@ -71,19 +73,26 @@ def blocks(path: Path, settings: Settings, start: int, count: int, width: int, h
     (uint8 grid). The decoder prints every frame from the first, so earlier frames are only counted.
     """
     mbw = (width + MB - 1) // MB
+    # -debug turns the log up to debug level. "repeat" keeps identical rows that would otherwise be folded into
+    # "Last message repeated n times".
     cmd = [
-        settings.ffmpeg, "-nostdin", "-hide_banner", "-nostats", "-threads", "1", "-debug", "mb_type+qp",
-        "-i", str(path), "-map", "0:v:0", "-frames:v", str(start + count), "-f", "null", "-",
+        settings.ffmpeg, "-nostdin", "-hide_banner", "-nostats", "-loglevel", "repeat+debug", "-threads", "1",
+        "-debug", "mb_type+qp", "-i", str(path), "-map", "0:v:0", "-frames:v", str(start + count), "-f", "null", "-",
     ]
     out: dict[int, dict] = {}
     n = -1
     cur: dict | None = None
-    rows: list[tuple[list[int], list[int]]] = []
+    cells: list[tuple[str, str]] = []
+    decoder: str | None = None  # the "[h264 @ 0x...]" prefix of the decoder that prints the grid
 
     def close():
-        if cur is not None and rows:
-            cur["kinds"] = np.array([r[0] for r in rows], np.uint8)
-            cur["qp"] = np.array([r[1] for r in rows], np.uint8)
+        # Other FFmpeg threads (filters, muxer) log at the same time and can break a row in two, so the cells of a
+        # frame are gathered across lines and cut into rows of exactly one cell per macroblock column.
+        full = len(cells) // mbw * mbw
+        if cur is not None and full:
+            rows = [cells[i : i + mbw] for i in range(0, full, mbw)]
+            cur["kinds"] = np.array([[CODE.get(t, OTHER) for _, t in r] for r in rows], np.uint8)
+            cur["qp"] = np.array([[min(255, int(q)) for q, _ in r] for r in rows], np.uint8)
             out[n] = cur
 
     tail: deque[str] = deque(maxlen=8)
@@ -91,21 +100,26 @@ def blocks(path: Path, settings: Settings, start: int, count: int, width: int, h
     try:
         for raw in proc.stderr:
             line = raw.decode("latin-1")
-            m = re.search(r"New frame, type: (\w)", line)
+            m = re.search(r"(\[[^\]]* @ 0x[0-9a-fA-F]+\]) New frame, type: (\w)", line)
             if m:
                 close()
+                decoder = m.group(1)
                 n += 1
-                cur = {"type": m.group(1)} if n >= start else None
-                rows = []
+                cur = {"type": m.group(2)} if n >= start else None
+                cells = []
                 continue
-            if cur is None or not line.startswith("[") or "] " not in line:
+            if cur is None:
                 tail.append(line.strip())
                 continue
-            cells = CELL.findall(line.split("] ", 1)[1])
-            # A row has exactly one cell per macroblock column; anything else is other log output.
-            if len(cells) != mbw:
-                continue
-            rows.append(([CODE.get(t, OTHER) for _, t in cells], [min(255, int(q)) for q, _ in cells]))
+            # Split the line at every log prefix; keep the decoder's text, and text before any prefix, which is
+            # the rest of a decoder row that another thread's message interrupted.
+            parts = PREFIX.split(line)
+            texts = [parts[0]] + [parts[i + 1] for i in range(1, len(parts) - 1, 2) if parts[i] == decoder]
+            for t in texts:
+                if t.strip() and GRID_TEXT.fullmatch(t.strip()):
+                    cells.extend(CELL.findall(t))
+                elif t.strip():
+                    tail.append(t.strip())
         close()
     finally:
         proc.stderr.close()
