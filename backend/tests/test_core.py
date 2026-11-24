@@ -62,6 +62,10 @@ def _every_image_filter_chain():
             params = {"points": [[20, 20], [280, 30], [290, 200], [10, 210]]}
         if f.id == "geometry.crop":
             params = {"x": 4, "y": 4}
+        if f.id == "annotate.mark":
+            params = {"shape": "zoom", "position": [[40, 40], [80, 70]], "text": "Exhibit 1"}
+        if f.id == "annotate.measure":
+            params = {"lines": [[10, 100], [200, 120]], "reference": [[10, 150], [110, 150]], "reference_length": 50}
         if f.id == "deblur.variable":
             params = {"streaks": [[10, 10], [16, 12], [200, 150], [206, 146]], "tiles": 3}
         nodes.append({"filter": f.id, "params": params})

@@ -89,7 +89,7 @@ PLAN: dict[str, dict] = {
     "geometry.flip": {"input": "building"},
     "geometry.resize": {"input": "small", "params": {"scale_x": 2, "scale_y": 2}},
     "geometry.aspect_ratio": {"input": "building", "params": {"ratio_w": 4, "ratio_h": 3}},
-    "geometry.perspective": {"input": "plate_car", "params": {"points": [[185, 254], [278, 254], [278, 293], [185, 293]], "width": 280, "height": 116}},
+    "geometry.perspective": {"input": "plate_car", "params": {"points": [[185, 254], [278, 254], [278, 293], [185, 293]], "width": 280, "height": 116, "crop": True}},
     "geometry.lens_undistort": {"input": "barrel", "params": {"k1": -0.2}},
     "geometry.deinterlace": {"input": "interlaced"},
     "stack.background_subtract": {"input": "moving", "frames": [0, 23], "show": 12, "params": {"output": "overlay"}},

@@ -319,12 +319,18 @@ also offered. Grey-edge and learned colour-constancy methods were not added: the
 better on benchmark scenes, but CCTV colour casts usually come from the camera's own
 white balance, which the examiner can correct by eye against a known neutral object.
 
-### 5.7 Greyscale or channel, and invert
+### 5.7 Greyscale or colour channel, and invert
 
 Greyscale uses **Rec. 601 luma** (0.299 R + 0.587 G + 0.114 B), the weighting of the JPEG
 and most CCTV pipelines, so the result matches the brightness the codec itself worked with.
-Isolating one channel helps when one channel carries the detail (for example red for a
-number plate under sodium light). Invert is `1 − v`.
+With a colour (red, green or blue) selected instead of luma, the picture stays in colour and the
+examiner chooses the action: **keep only this colour** (the other two channels are set to 0),
+**remove this colour** (this channel is set to 0, the others are kept) or **show this channel as
+grey** (the channel copied into all three, the only behaviour of version 1.0.0). Every action copies
+or zeroes channel values exactly. Keeping or removing one channel helps when one channel carries
+the detail or the clutter (for example red for a number plate under sodium light, or removing a
+blue cast to read a mark). Chains saved with version 1.0.0 open as "show this channel as grey"
+and reproduce. Invert is `1 − v`.
 
 ### 5.8 Video range to full range
 
@@ -403,8 +409,16 @@ comparing faces without correcting it distorts proportions.
 The examiner clicks four corners (top-left, top-right, bottom-right, bottom-left) of a planar
 object such as a plate or a document. The four point pairs define a **planar homography**
 (Hartley and Zisserman, ch. 2 and 4), computed exactly from four points, and the image is
-warped so the quadrilateral becomes a rectangle. The output size is the longer of each pair
+warped so the quadrilateral becomes a rectangle. The rectangle's size is the longer of each pair
 of opposite sides unless given.
+
+By default the **whole picture is kept**: every corner of the input is mapped through the same
+homography and the canvas is enlarged to hold them, so nothing outside the marked area is lost
+and the examiner decides whether to crop (tick *Crop to the marked area*, or add a Crop step).
+Areas far from the plane stretch strongly and a corner beyond the plane's horizon has no finite
+position, so the canvas is limited to three times the input (and 6000 pixels) on each side,
+centred on the marked area. Version 1.0.0 always cropped; chains saved with it open with the
+crop ticked and reproduce.
 
 *Why a homography:* a plane seen by a pinhole camera is related to its front-on view by
 exactly this transform, so the correction is geometrically exact for a flat object (it is
@@ -440,6 +454,30 @@ another field. That gives a nicer picture but mixes information from different m
 way that depends on a motion detector's thresholds. For evidence, a frame that is one moment
 in time, with interpolation that is trivial to explain, is the safer default (de Haan and
 Bellers 1998 compare the families).
+
+### 6.8 Annotation and measurement overlays
+
+`forensic/filters/annotate.py`. Two steps draw on the picture as it is at that point in the chain,
+so they go after any crop, rotation or perspective correction and land on the corrected picture.
+Each mark is drawn as an anti-aliased coverage mask in one colour and blended over the picture;
+pixels the mark does not cover keep their exact values.
+
+- **Annotation**: an arrow, line, rectangle, circle (centre and a point on the edge), text, or a
+  **zoom**: the marked area (rectangle or circle) copied, enlarged (nearest neighbour by default, so
+  the original pixels show as blocks), placed in a corner (by default the one farthest from the
+  area) and joined to its source by a line. The zoom factor is reduced if the copy would take more
+  than half the picture. Add one step per mark. Text uses a TrueType font on the machine (Segoe UI
+  or Arial on Windows, DejaVu Sans on Linux; Pillow's own font otherwise) with right-to-left
+  shaping, so Hebrew and Arabic labels read correctly; the font can differ between machines, a
+  re-run on the same machine is identical.
+- **Measurement**: pairs of clicked points, each a measured line drawn with end ticks and labelled
+  with its length (and optionally its angle from horizontal). Lengths are in pixels, or in real
+  units when a reference of known length is marked: the scale is reference length / reference
+  pixels. The printed uncertainty propagates a ±1 pixel clicking error at each of the four points
+  (line and reference) in quadrature (GUM, JCGM 100:2008). *Limits:* a real-unit reading is only
+  valid for lines in the same flat plane as the reference, seen front-on; straighten that plane
+  with Perspective correction first. Heights and distances in a 3D scene belong to the Measure
+  tab (section on photogrammetry), which models the camera.
 
 ---
 
@@ -1260,6 +1298,15 @@ double-compression history.
 6. **Video**: frames are sampled (default 25 frames, every 5th), faces tracked by box overlap
    (IoU ≥ 0.3), and a strong frame-to-frame fluctuation of the noise ratio (standard deviation
    above 0.35 over at least 5 frames) is flagged as consistent with per-frame face rendering.
+7. **Score and result**: each face (or video track) gets a score from 0 to 1.0 and a result,
+   TRUE (face-swap or face-edit indicated) or FALSE. With z the larger of the two |z|-scores,
+   score = z² / (z² + 4²), so z = 0 gives 0, the flagging threshold z = 4 gives exactly 0.50,
+   z = 2 gives 0.20 and z = 8 gives 0.80; the score is rounded down so 0.50 never appears below
+   the threshold. A face flagged for its compression history scores at least 0.5 + half the
+   difference in single-compressed share; a video track flagged for flicker scores at least 0.50.
+   The result is TRUE at 0.50 or more. The item's result is that of its highest-scoring face.
+   The score measures how unusual the face is within its own image; it is not a probability
+   that the face was manipulated.
 
 *References:* Mahdian and Saic (2009) for noise inconsistency, Immerkær (1996) for the noise
 estimator, Li et al. (2020, Face X-ray) for the blending boundary idea, Bianchi and Piva (2012)

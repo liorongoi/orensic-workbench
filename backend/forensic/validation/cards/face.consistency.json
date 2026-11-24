@@ -1,7 +1,7 @@
 {
   "detector": "face.consistency",
   "name": "Face-swap and face-edit checks",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "validated_on": "2026-10-14",
   "corpus": "synthetic photo-like scenes generated from fixed seeds (forensic.validation.run.scene)",
   "seeded": true,

@@ -11,6 +11,7 @@ in the same image, so the image's own variability sets what counts as unusual.
 from __future__ import annotations
 
 import json
+import math
 
 import cv2
 import numpy as np
@@ -25,6 +26,35 @@ NULL_SAMPLES = 200
 Z_FLAG = 4.0
 MIN_IOD_RELIABLE = 40  # inter-ocular distance in pixels below which results are unreliable
 MIN_IOD = 12
+SCORE_THRESHOLD = 0.5  # the score at which the result is "true" (face-swap or face-edit indicated)
+
+
+def face_score(noise_z, detail_z, jpeg_share_face=None, jpeg_share_image=None) -> float | None:
+    """One number from 0 to 1.0 for a face: 0 means it matches its surroundings as well as any other place in
+    the image does, 1.0 means it differs far more than anywhere else. z maps to z^2 / (z^2 + Z_FLAG^2), so the
+    flagging threshold (z = Z_FLAG) is exactly 0.5, z = 2 gives 0.2 and z = 8 gives 0.8. A face whose JPEG
+    compression history differs from the image's scores at least 0.5 plus half the difference in share."""
+    zs = [abs(v) for v in (noise_z, detail_z) if v is not None]
+    if not zs:
+        return None
+    z = max(zs)
+    score = z * z / (z * z + Z_FLAG * Z_FLAG)
+    if _jpeg_flag(jpeg_share_face, jpeg_share_image):
+        score = max(score, 0.5 + 0.5 * (jpeg_share_face - jpeg_share_image))
+    return math.floor(min(1.0, score) * 100 + 1e-9) / 100  # floored, so 0.50 is shown only at or past the threshold
+
+
+def _jpeg_flag(sf, si) -> bool:
+    return sf is not None and si is not None and sf >= 0.5 and si <= 0.25
+
+
+def _score(rec: dict) -> dict:
+    """Adds the 0-1.0 score and the true/false result to a face record."""
+    s = face_score(rec.get("noise_z"), rec.get("detail_z"), rec.get("jpeg_single_compressed_share_face"),
+                   rec.get("jpeg_single_compressed_share_image"))
+    rec["score"] = s
+    rec["result"] = None if s is None else s >= SCORE_THRESHOLD
+    return rec
 
 
 def _residual_maps(rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -136,21 +166,23 @@ def check_faces(img: np.ndarray, faces: list[dict], seed: int = 0, jpeg_llr: np.
                 rec["jpeg_single_compressed_share_face"] = round(float(np.mean(inside > 0.8)), 3)
                 rec["jpeg_single_compressed_share_image"] = round(float(np.mean(p_single > 0.8)), 3)
         out.append(rec)
-    return out
+    return [_score(r) for r in out]
 
 
 def _draw(img, results) -> np.ndarray:
     vis = media.to_uint8(img).copy()
     for r in results:
         x, y, w, h = (int(round(v)) for v in r["box"])
-        z = max(abs(r.get("noise_z") or 0), abs(r.get("detail_z") or 0))
-        col = (60, 200, 90) if z < 2 else (240, 180, 40) if z < Z_FLAG else (230, 50, 50)
-        if r["reliability"] == "too small":
-            col = (150, 150, 150)
+        sc = r.get("score")
+        col = (150, 150, 150) if sc is None else (60, 200, 90) if sc < 0.2 else (240, 180, 40) if sc < SCORE_THRESHOLD else (230, 50, 50)
         t = max(1, int(round(max(img.shape[:2]) / 500)))
         cv2.rectangle(vis, (x, y), (x + w, y + h), col, t)
-        label = f"#{r['face']} " + (f"z {z:.1f}" if r.get("noise_z") is not None else r["reliability"])
-        cv2.putText(vis, label, (x, max(12, y - 4)), cv2.FONT_HERSHEY_SIMPLEX, max(0.4, t * 0.4), col, t, cv2.LINE_AA)
+        label = f"#{r['face']} " + (f"{sc:.2f} {'TRUE' if r['result'] else 'FALSE'}" if sc is not None else r["reliability"])
+        fs = max(0.45, t * 0.45)
+        (tw, th), base = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, fs, t)
+        ty = max(th + 4, y - 4)
+        cv2.rectangle(vis, (x - 1, ty - th - 3), (x + tw + 3, ty + base), (0, 0, 0), -1)  # dark box: readable on any picture
+        cv2.putText(vis, label, (x + 1, ty), cv2.FONT_HERSHEY_SIMPLEX, fs, col, t, cv2.LINE_AA)
     return vis.astype(np.float32) / 255.0
 
 
@@ -165,10 +197,10 @@ def _flags(results, prefix="") -> list[dict]:
             which = "noise level" if abs(r.get("noise_z") or 0) >= Z_FLAG else "fineness of detail"
             flags.append({"code": "face.inconsistent", "level": "warning",
                           "text": f"{prefix}Face {r['face']}: its {which} differs from its surroundings more than "
-                          f"{Z_FLAG:g} times the spread at random places in the image (z {max(zs):.1f})"
+                          f"{Z_FLAG:g} times the spread at random places in the image (z {max(zs):.1f}, score {r.get('score'):.2f})"
                           + ("; the face is small, so treat this as weak." if r["reliability"] == "limited" else ".")})
         sf, si = r.get("jpeg_single_compressed_share_face"), r.get("jpeg_single_compressed_share_image")
-        if sf is not None and si is not None and sf >= 0.5 and si <= 0.25:
+        if _jpeg_flag(sf, si):
             flags.append({"code": "face.jpeg_history", "level": "warning",
                           "text": f"{prefix}Face {r['face']}: {sf:.0%} of its blocks lack the double-compression history "
                           f"found in the image as a whole ({si:.0%} of all blocks)."})
@@ -178,11 +210,13 @@ def _flags(results, prefix="") -> list[dict]:
 @register(
     "face.consistency",
     name="Face-swap and face-edit checks",
-    version="1.0.0",
+    version="1.1.0",
     category="Synthetic media",
     description="Finds faces (YuNet detector, or regions you mark) and compares each face with a ring around it: "
     "sensor-noise level, and fineness of detail relative to noise. Each difference is converted to a z-score "
     "against the same measurement at 200 random places in the image, so the image itself sets what is unusual. "
+    "Each face gets a score from 0 to 1.0 and a result: true (face-swap or face-edit indicated, score 0.5 or "
+    "more) or false (score below 0.5). "
     "In re-saved JPEGs it also checks whether the face shares the image's double-compression history. On video "
     "it samples frames and follows each face over time. Face size is reported because small faces carry little "
     "information.",
@@ -192,7 +226,12 @@ def _flags(results, prefix="") -> list[dict]:
     "Variance Estimation', CVIU 64(2), 1996; W. Wu, H. Peng and S. Yu, 'YuNet', Machine Intelligence Research 20, 2023.",
     applies_to=("image", "video"),
     ai=True,
-    reading_guide="A large z (4 or more) means the face differs from its surroundings more than almost any other "
+    reading_guide="Score: 0 to 1.0 for each face. 0 = the face matches its surroundings as well as any other "
+    "place in the image does; 1.0 = it differs far more than anywhere else. Result: TRUE when the score is 0.50 or "
+    "more (z of 4 or more, or a face whose JPEG history differs from the rest), FALSE below 0.50. Roughly: under "
+    "0.20 consistent, 0.20 to 0.50 some difference but within what the image itself shows, 0.50 to 0.80 a clear "
+    "difference, over 0.80 a strong difference. The score is a measure of inconsistency, not a probability of "
+    "manipulation. A large z (4 or more) means the face differs from its surroundings more than almost any other "
     "region of the image does from its own: consistent with a face rendered or edited separately, but also with "
     "make-up, motion blur, focus on the face or local denoising by a phone. A small z is not evidence of "
     "authenticity: modern face swaps can match noise. Faces under about 40 pixels between the eyes give weak "
@@ -225,11 +264,27 @@ def face_consistency(ctx: AnalysisContext, p: dict) -> AnalysisResult:
     flags = _flags(results)
     if not faces:
         flags.append({"level": "info", "text": "No face found. The detector misses small, turned or covered faces; mark regions to check them."})
-    summary = (f"{len(results)} face(s) checked; " + (f"{sum(1 for f in flags if f.get('code'))} inconsistency flag(s)."
-               if any(f.get("code") for f in flags) else "no inconsistency beyond the image's own variability.")) if results else "No face found."
-    findings = {"faces": results, "z_threshold": Z_FLAG, "null_samples": NULL_SAMPLES,
-                "double_jpeg_history_used": llr is not None}
+    summary = _summary(results, "face") if results else "No face found."
+    findings = _overall(results) | {"faces": results, "z_threshold": Z_FLAG, "null_samples": NULL_SAMPLES,
+                                    "double_jpeg_history_used": llr is not None}
     return AnalysisResult(summary=summary, findings=findings, flags=flags, maps={"faces": _draw(img, results)} if results else {})
+
+
+def _overall(results: list[dict]) -> dict:
+    scored = [r["score"] for r in results if r.get("score") is not None]
+    top = max(scored) if scored else None
+    return {"result": None if top is None else top >= SCORE_THRESHOLD, "score": top, "score_threshold": SCORE_THRESHOLD,
+            "score_scale": "0 = face consistent with its surroundings, 1.0 = strongly inconsistent; result TRUE at 0.50 or more"}
+
+
+def _summary(results: list[dict], what: str) -> str:
+    o = _overall(results)
+    n = len(results)
+    if o["score"] is None:
+        return f"{n} {what}(s) found; too small to assess."
+    hits = sum(1 for r in results if r.get("result"))
+    return (f"Result: {'TRUE' if o['result'] else 'FALSE'} (highest score {o['score']:.2f} of 1.0). {n} {what}(s) checked; "
+            + (f"{hits} with a score of {SCORE_THRESHOLD:.2f} or more." if hits else "none with a score of 0.50 or more."))
 
 
 def _iou(a, b):
@@ -277,14 +332,16 @@ def _video(ctx: AnalysisContext, p: dict) -> AnalysisResult:
             "noise_log_ratio_std_over_time": round(float(np.std(lr)), 4) if len(lr) > 2 else None,
             "share_of_frames_flagged": round(float(np.mean([abs(z) >= Z_FLAG for z in nz])), 3) if nz else None,
         })
+        _score(summaries[-1])
     flags = _flags(summaries, prefix="Track ")
     for s in summaries:
         if s["noise_log_ratio_std_over_time"] and s["noise_log_ratio_std_over_time"] > 0.35 and s["frames"] >= 5:
             flags.append({"code": "face.flicker", "level": "warning",
                           "text": f"Track {s['face']}: the face's noise relative to its surroundings fluctuates strongly between "
                           f"frames (std {s['noise_log_ratio_std_over_time']:.2f} in log ratio), consistent with per-frame face rendering."})
-    findings = {"frames_sampled": idx, "tracks": summaries, "z_threshold": Z_FLAG}
-    summary = f"{len(tracks)} face track(s) over {len(idx)} sampled frames" + (
-        f"; {sum(1 for f in flags if f.get('code'))} inconsistency flag(s)." if any(f.get("code") for f in flags) else ".")
+            # Flicker is itself a face-swap indication: the track's result is true even when its median z is small.
+            s["score"], s["result"] = max(s["score"] or 0.0, SCORE_THRESHOLD), True
+    findings = _overall(summaries) | {"frames_sampled": idx, "tracks": summaries, "z_threshold": Z_FLAG}
+    summary = (_summary(summaries, "face track") + f" {len(idx)} frames sampled.") if summaries else f"No face found in {len(idx)} sampled frames."
     maps = {"faces_first_frame": _draw(first_img, first_results)} if first_img is not None else {}
     return AnalysisResult(summary=summary, findings=json.loads(json.dumps(findings)), flags=flags, maps=maps)

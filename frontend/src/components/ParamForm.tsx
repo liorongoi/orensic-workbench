@@ -8,13 +8,15 @@ interface Props {
   onPick?: (param: ParamSchema) => void;
   picking?: string | null;
   disabled?: boolean;
+  /** Hides settings that do not apply to the current choices (e.g. zoom settings for an arrow). */
+  shown?: (name: string) => boolean;
 }
 
-export function ParamForm({ params, values, onChange, onPick, picking, disabled }: Props) {
+export function ParamForm({ params, values, onChange, onPick, picking, disabled, shown }: Props) {
   if (!params.length) return null;
   return (
     <div className="params">
-      {params.map((p) => {
+      {params.filter((p) => !shown || shown(p.name)).map((p) => {
         const v = values[p.name] ?? p.default;
         return (
           <label key={p.name} className="param" title={p.help}>

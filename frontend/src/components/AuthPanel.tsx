@@ -254,7 +254,13 @@ export function AuthPanel(props: Props) {
                 {spec.reading_guide}
               </details>
             )}
-            {r.name === "file.metadata" ? <MetadataView findings={r.result.findings} /> : <Findings findings={r.result.findings} />}
+            {r.name === "file.metadata" ? (
+              <MetadataView findings={r.result.findings} />
+            ) : r.name === "face.consistency" ? (
+              <FaceView findings={r.result.findings} />
+            ) : (
+              <Findings findings={r.result.findings} />
+            )}
             <p className="muted small" title={`Result hash ${r.output_hash}`}>
               {r.name} v{r.version} · {r.actor}
             </p>
@@ -277,6 +283,108 @@ function Findings({ findings }: { findings: Record<string, unknown> }) {
         ))}
       </tbody>
     </table>
+  );
+}
+
+interface FaceRow {
+  face: number;
+  source?: string;
+  reliability: string;
+  inter_ocular_px: number;
+  score?: number | null;
+  result?: boolean | null;
+  noise_z?: number | null;
+  detail_z?: number | null;
+  frames?: number;
+  first_frame?: number;
+  last_frame?: number;
+}
+
+const scoreClass = (s: number | null | undefined) => (s == null ? "na" : s < 0.2 ? "low" : s < 0.5 ? "mid" : "high");
+
+/** Face-swap and face-edit checks: a 0-1.0 score and a TRUE / FALSE result for the item and for each face. */
+function FaceView({ findings }: { findings: Record<string, unknown> }) {
+  const f = findings as { result?: boolean | null; score?: number | null; score_threshold?: number; faces?: FaceRow[]; tracks?: FaceRow[] };
+  const rows = f.faces ?? f.tracks ?? [];
+  const threshold = f.score_threshold ?? 0.5;
+  if (f.score === undefined) return <Findings findings={findings} />; // a result from before the 0-1.0 score
+  const { faces: _faces, tracks: _tracks, ...rest } = findings;
+  return (
+    <div className="face-view">
+      <div className={`face-verdict ${scoreClass(f.score)}`}>
+        <span className="face-verdict-label">Face-swap / edit</span>
+        <b>{f.result == null ? "NOT ASSESSED" : f.result ? "TRUE" : "FALSE"}</b>
+        <span>score {f.score == null ? "–" : f.score.toFixed(2)} / 1.00</span>
+      </div>
+      <ScoreScale threshold={threshold} marks={rows.filter((r) => r.score != null).map((r) => ({ label: `#${r.face}`, score: r.score! }))} />
+      <table className="kv face-table">
+        <thead>
+          <tr>
+            <th>{f.tracks ? "Track" : "Face"}</th>
+            <th>Result</th>
+            <th>Score (0–1.0)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.face}>
+              <td>
+                <b>#{r.face}</b>
+                {r.source === "examiner" && <span className="muted small"> marked</span>}
+                <div className="muted small" title="Distance between the eyes; z-scores of noise and detail against random places in the image">
+                  {r.frames != null && <>frames {r.first_frame}–{r.last_frame} · </>}
+                  {r.inter_ocular_px.toFixed(0)} px eyes ({r.reliability}) · z {r.noise_z ?? "–"} / {r.detail_z ?? "–"}
+                </div>
+              </td>
+              <td>
+                <b className={`face-result ${scoreClass(r.score)}`}>{r.result == null ? "n/a" : r.result ? "TRUE" : "FALSE"}</b>
+              </td>
+              <td>
+                {r.score == null ? (
+                  "–"
+                ) : (
+                  <span className="score-cell" title={`${r.score.toFixed(2)} of 1.00; TRUE at ${threshold.toFixed(2)} or more`}>
+                    <b>{r.score.toFixed(2)}</b>
+                    <span className="score-bar">
+                      <span className={`score-fill ${scoreClass(r.score)}`} style={{ width: `${r.score * 100}%` }} />
+                    </span>
+                  </span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="muted small">
+        0 = the face matches its surroundings as well as any other place in the image; 1.0 = it differs far more than anywhere else. TRUE at{" "}
+        {threshold.toFixed(2)} or more. Under 0.20 consistent; 0.20–0.50 within the image's own variation; 0.50–0.80 clear difference; over 0.80 strong
+        difference. The score measures inconsistency; it is not a probability of manipulation.
+      </p>
+      <details className="small">
+        <summary>All measurements</summary>
+        <Findings findings={{ ...rest, [f.tracks ? "tracks" : "faces"]: rows }} />
+      </details>
+    </div>
+  );
+}
+
+function ScoreScale({ threshold, marks }: { threshold: number; marks: { label: string; score: number }[] }) {
+  return (
+    <div className="score-scale" aria-label="Score scale from 0 to 1.0">
+      <div className="score-track">
+        <span className="score-threshold" style={{ left: `${threshold * 100}%` }} title={`TRUE at ${threshold.toFixed(2)} or more`} />
+        {marks.map((m) => (
+          <span key={m.label} className={`score-mark ${scoreClass(m.score)}`} style={{ left: `${m.score * 100}%` }} title={`${m.label}: ${m.score.toFixed(2)}`}>
+            {m.label}
+          </span>
+        ))}
+      </div>
+      <div className="score-ticks small muted">
+        <span>0 · FALSE</span>
+        <span style={{ left: `${threshold * 100}%` }}>{threshold.toFixed(2)}</span>
+        <span>TRUE · 1.0</span>
+      </div>
+    </div>
   );
 }
 

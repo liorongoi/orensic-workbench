@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Chain, ChainNode, FilterSchema, Graph, ParamSchema, StepInfo } from "../types";
 import { urls } from "../api";
 import { ParamForm } from "./ParamForm";
+import { paramShown } from "../crop";
 
 const MIN_JUSTIFICATION = 20;
 
@@ -285,6 +286,7 @@ export function ChainEditor(props: Props) {
             onChange={(name, value) => setNode(sel.id, { params: { ...sel.params, [name]: value } })}
             onPick={(p) => props.onPick(sel.id, p)}
             picking={picking?.nodeId === sel.id ? picking.param : null}
+            shown={(n) => paramShown(sel.filter, n, Object.fromEntries(selFilter.params.map((p) => [p.name, sel.params[p.name] ?? p.default])))}
           />
           <label className="param">
             <span className="param-label">Note</span>
