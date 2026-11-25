@@ -22,7 +22,7 @@ users" in the first dialog to install under Program Files for everyone on the ma
 Get the installer from the **Windows installer** workflow in GitHub Actions (artifact
 `Lucida-Windows-Setup`, with its `.sha256`), or from a release when a `v*` tag is
 pushed. Carry the `.exe` to the offline machine, check its SHA-256 if your lab requires it
-(`certutil -hashfile Lucida-0.4.0-Setup.exe SHA256`), and run it. The wizard opens with a
+(`certutil -hashfile Lucida-0.4.1-Setup.exe SHA256`), and run it. The wizard opens with a
 welcome page, the licence agreement and a list of what is included, then a **system check**.
 It reads the installed memory, the graphics card and the NVIDIA driver version. Lucida is sized for
 an NVIDIA RTX A4000 (16 GB) with 48 to 128 GB of RAM. The page warns, without stopping the install,
@@ -40,7 +40,10 @@ The wizard then asks for:
   It is kept when Lucida is uninstalled or upgraded. For one user it stays private to that
   account. For all users, only members of the local **Forensic Examiners** group (the account
   that ran the installer is added), administrators and SYSTEM can open it; add each examiner with
-  `net localgroup "Forensic Examiners" <account> /add`, and they sign out and in again;
+  `net localgroup "Forensic Examiners" <account> /add`, and they sign out and in again.
+  Because Setup sets the permissions of this folder, it must be a new, empty or existing Lucida
+  folder: a drive root, a profile, Documents, Desktop, AppData, Windows or Program Files folder,
+  or a folder that already holds other files, is refused;
 - the local port (default 8000; Lucida listens on 127.0.0.1 only, unless you tick the
   lab-network option, see [Examiners on other PCs](#examiners-on-other-pcs));
 - Start menu and desktop shortcuts (both ticked by default). **Lucida** opens the desktop
@@ -50,13 +53,16 @@ The wizard then asks for:
 
 The desktop window runs on the Microsoft Edge WebView2 runtime, which Windows 11 includes. On a
 Windows 10 machine without it, Setup installs it from the copy inside the installer, offline.
-The desktop window's messages go to `<case data>\logs\desktop-<date>.txt`.
+The desktop window's messages go to `<case data>\logs\desktop-<date>.txt`. If an earlier
+Lucida is still running in the background without a window, starting Lucida offers to close it
+and start again, instead of failing on a busy port or case database.
 
 A summary page shows every choice before anything is installed. The last page offers to run
 the acceptance self-test and to start Lucida straight away.
 
-**Uninstalling** (Settings > Apps, or **Start > Lucida > Uninstall Lucida**) removes the
-programs and shortcuts, then asks whether to delete the case data folder too. The answer
+**Uninstalling** (Settings > Apps, or **Start > Lucida > Uninstall Lucida**) first closes a
+Lucida that is still running (its window, a console, or a server left without a window, and
+FFmpeg), removes the programs and shortcuts, then asks whether to delete the case data folder too. The answer
 defaults to **No**, and deleting needs a second confirmation. A drive root or a whole Documents,
 Desktop or profile folder is never deleted, even if it was chosen as the case data folder. A
 silent uninstall (`unins000.exe /VERYSILENT`) keeps case data unless you add `/DELETECASEDATA`.
@@ -79,7 +85,7 @@ adapter number, if the NVIDIA card is not picked on its own). Running a newer in
 these settings and the case data. Silent installation for managed rollouts:
 
 ```
-Lucida-0.4.0-Setup.exe /VERYSILENT /ALLUSERS /DIR="C:\Program Files\Lucida" /DATADIR="D:\Cases" /PORT=8000
+Lucida-0.4.1-Setup.exe /VERYSILENT /ALLUSERS /DIR="C:\Program Files\Lucida" /DATADIR="D:\Cases" /PORT=8000
 ```
 
 Add `/TASKS="startmenu,desktopicon"` to choose shortcuts (and `labnetwork` for the lab-network
@@ -235,7 +241,7 @@ processor, memory and graphics card.
 ## Container
 
 ```bash
-docker build -t lucida:0.4.0 .
+docker build -t lucida:0.4.1 .
 docker compose up            # http://127.0.0.1:8000
 docker compose --profile agents up   # also the authenticate MCP server on the internal network
 ```
@@ -247,7 +253,7 @@ creates a missing bind-mounted folder owned by root), then runs Lucida as that u
 Without Compose:
 
 ```bash
-docker run -p 127.0.0.1:8000:8000 -v "$PWD/data:/data" lucida:0.4.0
+docker run -p 127.0.0.1:8000:8000 -v "$PWD/data:/data" lucida:0.4.1
 ```
 
 Lucida joins a plain network so its port can reach your browser (Docker does not

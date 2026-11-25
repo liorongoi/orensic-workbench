@@ -114,6 +114,79 @@ def _port_free(host: str, port: int) -> bool:
             return False
 
 
+def _lucida_processes() -> list[int]:
+    """Process ids of other Lucida programs (its Python or FFmpeg) running from this installation.
+
+    A Lucida server left running without a window (for example after a crash of the window, or
+    under a previous version) keeps the port and the case database busy, so a new start fails.
+    """
+    if sys.platform != "win32":
+        return []
+    import subprocess
+
+    dirs = [str(APP / d) + "\\" for d in ("python", "ffmpeg")]
+    cond = " -or ".join(f"$_.ExecutablePath.StartsWith('{d.replace(chr(39), chr(39) * 2)}', "
+                        "[StringComparison]::OrdinalIgnoreCase)" for d in dirs)
+    cmd = (f"Get-CimInstance Win32_Process | Where-Object {{ $_.ExecutablePath -and ({cond}) }} "
+           "| ForEach-Object { $_.ProcessId }")
+    try:
+        out = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", cmd],
+                             capture_output=True, text=True, timeout=60,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+    except Exception:  # noqa: BLE001
+        return []
+    mine = {os.getpid(), os.getppid()}
+    return [int(x) for x in out.split() if x.isdigit() and int(x) not in mine]
+
+
+def _stop_lucida(pids: list[int], host: str, port: int) -> bool:
+    """Stop the given Lucida processes and wait for the port to be free again."""
+    import subprocess
+
+    for pid in pids:
+        subprocess.run(["taskkill.exe", "/PID", str(pid), "/T", "/F"], capture_output=True,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    for _ in range(40):
+        if _port_free(host, port):
+            return True
+        time.sleep(0.25)
+    return _port_free(host, port)
+
+
+def _ask(message: str) -> bool:
+    """Yes/No question: a message box under pythonw.exe, the console otherwise; No when nobody can answer."""
+    if _windowed() or getattr(sys.stdout, "_lucida_log", False):
+        print(message)
+        try:
+            import ctypes
+
+            return ctypes.windll.user32.MessageBoxW(None, message, "Lucida", 0x4 | 0x20) == 6  # MB_YESNO, IDYES
+        except Exception:  # noqa: BLE001
+            return False
+    if sys.stdin and sys.stdin.isatty():
+        return input(message + " [y/N] ").strip().lower().startswith("y")
+    print(message + " (no answer possible; assuming No)")
+    return False
+
+
+def _free_port_or_explain(host: str, port: int) -> bool:
+    """True when the port is free, after offering to stop a Lucida left running in the background."""
+    if _port_free(host, port):
+        return True
+    pids = _lucida_processes()
+    if pids and _ask(f"An earlier Lucida is still running in the background ({len(pids)} process(es)) and is "
+                     f"holding port {port} and the case database, but it is not answering.\n\n"
+                     "Close it and start Lucida again? Cases and audit records are saved as you work."):
+        if _stop_lucida(pids, host, port):
+            return True
+    if pids:
+        _tell(f"Port {port} is still held by an earlier Lucida that is not answering. Restart the computer "
+              "(Start > Power > Restart), then open Lucida again.")
+    else:
+        _tell(f"Port {port} is used by another program. Close that program, or set a different port in {CONFIG}")
+    return False
+
+
 def run(open_browser: bool) -> int:
     net = configure()
     tls = net["tls"]
@@ -125,8 +198,7 @@ def run(open_browser: bool) -> int:
         if open_browser:
             webbrowser.open(url)
         return 0
-    if not _port_free(net["host"], net["port"]):
-        print(f"Port {net['port']} is used by another program. Set a different port in {CONFIG}")
+    if not _free_port_or_explain(net["host"], net["port"]):
         return 1
 
     def _open_when_ready():
@@ -192,11 +264,20 @@ def desktop() -> int:
         return run(True)
     url = f"http://127.0.0.1:{net['port']}"
     if _health(url):
-        print(f"Lucida is already running at {url}; opening it in the browser")
-        webbrowser.open(url)
-        return 0
-    if not _port_free("127.0.0.1", net["port"]):
-        _tell(f"Port {net['port']} is used by another program. Set a different port in {CONFIG}")
+        # Usually the Lucida window is already open. It can also be a server left running after its
+        # window closed, which only the browser could reach: offer to start it again in its own window.
+        pids = _lucida_processes()
+        if pids and _ask("Lucida is already running on this computer, but its window may have closed.\n\n"
+                         "Yes: close it and open Lucida again in its own window.\n"
+                         "No: open the running Lucida in your web browser."):
+            if not _stop_lucida(pids, "127.0.0.1", net["port"]):
+                _tell("The running Lucida could not be closed. Restart the computer, then open Lucida again.")
+                return 1
+        else:
+            print(f"Lucida is already running at {url}; opening it in the browser")
+            webbrowser.open(url)
+            return 0
+    if not _free_port_or_explain("127.0.0.1", net["port"]):
         return 1
     from forensic import desktop as shell
 
@@ -357,6 +438,9 @@ def main(argv=None) -> int:
         import traceback
 
         traceback.print_exc()
+        if "database is locked" in str(e).lower():
+            e = RuntimeError("the case database is in use by another Lucida. Close the other Lucida window, or restart "
+                             "the computer, then open Lucida again")
         if a.cmd == "desktop":
             _tell(f"Lucida stopped: {e}")
         else:
