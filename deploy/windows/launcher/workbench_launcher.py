@@ -131,7 +131,7 @@ def _lucida_processes() -> list[int]:
            "| ForEach-Object { $_.ProcessId }")
     try:
         out = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", cmd],
-                             capture_output=True, text=True, timeout=60,
+                             capture_output=True, text=True, timeout=60, check=False,
                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
     except Exception:  # noqa: BLE001
         return []
@@ -144,7 +144,7 @@ def _stop_lucida(pids: list[int], host: str, port: int) -> bool:
     import subprocess
 
     for pid in pids:
-        subprocess.run(["taskkill.exe", "/PID", str(pid), "/T", "/F"], capture_output=True,
+        subprocess.run(["taskkill.exe", "/PID", str(pid), "/T", "/F"], capture_output=True, check=False,
                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     for _ in range(40):
         if _port_free(host, port):
@@ -176,9 +176,9 @@ def _free_port_or_explain(host: str, port: int) -> bool:
     pids = _lucida_processes()
     if pids and _ask(f"An earlier Lucida is still running in the background ({len(pids)} process(es)) and is "
                      f"holding port {port} and the case database, but it is not answering.\n\n"
-                     "Close it and start Lucida again? Cases and audit records are saved as you work."):
-        if _stop_lucida(pids, host, port):
-            return True
+                     "Close it and start Lucida again? Cases and audit records are saved as you work.") \
+            and _stop_lucida(pids, host, port):
+        return True
     if pids:
         _tell(f"Port {port} is still held by an earlier Lucida that is not answering. Restart the computer "
               "(Start > Power > Restart), then open Lucida again.")
