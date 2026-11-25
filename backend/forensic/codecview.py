@@ -56,11 +56,15 @@ CELL_TEXT = re.compile(r"\d+[^\s\d]{1,3}")
 # What may remain of a grid row once its cells are taken out: spaces and the segmentation / interlace marks
 # that follow a blank one ("34< |" is "<", no segmentation, interlaced).
 GRID_REST = re.compile(r"[\s+\-|=]*")
-# Messages other FFmpeg threads print with no "[...]" prefix, which can land in the middle of a grid row,
-# even between a cell's QP and its type ("34EOF while reading input", then "d  34d ..." on the next line).
-STRAY = re.compile(r"EOF while reading input|Terminating demuxer thread")
-# A cell's QP at the end of a piece, its type still to come in the next piece.
-OPEN_CELL = re.compile(r"(?:^|(?<=\s))\d+$")
+# FFmpeg 6 prints each cell as two separate log calls: the QP ("%2d"), then the type with its segmentation
+# and interlace marks ("%c%c%c", "d  " or "X+="). Another thread's message can land between any two of them, even
+# with no "[...]" prefix ("34EOF while reading input", then "d  34d ..." on the next line). When a piece is
+# not a clean row, it is read one call at a time, from where the last piece stopped, up to the first text
+# that cannot be the next call; the rest is the other thread's message.
+CALLS = (
+    re.compile(r" \d|\d{2,3}"),
+    re.compile(r"[PAiIdDgGS<>X?][+\-| ?][=| ?]"),
+)
 # Forward and backward motion-vector arrow colours.
 MV_FWD = (255, 236, 120)
 MV_BWD = (90, 230, 255)
@@ -117,7 +121,7 @@ def _decode_blocks(path: Path, settings: Settings, start: int, count: int, width
     n = -1
     cur: dict | None = None
     cells: list[tuple[str, str]] = []
-    carry = ""
+    call, qp = 0, ""  # the next FFmpeg 6 call expected (index into CALLS), and the QP read before it
 
     def close():
         # Other FFmpeg threads (filters, muxer) log at the same time and can break a row in two, so the cells of a
@@ -140,7 +144,7 @@ def _decode_blocks(path: Path, settings: Settings, start: int, count: int, width
                 n += 1
                 cur = {"type": m.group(1)} if n >= start else None
                 cells = []
-                carry = ""
+                call, qp = 0, ""
                 continue
             if cur is None:
                 tail.append(line.strip())
@@ -148,20 +152,25 @@ def _decode_blocks(path: Path, settings: Settings, start: int, count: int, width
             # Split the line at every "[...]" log prefix and keep the pieces that are nothing but grid cells: a
             # decoder row (FFmpeg 8 logs a row in one message; FFmpeg 6 logs it cell by cell, so another thread's
             # message can interrupt it). The prefix's wording differs between versions, so it is not relied on.
-            for t in PREFIX.split(STRAY.sub("", line)):
+            for raw_piece in PREFIX.split(line.rstrip("\r\n")):
                 # FFmpeg 8 starts each row with its pixel row number ("112 30d  30>  ..."); FFmpeg 6 does not.
-                t = ROW_LABEL.sub("", t.strip())
+                t = ROW_LABEL.sub("", raw_piece.strip())
                 if not t or PREFIX.fullmatch(t + " "):
                     continue
-                t, carry = carry + t, ""
-                open_cell = OPEN_CELL.search(t)
-                body = t[: open_cell.start()].rstrip() if open_cell else t
-                found = CELL.findall(body)
-                if found and GRID_REST.fullmatch(CELL_TEXT.sub("", body)):
+                found = CELL.findall(t)
+                if found and GRID_REST.fullmatch(CELL_TEXT.sub("", t)):
                     cells.extend(found)
-                    carry = open_cell.group(0) if open_cell else ""
-                else:
-                    tail.append(t)
+                    call, qp = 0, ""
+                    continue
+                pos = 0
+                while pos < len(raw_piece) and (c := CALLS[call].match(raw_piece, pos)):
+                    if call == 0:
+                        qp = c.group().strip()
+                    elif call == 1:
+                        cells.append((qp, c.group()[0]))
+                    call, pos = 1 - call, c.end()
+                if raw_piece[pos:].strip():
+                    tail.append(raw_piece[pos:].strip())
         close()
     finally:
         proc.stderr.close()
