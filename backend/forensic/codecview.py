@@ -56,6 +56,11 @@ CELL_TEXT = re.compile(r"\d+[^\s\d]{1,3}")
 # What may remain of a grid row once its cells are taken out: spaces and the segmentation / interlace marks
 # that follow a blank one ("34< |" is "<", no segmentation, interlaced).
 GRID_REST = re.compile(r"[\s+\-|=]*")
+# Messages other FFmpeg threads print with no "[...]" prefix, which can land in the middle of a grid row,
+# even between a cell's QP and its type ("34EOF while reading input", then "d  34d ..." on the next line).
+STRAY = re.compile(r"EOF while reading input|Terminating demuxer thread")
+# A cell's QP at the end of a piece, its type still to come in the next piece.
+OPEN_CELL = re.compile(r"(?:^|(?<=\s))\d+$")
 # Forward and backward motion-vector arrow colours.
 MV_FWD = (255, 236, 120)
 MV_BWD = (90, 230, 255)
@@ -91,6 +96,7 @@ def blocks(path: Path, settings: Settings, start: int, count: int, width: int, h
     n = -1
     cur: dict | None = None
     cells: list[tuple[str, str]] = []
+    carry = ""
 
     def close():
         # Other FFmpeg threads (filters, muxer) log at the same time and can break a row in two, so the cells of a
@@ -113,6 +119,7 @@ def blocks(path: Path, settings: Settings, start: int, count: int, width: int, h
                 n += 1
                 cur = {"type": m.group(1)} if n >= start else None
                 cells = []
+                carry = ""
                 continue
             if cur is None:
                 tail.append(line.strip())
@@ -120,13 +127,19 @@ def blocks(path: Path, settings: Settings, start: int, count: int, width: int, h
             # Split the line at every "[...]" log prefix and keep the pieces that are nothing but grid cells: a
             # decoder row (FFmpeg 8 logs a row in one message; FFmpeg 6 logs it cell by cell, so another thread's
             # message can interrupt it). The prefix's wording differs between versions, so it is not relied on.
-            for t in PREFIX.split(line):
+            for t in PREFIX.split(STRAY.sub("", line)):
                 # FFmpeg 8 starts each row with its pixel row number ("112 30d  30>  ..."); FFmpeg 6 does not.
                 t = ROW_LABEL.sub("", t.strip())
-                found = CELL.findall(t)
-                if found and GRID_REST.fullmatch(CELL_TEXT.sub("", t)):
+                if not t or PREFIX.fullmatch(t + " "):
+                    continue
+                t, carry = carry + t, ""
+                open_cell = OPEN_CELL.search(t)
+                body = t[: open_cell.start()].rstrip() if open_cell else t
+                found = CELL.findall(body)
+                if found and GRID_REST.fullmatch(CELL_TEXT.sub("", body)):
                     cells.extend(found)
-                elif t and not PREFIX.fullmatch(t + " "):
+                    carry = open_cell.group(0) if open_cell else ""
+                else:
                     tail.append(t)
         close()
     finally:

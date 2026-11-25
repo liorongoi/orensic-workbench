@@ -164,3 +164,27 @@ def test_block_grid_reads_the_ffmpeg_8_layout(tmp_path):
     object.__setattr__(settings, "ffmpeg", str(fake))
     out = codecview.blocks(tmp_path / "x.mp4", settings, 0, 1, 64, 48)
     assert out[0]["qp"].tolist() == [[34, 34, 34, 34], [9, 9, 9, 9], [30, 30, 30, 30]]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the stand-in FFmpeg is a shell script")
+def test_block_grid_survives_demuxer_messages_inside_a_row(tmp_path):
+    """At the end of the file FFmpeg 6's demuxer thread prints with no prefix, even between a cell's QP and type."""
+    d = "[h264 @ 0x55aa]"
+    log = "\n".join([
+        f"{d} New frame, type: B",
+        f"{d} 34d  34>  34d  EOF while reading input",
+        "[in#0/mov,mp4,m4a,3gp,3g2,mj2 @ 0x66cc] Terminating demuxer thread",
+        f"{d} 34<  ",
+        f"{d} 30d  30EOF while reading input",
+        f"{d} Terminating demuxer thread",
+        f"{d} d  30d  30X- ",
+        f"{d} 32d  32d  32d  32d  ",
+    ]) + "\n"
+    (tmp_path / "log.txt").write_text(log)
+    fake = tmp_path / "ffmpeg"
+    fake.write_text(f"#!/bin/sh\ncat '{tmp_path / 'log.txt'}' >&2\n")
+    fake.chmod(0o755)
+    settings = load_settings(tmp_path / "data")
+    object.__setattr__(settings, "ffmpeg", str(fake))
+    out = codecview.blocks(tmp_path / "x.mp4", settings, 0, 1, 64, 48)
+    assert out[0]["qp"].tolist() == [[34, 34, 34, 34], [30, 30, 30, 30], [32, 32, 32, 32]]
