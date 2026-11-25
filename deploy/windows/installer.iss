@@ -433,13 +433,14 @@ begin
   end;
 end;
 
-function IsLucidaDataDir(Dir: String): Boolean;
+function IsLucidaDataDir(Dir, PreviousDir: String): Boolean;
 begin
   Result := FileExists(AddBackslash(Dir) + 'forensic.sqlite3') or DirExists(AddBackslash(Dir) + 'import') or
-    ((GetPreviousData('DataDir', '') <> '') and SameFolder(Dir, GetPreviousData('DataDir', '')));
+    ((PreviousDir <> '') and SameFolder(Dir, PreviousDir));
 end;
 
-function DataDirProblem(Dir: String): String;
+// AppDir and PreviousDir may be empty (before the wizard knows them); those checks are then skipped.
+function DataDirProblemIn(Dir, AppDir, PreviousDir: String): String;
 var
   Shared: array[0..13] of String;
   I: Integer;
@@ -463,7 +464,7 @@ begin
   Shared[6] := ExpandConstant('{localappdata}');      Shared[7] := ExpandConstant('{userappdata}');
   Shared[8] := ExpandConstant('{commonappdata}');     Shared[9] := ExpandConstant('{win}');
   Shared[10] := ExpandConstant('{commonpf32}');       Shared[11] := ExpandConstant('{commonpf64}');
-  Shared[12] := WizardDirValue;                       Shared[13] := ExtractFileDir(Shared[0]);
+  Shared[12] := AppDir;                              Shared[13] := ExtractFileDir(Shared[0]);
   for I := 0 to 13 do
     if IsWithin(Shared[I], Dir) then
     begin
@@ -472,14 +473,37 @@ begin
       Exit;
     end;
   if IsWithin(Dir, ExpandConstant('{win}')) or IsWithin(Dir, ExpandConstant('{commonpf32}')) or
-     IsWithin(Dir, ExpandConstant('{commonpf64}')) or IsWithin(Dir, WizardDirValue) then
+     IsWithin(Dir, ExpandConstant('{commonpf64}')) or IsWithin(Dir, AppDir) then
   begin
     Result := 'Case data cannot be kept inside the Windows, Program Files or Lucida installation folders. Choose another folder.';
     Exit;
   end;
-  if DirExists(Dir) and not DirIsEmpty(Dir) and not IsLucidaDataDir(Dir) then
+  if DirExists(Dir) and not DirIsEmpty(Dir) and not IsLucidaDataDir(Dir, PreviousDir) then
     Result := Dir + ' already holds other files. Choose a new or empty folder for case data, for example ' +
       AddBackslash(Dir) + 'Lucida.';
+end;
+
+function DataDirProblem(Dir: String): String;
+begin
+  Result := DataDirProblemIn(Dir, WizardDirValue, GetPreviousData('DataDir', ''));
+end;
+
+function InitializeSetup(): Boolean;
+var
+  Problem: String;
+begin
+  // A silent install given an unsuitable /DATADIR= stops here, before anything changes (exit code 1).
+  // Refusing it later, at the Preparing to Install step, leaves a silent Setup waiting for ever.
+  Result := True;
+  if ParamOr('DATADIR', '') = '' then
+    Exit;
+  Problem := DataDirProblemIn(ParamOr('DATADIR', ''), ParamOr('DIR', ''), '');
+  if Problem <> '' then
+  begin
+    Log('Case data folder refused: ' + Problem);
+    SuppressibleMsgBox(Problem, mbCriticalError, MB_OK, IDOK);
+    Result := False;
+  end;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -592,11 +616,17 @@ begin
   Sys := ExpandConstant('{sys}');
   RunHidden(Sys + '\net.exe', 'localgroup "' + ExaminersGroup + '" /add /comment:"Can open Lucida case data"', False);
   RunHidden(Sys + '\net.exe', 'localgroup "' + ExaminersGroup + '" "' + GetUserNameString + '" /add', False);
+  // The protected list is set on the folder alone. It used to be applied to every file in it as well
+  // (/T): on an upgrade, files already there (the case database, evidence, certificates) kept no
+  // entry at all, so nobody, Lucida included, could open or delete them. Everything inside now
+  // inherits from the folder, which also repairs a folder damaged that way by an earlier Setup.
   RunHidden(Sys + '\icacls.exe', '"' + DataDir('') + '" /inheritance:r /grant:r *S-1-5-32-544:(OI)(CI)F *S-1-5-18:(OI)(CI)F "' +
-    ExaminersGroup + ':(OI)(CI)M" /T /C /Q', True);
+    ExaminersGroup + ':(OI)(CI)M"', True);
   // A new group membership only counts after signing in again, so the installing account is granted
   // access directly too and Lucida can open its case data right away.
-  RunHidden(Sys + '\icacls.exe', '"' + DataDir('') + '" /grant "' + GetUserNameString + ':(OI)(CI)M" /T /C /Q', False);
+  RunHidden(Sys + '\icacls.exe', '"' + DataDir('') + '" /grant "' + GetUserNameString + ':(OI)(CI)M"', False);
+  // Fails harmlessly on a new, empty folder.
+  RunHidden(Sys + '\icacls.exe', '"' + AddBackslash(DataDir('')) + '*" /reset /T /C /Q', False);
 end;
 
 procedure OpenFirewall();
@@ -646,13 +676,7 @@ var
   Running, I: Integer;
   Old: array[0..3] of String;
 begin
-  // Silent installs never show the case data page, so its checks run here too.
-  Result := DataDirProblem(DataDir(''));
-  if Result <> '' then
-  begin
-    Log('Case data folder refused: ' + Result);
-    Exit;
-  end;
+  Result := '';
   AppDir := ExpandConstant('{app}');
   if not DirExists(AppDir + '\python') and not DirExists(AppDir + '\launcher') then
     Exit;
