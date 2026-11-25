@@ -188,3 +188,23 @@ def test_block_grid_survives_demuxer_messages_inside_a_row(tmp_path):
     object.__setattr__(settings, "ffmpeg", str(fake))
     out = codecview.blocks(tmp_path / "x.mp4", settings, 0, 1, 64, 48)
     assert out[0]["qp"].tolist() == [[34, 34, 34, 34], [30, 30, 30, 30], [32, 32, 32, 32]]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the stand-in FFmpeg is a shell script")
+def test_block_grid_decodes_again_when_a_row_is_lost(tmp_path):
+    """A frame that comes out a row short (another thread's message broke it) is decoded again."""
+    d = "[h264 @ 0x55aa]"
+    rows = [f"{d} {q}d  {q}d  {q}d  {q}d  " for q in (34, 30, 32, 28)]
+    (tmp_path / "short.txt").write_text("\n".join([f"{d} New frame, type: P", rows[0], "30d  stray 30", *rows[2:]]) + "\n")
+    (tmp_path / "whole.txt").write_text("\n".join([f"{d} New frame, type: P", *rows]) + "\n")
+    fake = tmp_path / "ffmpeg"
+    # The first run prints the broken grid, later runs the whole one.
+    fake.write_text(
+        f"#!/bin/sh\nif [ -e '{tmp_path / 'ran'}' ]; then cat '{tmp_path / 'whole.txt'}' >&2; "
+        f"else touch '{tmp_path / 'ran'}'; cat '{tmp_path / 'short.txt'}' >&2; fi\n"
+    )
+    fake.chmod(0o755)
+    settings = load_settings(tmp_path / "data")
+    object.__setattr__(settings, "ffmpeg", str(fake))
+    out = codecview.blocks(tmp_path / "x.mp4", settings, 0, 1, 64, 64)
+    assert out[0]["qp"].tolist() == [[q] * 4 for q in (34, 30, 32, 28)]

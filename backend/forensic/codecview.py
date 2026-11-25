@@ -75,12 +75,33 @@ def qp_range(codec: str | None) -> tuple[int, int]:
     return (0, 51) if codec == "h264" else (1, 31)
 
 
+BLOCK_ATTEMPTS = 3
+
+
 def blocks(path: Path, settings: Settings, start: int, count: int, width: int, height: int) -> dict[int, dict]:
     """Macroblock classes and QP for frames start..start+count-1, keyed by frame number.
 
     Each value holds ``type`` (picture type), ``kinds`` (uint8 grid of KINDS indices) and ``qp``
     (uint8 grid). The decoder prints every frame from the first, so earlier frames are only counted.
+
+    FFmpeg's other threads print into the decoder's grid at random, and now and then a piece of a row is
+    lost. A frame that comes out with the wrong number of macroblock rows is decoded again (at most
+    BLOCK_ATTEMPTS times in all); if it never comes out whole, the last grid read is kept.
     """
+    mbh = (height + MB - 1) // MB
+    whole = {mbh, mbh // 2, (mbh + 1) // 2}  # field-coded pictures report half the rows
+    out: dict[int, dict] = {}
+    for _ in range(BLOCK_ATTEMPTS):
+        got = _decode_blocks(path, settings, start, count, width)
+        for k, v in got.items():
+            if k not in out or out[k]["kinds"].shape[0] not in whole:
+                out[k] = v
+        if all(v["kinds"].shape[0] in whole for v in out.values()) and len(out) >= len(got):
+            break
+    return out
+
+
+def _decode_blocks(path: Path, settings: Settings, start: int, count: int, width: int) -> dict[int, dict]:
     mbw = (width + MB - 1) // MB
     # -debug turns the log up to debug level. "repeat" keeps identical rows that would otherwise be folded into
     # "Last message repeated n times".
