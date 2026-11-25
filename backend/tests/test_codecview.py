@@ -164,3 +164,47 @@ def test_block_grid_reads_the_ffmpeg_8_layout(tmp_path):
     object.__setattr__(settings, "ffmpeg", str(fake))
     out = codecview.blocks(tmp_path / "x.mp4", settings, 0, 1, 64, 48)
     assert out[0]["qp"].tolist() == [[34, 34, 34, 34], [9, 9, 9, 9], [30, 30, 30, 30]]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the stand-in FFmpeg is a shell script")
+def test_block_grid_survives_demuxer_messages_inside_a_row(tmp_path):
+    """At the end of the file FFmpeg 6's demuxer thread prints with no prefix, even between a cell's QP and type."""
+    d = "[h264 @ 0x55aa]"
+    log = "\n".join([
+        f"{d} New frame, type: B",
+        f"{d} 34d  34>  34d  EOF while reading input",
+        "[in#0/mov,mp4,m4a,3gp,3g2,mj2 @ 0x66cc] Terminating demuxer thread",
+        f"{d} 34<  ",
+        f"{d} 30d  30EOF while reading input",
+        f"{d} Terminating demuxer thread",
+        f"{d} d  30d  30X- ",
+        f"{d} 32d  32d  32d  32d  ",
+    ]) + "\n"
+    (tmp_path / "log.txt").write_text(log)
+    fake = tmp_path / "ffmpeg"
+    fake.write_text(f"#!/bin/sh\ncat '{tmp_path / 'log.txt'}' >&2\n")
+    fake.chmod(0o755)
+    settings = load_settings(tmp_path / "data")
+    object.__setattr__(settings, "ffmpeg", str(fake))
+    out = codecview.blocks(tmp_path / "x.mp4", settings, 0, 1, 64, 48)
+    assert out[0]["qp"].tolist() == [[34, 34, 34, 34], [30, 30, 30, 30], [32, 32, 32, 32]]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the stand-in FFmpeg is a shell script")
+def test_block_grid_decodes_again_when_a_row_is_lost(tmp_path):
+    """A frame that comes out a row short (another thread's message broke it) is decoded again."""
+    d = "[h264 @ 0x55aa]"
+    rows = [f"{d} {q}d  {q}d  {q}d  {q}d  " for q in (34, 30, 32, 28)]
+    (tmp_path / "short.txt").write_text("\n".join([f"{d} New frame, type: P", rows[0], "30d  stray 30", *rows[2:]]) + "\n")
+    (tmp_path / "whole.txt").write_text("\n".join([f"{d} New frame, type: P", *rows]) + "\n")
+    fake = tmp_path / "ffmpeg"
+    # The first run prints the broken grid, later runs the whole one.
+    fake.write_text(
+        f"#!/bin/sh\nif [ -e '{tmp_path / 'ran'}' ]; then cat '{tmp_path / 'whole.txt'}' >&2; "
+        f"else touch '{tmp_path / 'ran'}'; cat '{tmp_path / 'short.txt'}' >&2; fi\n"
+    )
+    fake.chmod(0o755)
+    settings = load_settings(tmp_path / "data")
+    object.__setattr__(settings, "ffmpeg", str(fake))
+    out = codecview.blocks(tmp_path / "x.mp4", settings, 0, 1, 64, 64)
+    assert out[0]["qp"].tolist() == [[q] * 4 for q in (34, 30, 32, 28)]

@@ -1,6 +1,6 @@
 ; Inno Setup script for the Lucida Windows installer.
 ; Built by deploy/windows/build-installer.ps1, which assembles the payload folder and runs:
-;   ISCC.exe /DAppVersion=0.4.0 /DPayloadDir=<payload> /DOutputDir=<dist> installer.iss
+;   ISCC.exe /DAppVersion=0.4.1 /DPayloadDir=<payload> /DOutputDir=<dist> installer.iss
 ; The installer is fully offline: the payload carries Python, every dependency, FFmpeg,
 ; the AI models and the built UI. It never downloads anything.
 
@@ -397,11 +397,131 @@ begin
   PortPage.Values[0] := ParamOr('PORT', GetPreviousData('Port', '8000'));
 end;
 
+// ---- Case data folder checks ----
+// On an all-users install Setup replaces the permissions of the case data folder and everything in it
+// (see RestrictDataDir). Pointed at a shared folder (a user profile, a drive, Documents, AppData...) that
+// would lock other programs out of their own files, so only a new, empty or existing Lucida folder is accepted.
+
+function SameFolder(A, B: String): Boolean;
+begin
+  Result := CompareText(RemoveBackslashUnlessRoot(A), RemoveBackslashUnlessRoot(B)) = 0;
+end;
+
+function IsWithin(Child, Parent: String): Boolean;
+begin
+  // True when Child is Parent or a folder inside it.
+  Result := (Trim(Parent) <> '') and (Trim(Child) <> '') and
+    (Pos(Uppercase(AddBackslash(RemoveBackslashUnlessRoot(Parent))), Uppercase(AddBackslash(RemoveBackslashUnlessRoot(Child)))) = 1);
+end;
+
+function DirIsEmpty(Dir: String): Boolean;
+var
+  FindRec: TFindRec;
+begin
+  Result := True;
+  if FindFirst(AddBackslash(Dir) + '*', FindRec) then
+  try
+    repeat
+      if (FindRec.Name <> '.') and (FindRec.Name <> '..') then
+      begin
+        Result := False;
+        Exit;
+      end;
+    until not FindNext(FindRec);
+  finally
+    FindClose(FindRec);
+  end;
+end;
+
+function IsLucidaDataDir(Dir, PreviousDir: String): Boolean;
+begin
+  Result := FileExists(AddBackslash(Dir) + 'forensic.sqlite3') or DirExists(AddBackslash(Dir) + 'import') or
+    ((PreviousDir <> '') and SameFolder(Dir, PreviousDir));
+end;
+
+// AppDir and PreviousDir may be empty (before the wizard knows them); those checks are then skipped.
+function DataDirProblemIn(Dir, AppDir, PreviousDir: String): String;
+var
+  Shared: array[0..13] of String;
+  I: Integer;
+begin
+  Result := '';
+  Dir := RemoveBackslashUnlessRoot(Trim(Dir));
+  if not (((Length(Dir) >= 3) and (Dir[2] = ':') and (Dir[3] = '\')) or (Copy(Dir, 1, 2) = '\\')) then
+  begin
+    Result := 'Enter the full path of the case data folder, for example C:\Lucida Cases.';
+    Exit;
+  end;
+  if Length(Dir) <= 3 then
+  begin
+    Result := Dir + ' is a whole drive. Choose a folder of its own on that drive, for example ' + AddBackslash(Dir) + 'Lucida Cases.';
+    Exit;
+  end;
+  // These folders, and any folder that contains one of them, are shared with Windows and other programs.
+  Shared[0] := ExpandConstant('{%USERPROFILE|}');     Shared[1] := ExpandConstant('{%PUBLIC|}');
+  Shared[2] := ExpandConstant('{userdocs}');          Shared[3] := ExpandConstant('{commondocs}');
+  Shared[4] := ExpandConstant('{userdesktop}');       Shared[5] := ExpandConstant('{commondesktop}');
+  Shared[6] := ExpandConstant('{localappdata}');      Shared[7] := ExpandConstant('{userappdata}');
+  Shared[8] := ExpandConstant('{commonappdata}');     Shared[9] := ExpandConstant('{win}');
+  Shared[10] := ExpandConstant('{commonpf32}');       Shared[11] := ExpandConstant('{commonpf64}');
+  Shared[12] := AppDir;                              Shared[13] := ExtractFileDir(Shared[0]);
+  for I := 0 to 13 do
+    if IsWithin(Shared[I], Dir) then
+    begin
+      Result := Dir + ' is a shared folder that Windows and other programs keep their files in. Choose a folder of ' +
+        'its own inside it instead, for example ' + AddBackslash(Dir) + 'Lucida.';
+      Exit;
+    end;
+  if IsWithin(Dir, ExpandConstant('{win}')) or IsWithin(Dir, ExpandConstant('{commonpf32}')) or
+     IsWithin(Dir, ExpandConstant('{commonpf64}')) or IsWithin(Dir, AppDir) then
+  begin
+    Result := 'Case data cannot be kept inside the Windows, Program Files or Lucida installation folders. Choose another folder.';
+    Exit;
+  end;
+  if DirExists(Dir) and not DirIsEmpty(Dir) and not IsLucidaDataDir(Dir, PreviousDir) then
+    Result := Dir + ' already holds other files. Choose a new or empty folder for case data, for example ' +
+      AddBackslash(Dir) + 'Lucida.';
+end;
+
+function DataDirProblem(Dir: String): String;
+begin
+  Result := DataDirProblemIn(Dir, WizardDirValue, GetPreviousData('DataDir', ''));
+end;
+
+function InitializeSetup(): Boolean;
+var
+  Problem: String;
+begin
+  // A silent install given an unsuitable /DATADIR= stops here, before anything changes (exit code 1).
+  // Refusing it later, at the Preparing to Install step, leaves a silent Setup waiting for ever.
+  Result := True;
+  if ParamOr('DATADIR', '') = '' then
+    Exit;
+  Problem := DataDirProblemIn(ParamOr('DATADIR', ''), ParamOr('DIR', ''), '');
+  if Problem <> '' then
+  begin
+    Log('Case data folder refused: ' + Problem);
+    SuppressibleMsgBox(Problem, mbCriticalError, MB_OK, IDOK);
+    Result := False;
+  end;
+end;
+
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
   P: Integer;
+  Problem: String;
 begin
   Result := True;
+  if (DataPage <> nil) and (CurPageID = DataPage.ID) then
+  begin
+    Problem := DataDirProblem(DataPage.Values[0]);
+    if Problem <> '' then
+    begin
+      MsgBox(Problem, mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+  end;
   if (PortPage <> nil) and (CurPageID = PortPage.ID) then
   begin
     P := StrToIntDef(Trim(PortPage.Values[0]), 0);
@@ -488,11 +608,25 @@ begin
   // All-users install: case data is shared only with members of a local "Forensic Examiners"
   // group (the installing account is added), plus Administrators and SYSTEM. Other accounts on
   // the computer cannot read or change evidence, the case database or the audit log.
+  if DataDirProblem(DataDir('')) <> '' then
+  begin
+    Log('Not changing the permissions of ' + DataDir('') + ': ' + DataDirProblem(DataDir('')));
+    Exit;
+  end;
   Sys := ExpandConstant('{sys}');
   RunHidden(Sys + '\net.exe', 'localgroup "' + ExaminersGroup + '" /add /comment:"Can open Lucida case data"', False);
   RunHidden(Sys + '\net.exe', 'localgroup "' + ExaminersGroup + '" "' + GetUserNameString + '" /add', False);
+  // The protected list is set on the folder alone. It used to be applied to every file in it as well
+  // (/T): on an upgrade, files already there (the case database, evidence, certificates) kept no
+  // entry at all, so nobody, Lucida included, could open or delete them. Everything inside now
+  // inherits from the folder, which also repairs a folder damaged that way by an earlier Setup.
   RunHidden(Sys + '\icacls.exe', '"' + DataDir('') + '" /inheritance:r /grant:r *S-1-5-32-544:(OI)(CI)F *S-1-5-18:(OI)(CI)F "' +
-    ExaminersGroup + ':(OI)(CI)M" /T /C /Q', True);
+    ExaminersGroup + ':(OI)(CI)M"', True);
+  // A new group membership only counts after signing in again, so the installing account is granted
+  // access directly too and Lucida can open its case data right away.
+  RunHidden(Sys + '\icacls.exe', '"' + DataDir('') + '" /grant "' + GetUserNameString + ':(OI)(CI)M"', False);
+  // Fails harmlessly on a new, empty folder.
+  RunHidden(Sys + '\icacls.exe', '"' + AddBackslash(DataDir('')) + '*" /reset /T /C /Q', False);
 end;
 
 procedure OpenFirewall();
@@ -520,11 +654,12 @@ var
   Cmd, Dir: String;
   Code: Integer;
 begin
-  // The folder goes into a PowerShell single-quoted string, where a quote is written twice.
-  Dir := AddBackslash(AppDir) + 'python\';
+  // Lucida's Python and FFmpeg. The folder goes into a PowerShell single-quoted string, where a quote is written twice.
+  Dir := AddBackslash(AppDir);
   StringChangeEx(Dir, '''', '''''', True);
-  Cmd := '$p = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith(''' +
-    Dir + ''', [StringComparison]::OrdinalIgnoreCase) });';
+  Cmd := '$p = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and ($_.ExecutablePath.StartsWith(''' +
+    Dir + 'python\'', [StringComparison]::OrdinalIgnoreCase) -or $_.ExecutablePath.StartsWith(''' +
+    Dir + 'ffmpeg\'', [StringComparison]::OrdinalIgnoreCase)) });';
   if StopThem then
     Cmd := Cmd + ' $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 2;';
   Cmd := Cmd + ' exit $p.Count';
@@ -661,11 +796,6 @@ begin
       Result := True;
 end;
 
-function SameFolder(A, B: String): Boolean;
-begin
-  Result := CompareText(RemoveBackslashUnlessRoot(A), RemoveBackslashUnlessRoot(B)) = 0;
-end;
-
 function IsUnsafeToDelete(Dir: String): Boolean;
 begin
   // Never delete a drive root or a whole user or system folder, even if it was chosen as the
@@ -696,6 +826,16 @@ var
 begin
   if CurUninstallStep = usUninstall then
   begin
+    // A Lucida still running (its window, a console, or a server left without a window) keeps its
+    // programs and the case database open, and they could not be removed.
+    if LucidaProcesses(ExpandConstant('{app}'), False) > 0 then
+    begin
+      Log('Closing the running Lucida before uninstalling');
+      if not UninstallSilent then
+        MsgBox('Lucida is still running. It will be closed now so it can be removed. Cases and audit records are ' +
+          'saved as you work, so nothing is lost.', mbInformation, MB_OK);
+      LucidaProcesses(ExpandConstant('{app}'), True);
+    end;
     // Read the folder now: workbench.ini is removed with the programs.
     CaseDataDir := RemoveBackslashUnlessRoot(GetIniString('workbench', 'data_dir', '', ExpandConstant('{app}\workbench.ini')));
     DeleteCaseData := False;

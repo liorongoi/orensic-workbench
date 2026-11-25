@@ -2,7 +2,7 @@
 .SYNOPSIS
   Install the built installer silently on a clean Windows machine and check it works offline.
 
-      deploy\windows\test-installer.ps1 -Installer dist\Lucida-0.4.0-Setup.exe [-AllUsers] [-LabNetwork]
+      deploy\windows\test-installer.ps1 -Installer dist\Lucida-0.4.1-Setup.exe [-AllUsers] [-LabNetwork]
 
   Installs, blocks the installed Python from the network with a firewall rule (needs an
   administrator shell), runs the acceptance self-test with nothing but Windows itself on PATH,
@@ -170,11 +170,29 @@ try {
     if (-not (Select-String -Quiet -Path "$Root\reinstall.log" -Pattern "Lucida process\(es\) running")) { throw "Setup did not see the running Lucida" }
     if (-not $server.WaitForExit(10000)) { throw "Setup did not close the running Lucida" }
     if (-not (Test-Path "$Data\forensic.sqlite3")) { throw "reinstalling lost the case database" }
+    # Setup sets the case data permissions again on an upgrade; the files already there must stay readable.
+    & icacls.exe "$Data\forensic.sqlite3"
+    try { [IO.File]::ReadAllBytes("$Data\forensic.sqlite3") | Out-Null } catch { throw "after reinstalling, the case database cannot be read: $_" }
     Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
 } finally {
     Remove-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue
 }
+
+Step "Starting Lucida again, to uninstall it while it runs"
+# A Lucida left running holds its programs and the case database open; the uninstaller has to close it.
+# No console input: if Lucida stops, it must not wait for Enter.
+Set-Content "$Root\no-input.txt" ""
+$server = Start-Process -PassThru -FilePath $py -ArgumentList "-B", "-X", "utf8", "`"$launcher`"", "run", "--no-browser" `
+    -RedirectStandardInput "$Root\no-input.txt" -RedirectStandardOutput "$Root\server2.out.txt" `
+    -RedirectStandardError "$Root\server2.err.txt" -WorkingDirectory $App
+$up = $false
+for ($i = 0; $i -lt 120 -and -not $up; $i++) {
+    Start-Sleep -Milliseconds 500
+    try { $c = New-Object Net.Sockets.TcpClient; $c.Connect("127.0.0.1", $Port); $c.Close(); $up = $true } catch { }
+    if ($server.HasExited) { break }
+}
+if (-not $up) { Get-Content "$Root\server2.out.txt", "$Root\server2.err.txt" -ErrorAction SilentlyContinue; throw "Lucida did not start again" }
 
 Step "Uninstalling$(if ($DeleteCaseData) { ' and deleting case data' })"
 $uargs = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
@@ -184,8 +202,10 @@ if ($DeleteCaseData) {
     Set-ItemProperty "$Data\readonly-evidence-test.bin" -Name IsReadOnly -Value $true
     $uargs += "/DELETECASEDATA"
 }
-$u = Start-Process -Wait -PassThru -FilePath "$App\unins000.exe" -ArgumentList $uargs
+$u = Start-Process -PassThru -FilePath "$App\unins000.exe" -ArgumentList $uargs
+if (-not $u.WaitForExit(600000)) { throw "the uninstaller did not finish in 10 minutes" }
 if ($u.ExitCode -ne 0) { throw "uninstaller exited with $($u.ExitCode)" }
+if (-not $server.WaitForExit(10000)) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue; throw "the uninstaller did not close the running Lucida" }
 Start-Sleep -Seconds 3
 if (Test-Path "$App\python\python.exe") { throw "programs were not removed" }
 if ($DeleteCaseData) {
@@ -212,4 +232,22 @@ Assert-FilesChecked "$Root\install2.log"
 if (Test-Path "$App\python\Lib\__pycache__\stale.cpython-312.pyc") { throw "Setup kept a leftover file from before" }
 $u = Start-Process -Wait -PassThru -FilePath "$App\unins000.exe" -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
 if ($u.ExitCode -ne 0) { throw "second uninstall exited with $($u.ExitCode)" }
+Step "Refusing shared case data folders"
+# Setup replaces the permissions of the case data folder, so a folder other programs use must be refused
+# before anything is installed: a user profile, a whole drive, or a folder that already holds other files.
+$n = 0
+foreach ($bad in $env:USERPROFILE, "$env:SystemDrive\", $Root) {
+    $n++; $log = "$Root\refuse-$n.log"
+    $p = Start-Process -PassThru -FilePath (Resolve-Path $Installer) -ArgumentList @(
+        "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", $mode, "/DIR=`"$App`"", "/DATADIR=`"$($bad.TrimEnd('\'))`"", "/LOG=`"$log`"")
+    if (-not $p.WaitForExit(120000)) {
+        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+        Get-Content $log -Tail 20 -ErrorAction SilentlyContinue; throw "Setup with $bad as the case data folder did not finish"
+    }
+    if ($p.ExitCode -eq 0) { throw "Setup accepted $bad as the case data folder" }
+    if (-not (Select-String -Quiet -Path $log -Pattern "Case data folder refused")) { Get-Content $log -Tail 20; throw "Setup failed for $bad, but not by refusing the folder" }
+    if (Test-Path "$App\python\python.exe") { throw "Setup installed Lucida with $bad as the case data folder" }
+    Write-Host "Refused $bad"
+}
+
 Write-Host "`nInstaller test passed ($mode$(if ($LabNetwork) { ', lab network' }))." -ForegroundColor Green

@@ -31,6 +31,8 @@ jobs:
   test:
     needs: build
     runs-on: windows-2022
+    # A step that waits (for example on a prompt) fails the job instead of holding the runner for hours.
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
