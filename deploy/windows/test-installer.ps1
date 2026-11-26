@@ -146,6 +146,7 @@ try {
         if (-not $fxp.WaitForExit(180000)) { Stop-Process -Id $fxp.Id -Force -ErrorAction SilentlyContinue; throw "the bundled Firefox did not finish" }
         if (-not (Test-Path $shot) -or (Get-Item $shot).Length -lt 5000) { throw "the bundled Firefox did not render Lucida" }
         Write-Host "Bundled Firefox $((Get-Item $fx).VersionInfo.ProductVersion) rendered the interface ($((Get-Item $shot).Length) bytes)"
+        if ($env:GITHUB_WORKSPACE) { Copy-Item $shot (Join-Path $env:GITHUB_WORKSPACE "firefox-ui.png") }
     }
     $case = Invoke-RestMethod -Method Post "$base/api/cases" -WebSession $web `
         -ContentType "application/json" -Body '{"name": "Installer test", "examiner": "Installer test"}'

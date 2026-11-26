@@ -51,6 +51,12 @@ jobs:
             "all-users-lab" { deploy\windows\test-installer.ps1 -Installer $setup -AllUsers -LabNetwork -DeleteCaseData }
             default         { deploy\windows\test-installer.ps1 -Installer $setup }
           }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: firefox-ui-${{ matrix.scope }}
+          path: firefox-ui.png
+          if-no-files-found: ignore
 
   # Clicks through the real wizard and uninstaller and keeps a screenshot of every page.
   wizard-screenshots:
