@@ -1,5 +1,5 @@
 # Lucida: one image with the API, the built UI, FFmpeg and the bundled models.
-# Build:  docker build -t lucida:0.4.1 .
+# Build:  docker build -t lucida:0.4.2 .
 # Run:    docker compose up   (see docker-compose.yml; no network access is needed at run time)
 
 FROM node:22-bookworm-slim AS ui

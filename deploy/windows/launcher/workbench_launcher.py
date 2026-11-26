@@ -4,6 +4,7 @@ Runs with the Python bundled in the installation (<app>\\python\\python.exe):
 
     workbench_launcher.py desktop              start Lucida in its own window (pythonw.exe, no console)
     workbench_launcher.py run [--no-browser]   start Lucida with a console and open it in the browser
+    workbench_launcher.py firefox              start Lucida in the Firefox that ships with it (pythonw.exe)
     workbench_launcher.py selftest [--pause]   check the installed files, then the acceptance self-test
     workbench_launcher.py verify [--report F]  check the installed files against the installer's SHA256SUMS
     workbench_launcher.py cli ARGS...          the `lucida` command line (lucida.cmd in the install folder)
@@ -245,6 +246,61 @@ def _tell(message: str, error: bool = True) -> None:
             pass
 
 
+FIREFOX = APP / "firefox" / "firefox.exe"
+
+
+def _open_log(name: str) -> None:
+    """Under pythonw.exe there is no console: send messages to <case data>\\logs\\<name>-<date>.txt."""
+    if _windowed():
+        logs = Path(os.environ["FORENSIC_DATA_DIR"]) / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        log = open(logs / f"{name}-{dt.datetime.now():%Y%m%d}.txt", "a", encoding="utf-8", buffering=1)  # noqa: SIM115
+        log._lucida_log = True  # type: ignore[attr-defined]
+        sys.stdout = sys.stderr = log
+        print(f"\n== Lucida {name}, {dt.datetime.now().isoformat(timespec='seconds')}")
+
+
+def firefox() -> int:
+    """Lucida in the Firefox that ships with it.
+
+    For computers where the desktop window cannot run: its WebView2 engine (the engine Chrome and Edge use too)
+    crashes there, for example because of an old graphics-driver add-on, and the only other browser is too old
+    for Lucida's interface. Firefox's engine is unaffected. It runs from the installation with its own profile in
+    the case data folder, offline, and Lucida stops when its Firefox window is closed.
+    """
+    import subprocess
+
+    net = configure()
+    _open_log("firefox")
+    if not FIREFOX.exists():
+        _tell(f"This Lucida has no Firefox ({FIREFOX} is missing). Reinstall Lucida.")
+        return 1
+    profile = Path(os.environ["FORENSIC_DATA_DIR"]) / "firefox-profile"
+    profile.mkdir(parents=True, exist_ok=True)
+    tls = net["tls"]
+    url = f"{'https' if tls else 'http'}://127.0.0.1:{net['port']}"
+    server = None
+    if not _health(url, cafile=tls and (tls["authority"] or tls["cert"])):
+        if tls:
+            _tell("With the lab-network option, start Lucida with the Lucida shortcut, then open it in Firefox.")
+            return 1
+        if not _free_port_or_explain("127.0.0.1", net["port"]):
+            return 1
+        os.environ.setdefault("FORENSIC_DESKTOP", "1")
+        from forensic.desktop import serve
+
+        server = serve(net["port"])
+        print(f"Lucida is running at {url}")
+    # -wait-for-browser keeps firefox.exe running until its window is closed (Firefox otherwise hands over to a
+    # second process and returns at once); -no-remote keeps it apart from any other Firefox on the computer.
+    proc = subprocess.Popen([str(FIREFOX), "-no-remote", "-wait-for-browser", "-profile", str(profile), url])
+    proc.wait()
+    if server is not None:
+        server.should_exit = True
+        time.sleep(1)
+    return 0
+
+
 def desktop() -> int:
     """Lucida in its own window (forensic.desktop), on this computer only.
 
@@ -420,6 +476,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="workbench_launcher")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("desktop")
+    sub.add_parser("firefox")
     r = sub.add_parser("run")
     r.add_argument("--no-browser", action="store_true")
     s = sub.add_parser("selftest")
@@ -432,6 +489,8 @@ def main(argv=None) -> int:
     try:
         if a.cmd == "desktop":
             code = desktop()
+        elif a.cmd == "firefox":
+            code = firefox()
         else:
             code = run(not a.no_browser) if a.cmd == "run" else selftest(a.pause)
     except Exception as e:  # noqa: BLE001
@@ -441,7 +500,7 @@ def main(argv=None) -> int:
         if "database is locked" in str(e).lower():
             e = RuntimeError("the case database is in use by another Lucida. Close the other Lucida window, or restart "
                              "the computer, then open Lucida again")
-        if a.cmd == "desktop":
+        if a.cmd in ("desktop", "firefox"):
             _tell(f"Lucida stopped: {e}")
         else:
             print(f"\nLucida stopped: {e}")
