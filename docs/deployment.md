@@ -22,7 +22,7 @@ users" in the first dialog to install under Program Files for everyone on the ma
 Get the installer from the **Windows installer** workflow in GitHub Actions (artifact
 `Lucida-Windows-Setup`, with its `.sha256`), or from a release when a `v*` tag is
 pushed. Carry the `.exe` to the offline machine, check its SHA-256 if your lab requires it
-(`certutil -hashfile Lucida-0.4.1-Setup.exe SHA256`), and run it. The wizard opens with a
+(`certutil -hashfile Lucida-0.4.2-Setup.exe SHA256`), and run it. The wizard opens with a
 welcome page, the licence agreement and a list of what is included, then a **system check**.
 It reads the installed memory, the graphics card and the NVIDIA driver version. Lucida is sized for
 an NVIDIA RTX A4000 (16 GB) with 48 to 128 GB of RAM. The page warns, without stopping the install,
@@ -57,6 +57,14 @@ The desktop window's messages go to `<case data>\logs\desktop-<date>.txt`. If an
 Lucida is still running in the background without a window, starting Lucida offers to close it
 and start again, instead of failing on a busy port or case database.
 
+Some PCs crash every Chromium-based window, which includes Chrome and WebView2; an old NVIDIA
+nView Desktop Manager (`NViewH64.dll`) does this. On such a PC the Lucida window stays black. The
+installer also carries its own Firefox ESR, with updates and telemetry turned off, and adds a
+**Lucida in Firefox** shortcut. It starts Lucida and opens it in that Firefox, with a profile
+under `<case data>\firefox-profile`. When the Firefox window closes, Lucida stops. Its
+messages go to `<case data>\logs\firefox-<date>.txt`. With the lab-network option, start
+Lucida with the Lucida shortcut first.
+
 A summary page shows every choice before anything is installed. The last page offers to run
 the acceptance self-test and to start Lucida straight away.
 
@@ -85,7 +93,7 @@ adapter number, if the NVIDIA card is not picked on its own). Running a newer in
 these settings and the case data. Silent installation for managed rollouts:
 
 ```
-Lucida-0.4.1-Setup.exe /VERYSILENT /ALLUSERS /DIR="C:\Program Files\Lucida" /DATADIR="D:\Cases" /PORT=8000
+Lucida-0.4.2-Setup.exe /VERYSILENT /ALLUSERS /DIR="C:\Program Files\Lucida" /DATADIR="D:\Cases" /PORT=8000
 ```
 
 Add `/TASKS="startmenu,desktopicon"` to choose shortcuts (and `labnetwork` for the lab-network
@@ -241,7 +249,7 @@ processor, memory and graphics card.
 ## Container
 
 ```bash
-docker build -t lucida:0.4.1 .
+docker build -t lucida:0.4.2 .
 docker compose up            # http://127.0.0.1:8000
 docker compose --profile agents up   # also the authenticate MCP server on the internal network
 ```
@@ -253,7 +261,7 @@ creates a missing bind-mounted folder owned by root), then runs Lucida as that u
 Without Compose:
 
 ```bash
-docker run -p 127.0.0.1:8000:8000 -v "$PWD/data:/data" lucida:0.4.1
+docker run -p 127.0.0.1:8000:8000 -v "$PWD/data:/data" lucida:0.4.2
 ```
 
 Lucida joins a plain network so its port can reach your browser (Docker does not

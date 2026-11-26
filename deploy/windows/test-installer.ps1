@@ -2,7 +2,7 @@
 .SYNOPSIS
   Install the built installer silently on a clean Windows machine and check it works offline.
 
-      deploy\windows\test-installer.ps1 -Installer dist\Lucida-0.4.1-Setup.exe [-AllUsers] [-LabNetwork]
+      deploy\windows\test-installer.ps1 -Installer dist\Lucida-0.4.2-Setup.exe [-AllUsers] [-LabNetwork]
 
   Installs, blocks the installed Python from the network with a firewall rule (needs an
   administrator shell), runs the acceptance self-test with nothing but Windows itself on PATH,
@@ -134,6 +134,19 @@ try {
     if ($me.full_name -ne "Installer test") { throw "the local examiner could not be named" }
     $models = Invoke-RestMethod "$base/api/models" -WebSession $web
     Write-Host "UI served; $(@($models).Count) model entries listed"
+    if (-not $LabNetwork) {
+        # The "Lucida in Firefox" shortcut's Firefox must run from the installation and load the interface.
+        $fx = "$App\firefox\firefox.exe"
+        if (-not (Test-Path $fx)) { throw "the installation has no Firefox" }
+        if (-not (Test-Path "$App\firefox\distribution\policies.json")) { throw "the bundled Firefox has no policies.json" }
+        $shot = "$Root\firefox-ui.png"
+        New-Item -ItemType Directory -Force "$Root\fxprofile" | Out-Null
+        $fxp = Start-Process -PassThru -FilePath $fx -ArgumentList "-no-remote", "-headless", "-profile", "`"$Root\fxprofile`"", `
+            "-window-size=1280,800", "-screenshot", "`"$shot`"", "$base/"
+        if (-not $fxp.WaitForExit(180000)) { Stop-Process -Id $fxp.Id -Force -ErrorAction SilentlyContinue; throw "the bundled Firefox did not finish" }
+        if (-not (Test-Path $shot) -or (Get-Item $shot).Length -lt 5000) { throw "the bundled Firefox did not render Lucida" }
+        Write-Host "Bundled Firefox $((Get-Item $fx).VersionInfo.ProductVersion) rendered the interface ($((Get-Item $shot).Length) bytes)"
+    }
     $case = Invoke-RestMethod -Method Post "$base/api/cases" -WebSession $web `
         -ContentType "application/json" -Body '{"name": "Installer test", "examiner": "Installer test"}'
     Write-Host "Created case $($case.id) through the API"

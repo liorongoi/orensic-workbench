@@ -33,6 +33,9 @@ $VcRedistUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 # WebView2 Evergreen Standalone Installer (x64), for the desktop window on Windows 10 machines
 # that lack the runtime. Setup copies it to a temporary folder and runs it only when needed.
 $WebView2Url = "https://go.microsoft.com/fwlink/?linkid=2124701"
+# Firefox ESR (x64), run from the installation by the "Lucida in Firefox" shortcut on computers where the
+# WebView2 engine cannot run. The installer is a 7-Zip archive; its core folder is a complete Firefox.
+$FirefoxUrl = "https://download.mozilla.org/?product=firefox-esr-latest-ssl&os=win64&lang=en-US"
 
 $Repo = (Resolve-Path "$PSScriptRoot\..\..").Path
 $Version = (Select-String -Path "$Repo\backend\pyproject.toml" -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
@@ -136,6 +139,45 @@ New-Item -ItemType Directory -Force "$Payload\ffmpeg" | Out-Null
 Copy-Item "$ffRoot\bin\ffmpeg.exe", "$ffRoot\bin\ffprobe.exe" "$Payload\ffmpeg"
 Get-ChildItem $ffRoot -File | Copy-Item -Destination "$Payload\ffmpeg"
 
+Step "Firefox ESR (for the Lucida in Firefox shortcut)"
+$fxSetup = "$Downloads\firefox-esr-setup.exe"
+$fxSha = Get-Pinned $FirefoxUrl $fxSetup ""
+# "latest" always serves the current release, so require Mozilla's signature.
+$sig = Get-AuthenticodeSignature $fxSetup
+if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notmatch "O=Mozilla Corporation") {
+    throw "the Firefox installer is not validly signed by Mozilla ($($sig.Status): $($sig.SignerCertificate.Subject))"
+}
+Write-Host "  signed by $($sig.SignerCertificate.Subject)"
+$sevenZip = @("$env:ProgramFiles\7-Zip\7z.exe", (Get-Command 7z -ErrorAction SilentlyContinue).Source) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+if (-not $sevenZip) { throw "7-Zip (7z.exe) is needed to unpack the Firefox installer" }
+$fxTmp = "$Work\firefox-extract"
+if (Test-Path $fxTmp) { Remove-Item -Recurse -Force $fxTmp }
+& $sevenZip x -y "-o$fxTmp" $fxSetup | Out-Null; Check "unpacking Firefox"
+if (-not (Test-Path "$fxTmp\core\firefox.exe")) { throw "the Firefox installer has no core\firefox.exe" }
+Copy-Item -Recurse "$fxTmp\core" "$Payload\firefox"
+$fxVersion = (Get-Item "$Payload\firefox\firefox.exe").VersionInfo.ProductVersion
+Write-Host "  Firefox $fxVersion"
+# Offline and private: no updates, no telemetry, no first-run pages, no default-browser prompt.
+New-Item -ItemType Directory -Force "$Payload\firefox\distribution" | Out-Null
+@"
+{
+  "policies": {
+    "DisableAppUpdate": true,
+    "AppAutoUpdate": false,
+    "BackgroundAppUpdate": false,
+    "DisableTelemetry": true,
+    "DisableDefaultBrowserAgent": true,
+    "DisableFirefoxStudies": true,
+    "DisablePocket": true,
+    "DontCheckDefaultBrowser": true,
+    "NoDefaultBookmarks": true,
+    "OverrideFirstRunPage": "",
+    "OverridePostUpdatePage": "",
+    "UserMessaging": { "WhatsNew": false, "ExtensionRecommendations": false, "FeatureRecommendations": false, "SkipOnboarding": true, "MoreFromMozilla": false }
+  }
+}
+"@ | Set-Content -Encoding utf8 "$Payload\firefox\distribution\policies.json"
+
 Step "User interface"
 Push-Location "$Repo\frontend"
 try {
@@ -205,6 +247,7 @@ Python:   $PythonVersion embeddable, sha256 $pySha
 FFmpeg:   $FfmpegVersion essentials (gyan.dev), sha256 $ffSha
 VC++:     vc_redist.x64.exe, sha256 $vcSha
 WebView2: Evergreen Standalone x64 (run by Setup only if missing), sha256 $wv2Sha
+Firefox:  ESR $fxVersion x64 (for "Lucida in Firefox"), installer sha256 $fxSha
 "@ | Set-Content -Encoding utf8 "$Payload\BUILDINFO.txt"
 & "$Py\python.exe" -I -c @"
 import hashlib, os, sys

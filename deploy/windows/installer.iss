@@ -1,6 +1,6 @@
 ; Inno Setup script for the Lucida Windows installer.
 ; Built by deploy/windows/build-installer.ps1, which assembles the payload folder and runs:
-;   ISCC.exe /DAppVersion=0.4.1 /DPayloadDir=<payload> /DOutputDir=<dist> installer.iss
+;   ISCC.exe /DAppVersion=0.4.2 /DPayloadDir=<payload> /DOutputDir=<dist> installer.iss
 ; The installer is fully offline: the payload carries Python, every dependency, FFmpeg,
 ; the AI models and the built UI. It never downloads anything.
 
@@ -83,6 +83,7 @@ Type: filesandordirs; Name: "{app}\python"
 Type: filesandordirs; Name: "{app}\frontend"
 Type: filesandordirs; Name: "{app}\ffmpeg"
 Type: filesandordirs; Name: "{app}\launcher"
+Type: filesandordirs; Name: "{app}\firefox"
 ; Shortcuts left by an install made under the old name.
 Type: filesandordirs; Name: "{autoprograms}\{#OldAppName}"
 Type: files; Name: "{autodesktop}\{#OldAppName}.lnk"
@@ -116,6 +117,7 @@ Filename: "{app}\workbench.ini"; Section: "workbench"; Key: "gpu_jobs"; String: 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{#PythonW}"; Parameters: "-X utf8 ""{#Launcher}"" desktop"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Open Lucida in its own window"; Tasks: startmenu
 Name: "{group}\{#AppName} in the browser"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" run"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Start Lucida with a console window and open it in the browser"; Tasks: startmenu
+Name: "{group}\{#AppName} in Firefox"; Filename: "{#PythonW}"; Parameters: "-X utf8 ""{#Launcher}"" firefox"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Open Lucida in the Firefox that comes with it, for computers where the Lucida window stays black"; Tasks: startmenu
 Name: "{group}\Self-test"; Filename: "{#Python}"; Parameters: "-X utf8 ""{#Launcher}"" selftest --pause"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Check the installation and run the acceptance self-test"; Tasks: startmenu
 Name: "{group}\Case data folder"; Filename: "{code:DataDir}"; Tasks: startmenu
 Name: "{group}\User manual"; Filename: "{app}\docs\user-manual.md"; Tasks: startmenu
@@ -123,6 +125,7 @@ Name: "{group}\Algorithm guide"; Filename: "{app}\docs\algorithms.md"; Tasks: st
 Name: "{group}\Amped vs Lucida"; Filename: "{app}\docs\amped-comparison.md"; Tasks: startmenu
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"; Tasks: startmenu
 Name: "{autodesktop}\{#AppName}"; Filename: "{#PythonW}"; Parameters: "-X utf8 ""{#Launcher}"" desktop"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Open Lucida in its own window"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName} in Firefox"; Filename: "{#PythonW}"; Parameters: "-X utf8 ""{#Launcher}"" firefox"; WorkingDir: "{app}"; IconFilename: "{#AppIcon}"; Comment: "Open Lucida in the Firefox that comes with it, for computers where the Lucida window stays black"; Tasks: desktopicon
 
 [Run]
 Filename: "{tmp}\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"; Parameters: "/silent /install"; StatusMsg: "Installing the Microsoft Edge WebView2 runtime for the Lucida window..."; Check: NeedsWebView2; Flags: waituntilterminated
@@ -141,6 +144,7 @@ Type: filesandordirs; Name: "{app}\python"
 Type: filesandordirs; Name: "{app}\launcher"
 Type: filesandordirs; Name: "{app}\frontend"
 Type: filesandordirs; Name: "{app}\ffmpeg"
+Type: filesandordirs; Name: "{app}\firefox"
 
 [Code]
 var
@@ -654,12 +658,13 @@ var
   Cmd, Dir: String;
   Code: Integer;
 begin
-  // Lucida's Python and FFmpeg. The folder goes into a PowerShell single-quoted string, where a quote is written twice.
+  // Lucida's Python, FFmpeg and Firefox. The folder goes into a PowerShell single-quoted string, where a quote is written twice.
   Dir := AddBackslash(AppDir);
   StringChangeEx(Dir, '''', '''''', True);
   Cmd := '$p = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and ($_.ExecutablePath.StartsWith(''' +
     Dir + 'python\'', [StringComparison]::OrdinalIgnoreCase) -or $_.ExecutablePath.StartsWith(''' +
-    Dir + 'ffmpeg\'', [StringComparison]::OrdinalIgnoreCase)) });';
+    Dir + 'ffmpeg\'', [StringComparison]::OrdinalIgnoreCase) -or $_.ExecutablePath.StartsWith(''' +
+    Dir + 'firefox\'', [StringComparison]::OrdinalIgnoreCase)) });';
   if StopThem then
     Cmd := Cmd + ' $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 2;';
   Cmd := Cmd + ' exit $p.Count';
@@ -674,7 +679,7 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   AppDir: String;
   Running, I: Integer;
-  Old: array[0..3] of String;
+  Old: array[0..4] of String;
 begin
   Result := '';
   AppDir := ExpandConstant('{app}');
@@ -693,8 +698,8 @@ begin
       end;
     LucidaProcesses(AppDir, True);
   end;
-  Old[0] := 'python'; Old[1] := 'launcher'; Old[2] := 'frontend'; Old[3] := 'ffmpeg';
-  for I := 0 to 3 do
+  Old[0] := 'python'; Old[1] := 'launcher'; Old[2] := 'frontend'; Old[3] := 'ffmpeg'; Old[4] := 'firefox';
+  for I := 0 to 4 do
     if DirExists(AppDir + '\' + Old[I]) then
     begin
       DelTree(AppDir + '\' + Old[I], True, True, True);
