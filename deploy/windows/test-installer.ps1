@@ -145,6 +145,17 @@ try {
             "-window-size=1280,800", "-screenshot", "`"$shot`"", "$base/"
         if (-not $fxp.WaitForExit(180000)) { Stop-Process -Id $fxp.Id -Force -ErrorAction SilentlyContinue; throw "the bundled Firefox did not finish" }
         if (-not (Test-Path $shot) -or (Get-Item $shot).Length -lt 5000) { throw "the bundled Firefox did not render Lucida" }
+        # The page is empty until the interface's script runs, which then writes its first text ("Loading...") at
+        # the top left. Text means shades; an empty page is one colour.
+        Add-Type -AssemblyName System.Drawing
+        $bmp = [System.Drawing.Bitmap]::FromFile($shot)
+        try {
+            $shades = @{}
+            for ($y = 0; $y -lt [Math]::Min(120, $bmp.Height); $y++) {
+                for ($x = 0; $x -lt [Math]::Min(400, $bmp.Width); $x++) { $shades[$bmp.GetPixel($x, $y).ToArgb()] = 1 }
+            }
+        } finally { $bmp.Dispose() }
+        if ($shades.Count -lt 5) { throw "the bundled Firefox shows an empty page: the interface's script did not run ($($shades.Count) colour(s))" }
         Write-Host "Bundled Firefox $((Get-Item $fx).VersionInfo.ProductVersion) rendered the interface ($((Get-Item $shot).Length) bytes)"
         if ($env:GITHUB_WORKSPACE) { Copy-Item $shot (Join-Path $env:GITHUB_WORKSPACE "firefox-ui.png") }
     }
