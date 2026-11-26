@@ -28,7 +28,8 @@ def test_block_grid_matches_frame_types(wb, case, video_path):
         info = wb.codec_info(ev["id"], n)
         # Display order: the decoder's picture type agrees with the frame strip's.
         assert info["type"] == table[n]["type"]
-        assert (info["cols"], info["rows"]) == (10, 8)  # 160x120 -> 10x8 macroblocks
+        # 160x120 -> 10x8 macroblocks; on a torn grid, show the decoder log that tore it.
+        assert (info["cols"], info["rows"]) == (10, 8), "\n\n".join(codecview.TORN_LOGS)
         assert sum(info["counts"].values()) == 80 and info["counts"]["other"] == 0
         assert len(info["kinds"]) == 8 and len(info["qp_grid"][0]) == 10
         if info["type"] == "I":

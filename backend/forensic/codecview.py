@@ -80,6 +80,8 @@ def qp_range(codec: str | None) -> tuple[int, int]:
 
 
 BLOCK_ATTEMPTS = 3
+# The decoder logs of the last few attempts that lost part of a grid, kept so a failure can be traced.
+TORN_LOGS: deque[str] = deque(maxlen=3)
 
 
 def blocks(path: Path, settings: Settings, start: int, count: int, width: int, height: int) -> dict[int, dict]:
@@ -96,7 +98,11 @@ def blocks(path: Path, settings: Settings, start: int, count: int, width: int, h
     whole = {mbh, mbh // 2, (mbh + 1) // 2}  # field-coded pictures report half the rows
     out: dict[int, dict] = {}
     for _ in range(BLOCK_ATTEMPTS):
-        got = _decode_blocks(path, settings, start, count, width)
+        log: list[str] = []
+        got = _decode_blocks(path, settings, start, count, width, log)
+        torn = sorted(k for k, v in got.items() if v["kinds"].shape[0] not in whole)
+        if torn:
+            TORN_LOGS.append(f"frames {torn}:\n" + "".join(log))
         for k, v in got.items():
             if k not in out or out[k]["kinds"].shape[0] not in whole:
                 out[k] = v
@@ -105,7 +111,9 @@ def blocks(path: Path, settings: Settings, start: int, count: int, width: int, h
     return out
 
 
-def _decode_blocks(path: Path, settings: Settings, start: int, count: int, width: int) -> dict[int, dict]:
+def _decode_blocks(
+    path: Path, settings: Settings, start: int, count: int, width: int, log: list[str] | None = None
+) -> dict[int, dict]:
     mbw = (width + MB - 1) // MB
     # -debug turns the log up to debug level. "repeat" keeps identical rows that would otherwise be folded into
     # "Last message repeated n times".
@@ -138,6 +146,8 @@ def _decode_blocks(path: Path, settings: Settings, start: int, count: int, width
     try:
         for raw in proc.stderr:
             line = raw.decode("latin-1")
+            if log is not None:
+                log.append(line)
             m = re.search(r"New frame, type: (\w)", line)
             if m:
                 close()
